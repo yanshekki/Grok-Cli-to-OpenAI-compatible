@@ -96,15 +96,21 @@ curl -s http://127.0.0.1:3847/v1/chat/completions \
 
 ---
 
-## Install options
+## Install
 
-### Global (recommended)
+**Supported path:** install from the **npm registry** only.
 
 ```bash
 npm install -g grok-cli-to-openai-compatible
 ```
 
-### As a project dependency
+Optional helper (same as above):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yanshekki/Grok-Cli-to-OpenAI-compatible/main/scripts/install.sh | bash
+```
+
+### Project dependency
 
 ```bash
 npm install grok-cli-to-openai-compatible
@@ -112,7 +118,9 @@ npx gctoac setup
 npx gctoac start --foreground
 ```
 
-### From source
+### Develop from source (contributors)
+
+`dist/` is **not** committed. Build locally after clone:
 
 ```bash
 git clone https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible.git
@@ -120,25 +128,18 @@ cd Grok-Cli-to-OpenAI-compatible
 npm install
 npm run build
 npm link          # optional: put gctoac on PATH
-gctoac setup
-gctoac start
 ```
 
-One-shot install script (clones into `~/.gctoac/src` + `npm link`):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/yanshekki/Grok-Cli-to-OpenAI-compatible/main/scripts/install.sh | bash
-```
-
-> Prefer **`npm install -g grok-cli-to-openai-compatible`**.  
-> Avoid `npm install -g github:yanshekki/...` — it fails on some npm versions.
+> Do **not** use `npm install -g github:…` — it is unsupported.
 
 ### Update
 
 ```bash
-gctoac update              # update package + restart
+npm install -g grok-cli-to-openai-compatible@latest
+# or
+gctoac update              # npm self-update + restart
 gctoac update --check      # check only
-gctoac update --no-restart # update without restart
+gctoac update --no-restart
 ```
 
 Or in Admin → **System** → one-click update.
@@ -362,8 +363,8 @@ Or simply: `gctoac start` (background; pid under data home).
 src/           TypeScript (app, routes, services, cli)
 public/admin/  Admin SPA
 prisma/        Schema, migrations, seed
-dist/          Built JS (published on npm)
-scripts/       prepare, install.sh
+dist/          Built JS (gitignored; created by npm run build / prepublishOnly)
+scripts/       prepare, install.sh (npm install -g)
 tests/         Vitest
 ```
 
@@ -382,9 +383,10 @@ gctoac setup|start|status|stop|doctor|update
 
 ### Publish (maintainers)
 
+`prepublishOnly` runs `npm run build` so the tarball always includes `dist/`.
+
 ```bash
 npm login
-npm run build
 npm publish --access public --otp=<2FA_CODE>
 ```
 

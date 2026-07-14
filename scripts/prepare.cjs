@@ -1,9 +1,9 @@
 /**
- * Runs on github/git/npm install.
- * - Ensures dist/ exists (committed; rebuild if missing + typescript present)
- * - Generates Prisma client for THIS platform via temporary `npx prisma`
- *   (prisma is NOT a runtime dependency — avoids broken prisma package postinstalls)
- * Uses execFile only (no `sh` spawn).
+ * Runs on npm install (local dev + published package).
+ * - Chmod CLI bin when dist/ is present (npm pack includes dist/)
+ * - In a git checkout without dist/, rebuild if TypeScript is available
+ * - Generate Prisma client for this platform
+ * Uses execFile only (no shell spawn).
  */
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -40,7 +40,7 @@ function run(bin, args) {
   });
 }
 
-// 1) chmod committed CLI / rebuild if missing
+// 1) dist/ comes from npm pack (prepublishOnly build) or local `npm run build`
 if (fs.existsSync(cliJs)) {
   try {
     fs.chmodSync(cliJs, 0o755);
@@ -51,7 +51,7 @@ if (fs.existsSync(cliJs)) {
 } else {
   const tsc = path.join(root, 'node_modules', 'typescript', 'lib', 'tsc.js');
   if (fs.existsSync(tsc)) {
-    log('Building TypeScript…');
+    log('dist/ missing — building TypeScript…');
     try {
       run(process.execPath, [tsc, '-p', 'tsconfig.json']);
       try {
@@ -59,11 +59,14 @@ if (fs.existsSync(cliJs)) {
       } catch {
         /* ignore */
       }
+      log('dist/ built');
     } catch (e) {
       warn(`build failed: ${e instanceof Error ? e.message : e}`);
     }
   } else {
-    warn('dist/ missing — install from a release that includes dist/, or run npm run build');
+    warn(
+      'dist/ missing — install from npm (`npm install -g grok-cli-to-openai-compatible`) or run `npm run build` in a full checkout',
+    );
   }
 }
 

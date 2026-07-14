@@ -222,24 +222,7 @@ export class UpdateService {
         run('npm install', packageRoot, log);
         run('npm run build', packageRoot, log);
       } else if (channel === 'npm-global') {
-        // Prefer GitHub install so users always get latest main if not on npm yet
-        try {
-          run(
-            `npm install -g ${NPM_PACKAGE}@latest`,
-            packageRoot,
-            log,
-          );
-        } catch (e) {
-          log.push(
-            `npm registry install failed: ${e instanceof Error ? e.message : e}`,
-          );
-          log.push('Falling back to GitHub install…');
-          run(
-            `npm install -g github:${GITHUB_REPO}`,
-            packageRoot,
-            log,
-          );
-        }
+        run(`npm install -g ${NPM_PACKAGE}@latest`, packageRoot, log);
       } else if (channel === 'npm-local') {
         run(
           `npm install ${NPM_PACKAGE}@latest`,
@@ -247,13 +230,13 @@ export class UpdateService {
           log,
         );
       } else {
-        // unknown: try git if .git appears, else github global style update of self via npm pack not possible
+        // unknown: prefer git checkout rebuild, else npm global
         if (fs.existsSync(path.join(packageRoot, '.git'))) {
           run('git pull --ff-only', packageRoot, log);
           run('npm install', packageRoot, log);
           run('npm run build', packageRoot, log);
         } else {
-          run(`npm install -g github:${GITHUB_REPO}`, packageRoot, log);
+          run(`npm install -g ${NPM_PACKAGE}@latest`, packageRoot, log);
         }
       }
 

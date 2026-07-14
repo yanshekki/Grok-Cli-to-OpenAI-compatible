@@ -96,12 +96,18 @@ curl -s http://127.0.0.1:3847/v1/chat/completions \
 
 ---
 
-## 安裝方式
+## 安裝
 
-### 全域安裝（建議）
+**支援方式：** 只從 **npm registry** 安裝。
 
 ```bash
 npm install -g grok-cli-to-openai-compatible
+```
+
+可選輔助腳本（等同上面指令）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yanshekki/Grok-Cli-to-OpenAI-compatible/main/scripts/install.sh | bash
 ```
 
 ### 專案依賴
@@ -112,7 +118,9 @@ npx gctoac setup
 npx gctoac start --foreground
 ```
 
-### 由原始碼安裝
+### 由原始碼開發（貢獻者）
+
+`dist/` **不會** commit 到 git。clone 後請自行 build：
 
 ```bash
 git clone https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible.git
@@ -120,25 +128,18 @@ cd Grok-Cli-to-OpenAI-compatible
 npm install
 npm run build
 npm link          # 可選：把 gctoac 掛到 PATH
-gctoac setup
-gctoac start
 ```
 
-一鍵腳本（clone 到 `~/.gctoac/src` 再 `npm link`）：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/yanshekki/Grok-Cli-to-OpenAI-compatible/main/scripts/install.sh | bash
-```
-
-> 請優先使用 **`npm install -g grok-cli-to-openai-compatible`**。  
-> 不建議 `npm install -g github:yanshekki/...`（部分 npm 版本會失敗）。
+> **不要** 使用 `npm install -g github:…`（不支援）。
 
 ### 更新
 
 ```bash
-gctoac update              # 更新套件並重啟
-gctoac update --check      # 只檢查是否有新版本
-gctoac update --no-restart # 更新但不重啟
+npm install -g grok-cli-to-openai-compatible@latest
+# 或
+gctoac update              # npm 自我更新並重啟
+gctoac update --check      # 只檢查
+gctoac update --no-restart
 ```
 
 亦可在 Admin → **系統狀態** → 一鍵更新。
@@ -362,8 +363,8 @@ pm2 logs grok-openai-gateway
 src/           TypeScript 原始碼（app、routes、services、cli）
 public/admin/  Admin SPA
 prisma/        Schema、migrations、seed
-dist/          編譯後 JS（隨 npm 發佈）
-scripts/       prepare、install.sh
+dist/          編譯後 JS（gitignore；npm run build / prepublishOnly 產生）
+scripts/       prepare、install.sh（npm install -g）
 tests/         Vitest
 ```
 
@@ -382,9 +383,10 @@ gctoac setup|start|status|stop|doctor|update
 
 ### 發佈到 npm（維護者）
 
+`prepublishOnly` 會跑 `npm run build`，tarball 一定包含 `dist/`。
+
 ```bash
 npm login
-npm run build
 npm publish --access public --otp=<2FA六位碼>
 ```
 

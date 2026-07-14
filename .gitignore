@@ -1,5 +1,6 @@
 node_modules/
-# dist is committed so github: installs get working bins
+# Built output is published via npm only (not committed to git)
+dist/
 .env
 .env.local
 storage/*

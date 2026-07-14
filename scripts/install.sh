@@ -1,37 +1,19 @@
 #!/usr/bin/env bash
-# Reliable global installer.
-# Does NOT use `npm install -g github:…` (broken on some npm versions).
-# Clones into a permanent directory and npm-links gctoac/gcoa onto PATH.
+# Install gctoac globally from the npm registry (recommended path).
+# Does NOT clone GitHub or use `npm install -g github:…`.
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible.git}"
-REF="${REF:-main}"
-# Keep source permanently so npm link targets stay valid
-INSTALL_DIR="${GCTOAC_INSTALL_DIR:-${HOME}/.gctoac/src}"
+PKG="${GCTOAC_NPM_PACKAGE:-grok-cli-to-openai-compatible}"
+VERSION="${GCTOAC_NPM_VERSION:-latest}"
 
-echo "[gctoac] Install dir: $INSTALL_DIR"
-echo "[gctoac] Cloning $REPO_URL ($REF)…"
-
-mkdir -p "$(dirname "$INSTALL_DIR")"
-rm -rf "$INSTALL_DIR"
-git clone --depth 1 --branch "$REF" "$REPO_URL" "$INSTALL_DIR"
-cd "$INSTALL_DIR"
-
-echo "[gctoac] Installing dependencies…"
-npm install --no-fund --no-audit
-
-echo "[gctoac] Building…"
-npm run build
-
-echo "[gctoac] Linking globally (gctoac / gcoa)…"
-# Ensure global bin dir is used
-npm link
+echo "[gctoac] Installing ${PKG}@${VERSION} globally from npm…"
+npm install -g "${PKG}@${VERSION}" --no-fund --no-audit
 
 BIN_DIR="$(npm config get prefix)/bin"
 echo ""
 echo "[gctoac] Done."
-echo "[gctoac] Source: $INSTALL_DIR"
-echo "[gctoac] Bins:   $BIN_DIR/gctoac , $BIN_DIR/gcoa"
+echo "[gctoac] Package: ${PKG}@${VERSION}"
+echo "[gctoac] Bins:    $BIN_DIR/gctoac , $BIN_DIR/gcoa"
 echo ""
 
 if ! command -v gctoac >/dev/null 2>&1; then
@@ -39,7 +21,6 @@ if ! command -v gctoac >/dev/null 2>&1; then
   echo "         Add this to ~/.bashrc or ~/.zshrc:"
   echo "           export PATH=\"$BIN_DIR:\$PATH\""
   echo ""
-  # still try running via absolute path
   if [[ -x "$BIN_DIR/gctoac" ]]; then
     "$BIN_DIR/gctoac" version || true
   fi
