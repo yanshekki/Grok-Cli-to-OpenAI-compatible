@@ -7,7 +7,6 @@ exports.updateService = exports.UpdateService = exports.NPM_PACKAGE = exports.GI
 const node_child_process_1 = require("node:child_process");
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
-const env_1 = require("../config/env");
 const exception_factory_1 = require("../exceptions/exception.factory");
 exports.GITHUB_REPO = 'yanshekki/Grok-Cli-to-OpenAI-compatible';
 exports.NPM_PACKAGE = 'grok-cli-to-openai-compatible';
@@ -251,7 +250,7 @@ class UpdateService {
         const packageRoot = getPackageRoot();
         const cli = node_path_1.default.join(packageRoot, 'dist', 'cli', 'index.js');
         const home = options?.home || process.env.GCTOAC_HOME || '';
-        const port = options?.port || env_1.env.PORT;
+        const port = options?.port || Number(process.env.PORT || 3847);
         const homeFlag = home ? ` --home ${JSON.stringify(home)}` : '';
         const portFlag = port ? ` --port ${port}` : '';
         // Delay so HTTP can flush; then update + restart via CLI

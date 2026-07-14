@@ -1,7 +1,6 @@
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { env } from '../config/env';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 
 export const GITHUB_REPO = 'yanshekki/Grok-Cli-to-OpenAI-compatible';
@@ -315,7 +314,7 @@ export class UpdateService {
     const packageRoot = getPackageRoot();
     const cli = path.join(packageRoot, 'dist', 'cli', 'index.js');
     const home = options?.home || process.env.GCTOAC_HOME || '';
-    const port = options?.port || env.PORT;
+    const port = options?.port || Number(process.env.PORT || 3847);
 
     const homeFlag = home ? ` --home ${JSON.stringify(home)}` : '';
     const portFlag = port ? ` --port ${port}` : '';
