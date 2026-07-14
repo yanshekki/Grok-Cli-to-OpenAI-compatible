@@ -1,1 +1,1 @@
-{"version":3,"file":"setup.d.ts","sourceRoot":"","sources":["../../../src/cli/commands/setup.ts"],"names":[],"mappings":"AAUA,wBAAsB,QAAQ,CAAC,IAAI,EAAE;IACnC,IAAI,CAAC,EAAE,MAAM,CAAC;IACd,IAAI,CAAC,EAAE,MAAM,CAAC;IACd,SAAS,CAAC,EAAE,OAAO,CAAC;CACrB,GAAG,OAAO,CAAC,IAAI,CAAC,CA8DhB"}
+{"version":3,"file":"setup.d.ts","sourceRoot":"","sources":["../../../src/cli/commands/setup.ts"],"names":[],"mappings":"AAWA,wBAAsB,QAAQ,CAAC,IAAI,EAAE;IACnC,IAAI,CAAC,EAAE,MAAM,CAAC;IACd,IAAI,CAAC,EAAE,MAAM,CAAC;IACd,SAAS,CAAC,EAAE,OAAO,CAAC;CACrB,GAAG,OAAO,CAAC,IAAI,CAAC,CAgDhB"}

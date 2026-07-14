@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process';
 import path from 'node:path';
 import {
   ensureHomeDirs,
@@ -6,6 +5,8 @@ import {
   DEFAULT_PORT,
 } from '../lib/paths';
 import { ensureEnvFile } from '../lib/env-file';
+import { runPrisma } from '../lib/run-prisma';
+import { seedAdmin } from '../lib/seed-admin';
 import { baseUrls, info, ok, warn } from '../lib/print';
 
 export async function cmdSetup(opts: {
@@ -24,45 +25,31 @@ export async function cmdSetup(opts: {
   ensureHomeDirs(paths);
   const env = ensureEnvFile(paths, port);
 
+  const databaseUrl = env.DATABASE_URL || paths.databaseUrl;
+  const runEnv = {
+    ...process.env,
+    DATABASE_URL: databaseUrl,
+    ENCRYPTION_KEY: env.ENCRYPTION_KEY,
+    PORT: env.PORT || String(port),
+  };
+
   info('Running prisma migrate deploy…');
-  execSync('npx --yes prisma@6.5.0 migrate deploy', {
+  runPrisma(['migrate', 'deploy'], {
     cwd: paths.packageRoot,
-    stdio: 'inherit',
-    env: {
-      ...process.env,
-      DATABASE_URL: env.DATABASE_URL || paths.databaseUrl,
-      ENCRYPTION_KEY: env.ENCRYPTION_KEY,
-    },
+    packageRoot: paths.packageRoot,
+    env: runEnv,
   });
 
   info('Running seed…');
   try {
-    execSync('npx tsx prisma/seed.ts', {
-      cwd: paths.packageRoot,
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        DATABASE_URL: env.DATABASE_URL || paths.databaseUrl,
-        ENCRYPTION_KEY: env.ENCRYPTION_KEY,
-        PORT: env.PORT || String(port),
-      },
+    await seedAdmin({
+      databaseUrl,
+      bootstrapKey: env.ADMIN_BOOTSTRAP_KEY,
+      port: env.PORT || port,
     });
-  } catch {
-    // seed with node if tsx missing in production install
-    try {
-      execSync('node --import tsx prisma/seed.ts', {
-        cwd: paths.packageRoot,
-        stdio: 'inherit',
-        env: {
-          ...process.env,
-          DATABASE_URL: env.DATABASE_URL || paths.databaseUrl,
-          ENCRYPTION_KEY: env.ENCRYPTION_KEY,
-          PORT: env.PORT || String(port),
-        },
-      });
-    } catch {
-      warn('Seed failed — run: gctoac seed');
-    }
+  } catch (err) {
+    warn(`Seed failed: ${err instanceof Error ? err.message : String(err)}`);
+    warn('Retry with: gctoac seed');
   }
 
   const urls = baseUrls(Number(env.PORT || port));

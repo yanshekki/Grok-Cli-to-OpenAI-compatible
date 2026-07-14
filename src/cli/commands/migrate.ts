@@ -1,6 +1,6 @@
-import { execSync } from 'node:child_process';
 import { resolveRuntimePaths } from '../lib/paths';
 import { ensureEnvFile, loadEnvIntoProcess } from '../lib/env-file';
+import { runPrisma } from '../lib/run-prisma';
 import { ok } from '../lib/print';
 
 export async function cmdMigrate(opts: {
@@ -13,10 +13,10 @@ export async function cmdMigrate(opts: {
   });
   const env = ensureEnvFile(paths);
   loadEnvIntoProcess(paths.envFile);
-  // Use npx so prisma CLI need not be a runtime dependency (avoids broken global installs)
-  execSync('npx --yes prisma@6.5.0 migrate deploy', {
+
+  runPrisma(['migrate', 'deploy'], {
     cwd: paths.packageRoot,
-    stdio: 'inherit',
+    packageRoot: paths.packageRoot,
     env: {
       ...process.env,
       DATABASE_URL: env.DATABASE_URL || paths.databaseUrl,

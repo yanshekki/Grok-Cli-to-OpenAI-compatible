@@ -1,7 +1,7 @@
-import { execSync } from 'node:child_process';
 import { resolveRuntimePaths } from '../lib/paths';
 import { ensureEnvFile, loadEnvIntoProcess } from '../lib/env-file';
-import { ok, warn } from '../lib/print';
+import { seedAdmin } from '../lib/seed-admin';
+import { ok } from '../lib/print';
 
 export async function cmdSeed(opts: {
   home?: string;
@@ -13,25 +13,11 @@ export async function cmdSeed(opts: {
   });
   const env = ensureEnvFile(paths);
   loadEnvIntoProcess(paths.envFile);
-  const runEnv = {
-    ...process.env,
-    DATABASE_URL: env.DATABASE_URL || paths.databaseUrl,
-    ENCRYPTION_KEY: env.ENCRYPTION_KEY,
-    PORT: env.PORT,
-  };
-  try {
-    execSync('npx tsx prisma/seed.ts', {
-      cwd: paths.packageRoot,
-      stdio: 'inherit',
-      env: runEnv,
-    });
-  } catch {
-    warn('tsx seed failed, trying prisma db seed…');
-    execSync('npx prisma db seed', {
-      cwd: paths.packageRoot,
-      stdio: 'inherit',
-      env: runEnv,
-    });
-  }
+
+  await seedAdmin({
+    databaseUrl: env.DATABASE_URL || paths.databaseUrl,
+    bootstrapKey: env.ADMIN_BOOTSTRAP_KEY,
+    port: env.PORT,
+  });
   ok('Seed complete');
 }

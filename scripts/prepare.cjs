@@ -72,20 +72,25 @@ const schema = path.join(root, 'prisma', 'schema.prisma');
 if (fs.existsSync(schema)) {
   log('Generating Prisma client for this platform…');
   try {
-    const npmBin = which('npm');
-    if (npmBin) {
-      // npm exec downloads prisma@6.5.0 temporarily — no permanent dep
-      run(npmBin, [
-        'exec',
-        '--yes',
-        '--package=prisma@6.5.0',
-        '--',
-        'prisma',
-        'generate',
-      ]);
+    const localPrisma = path.join(root, 'node_modules', 'prisma', 'build', 'index.js');
+    if (fs.existsSync(localPrisma)) {
+      run(process.execPath, [localPrisma, 'generate']);
       log('Prisma client ready');
     } else {
-      warn('npm not found on PATH — skip prisma generate');
+      const npmBin = which('npm');
+      if (npmBin) {
+        run(npmBin, [
+          'exec',
+          '--yes',
+          '--package=prisma@6.5.0',
+          '--',
+          'prisma',
+          'generate',
+        ]);
+        log('Prisma client ready');
+      } else {
+        warn('prisma CLI not found — skip generate (run: npm install)');
+      }
     }
   } catch (e) {
     warn(`prisma generate failed: ${e instanceof Error ? e.message : e}`);
