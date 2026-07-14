@@ -1,6 +1,10 @@
 import type { NextFunction, Request, Response } from 'express';
 import { ROLES } from '../config/constants';
 import { ExceptionFactory } from '../exceptions/exception.factory';
+import {
+  clearFailedAuth,
+  recordFailedAuth,
+} from './rate-limit.middleware';
 import { apiKeyService } from '../services/api-key.service';
 import { asyncHandler } from '../utils/async-handler';
 
@@ -16,9 +20,16 @@ function extractBearer(req: Request): string | null {
 export const requireApiKey = asyncHandler(async (req, _res, next) => {
   const token = extractBearer(req);
   if (!token) {
+    recordFailedAuth(req);
     throw ExceptionFactory.unauthorized('Missing Authorization: Bearer <api_key>');
   }
-  req.apiKey = await apiKeyService.authenticate(token);
+  try {
+    req.apiKey = await apiKeyService.authenticate(token);
+    clearFailedAuth(req);
+  } catch (err) {
+    recordFailedAuth(req);
+    throw err;
+  }
   next();
 });
 

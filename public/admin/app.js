@@ -1,12 +1,33 @@
 const API = '/admin/api';
 const KEY_STORAGE = 'gog_admin_key';
 
+import {
+  t,
+  getLocale,
+  setLocale,
+  langSwitchHtml,
+} from './i18n.js';
+
 const state = {
   key: sessionStorage.getItem(KEY_STORAGE) || '',
   page: 'dashboard',
   me: null,
   error: '',
   modal: null,
+  chatFilter: {
+    q: '',
+    status: '',
+    model: '',
+    apiKeyId: '',
+    from: '',
+    to: '',
+    policyMode: '',
+    hasDocuments: '',
+    limit: 50,
+    offset: 0,
+  },
+  models: [],
+  keys: [],
 };
 
 async function api(path, options = {}) {
@@ -26,9 +47,7 @@ async function api(path, options = {}) {
   if (!res.ok) {
     const msg = data?.error?.message || res.statusText || 'Request failed';
     if (res.status === 401 || res.status === 403) {
-      if (state.page !== 'login') {
-        logout(false);
-      }
+      if (state.page !== 'login') logout(false);
     }
     throw new Error(msg);
   }
@@ -47,23 +66,8 @@ function setPage(page) {
   state.page = page;
   state.modal = null;
   state.error = '';
+  if (page === 'chats') state.chatFilter.offset = 0;
   render();
-}
-
-function el(html) {
-  const t = document.createElement('template');
-  t.innerHTML = html.trim();
-  return t.content.firstElementChild;
-}
-
-function badgeStatus(s) {
-  const c =
-    s === 'success' ? 'success' : s === 'error' || s === 'timeout' ? 'error' : 'pending';
-  return `<span class="badge ${c}">${escapeHtml(s || '-')}</span>`;
-}
-
-function badgeMode(m) {
-  return `<span class="badge ${m === 'agent' ? 'agent' : 'safe'}">${escapeHtml(m || 'safe')}</span>`;
 }
 
 function escapeHtml(s) {
@@ -77,10 +81,17 @@ function escapeHtml(s) {
 function fmtTime(iso) {
   if (!iso) return '-';
   try {
-    return new Date(iso).toLocaleString();
+    return new Date(iso).toLocaleString(getLocale() === 'zh-Hant' ? 'zh-HK' : 'en-US');
   } catch {
     return iso;
   }
+}
+
+function fmtBytes(n) {
+  if (n == null) return '-';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function showError(msg) {
@@ -92,11 +103,18 @@ function showError(msg) {
   }
 }
 
-async function ensureMe() {
-  if (!state.key) return false;
-  const data = await api('/me');
-  state.me = data.data;
-  return true;
+function badgeStatus(s) {
+  const c =
+    s === 'success' ? 'success' : s === 'error' || s === 'timeout' ? 'error' : 'pending';
+  return `<span class="badge ${c}">${escapeHtml(s || '-')}</span>`;
+}
+
+function badgeMode(m) {
+  return `<span class="badge ${m === 'agent' ? 'agent' : 'safe'}">${escapeHtml(m || 'safe')}</span>`;
+}
+
+function isImageMime(m) {
+  return String(m || '').toLowerCase().startsWith('image/');
 }
 
 function poweredByFooter() {
@@ -104,7 +122,7 @@ function poweredByFooter() {
   <footer class="site-footer">
     <a class="powered-by" href="https://ysk.hk/" target="_blank" rel="noopener noreferrer">
       <img src="/admin/assets/logo.svg" alt="" width="22" height="22" />
-      <span>Powered by <strong>YSK Limited</strong></span>
+      <span>${escapeHtml(t('common.powered'))} <strong>YSK Limited</strong></span>
     </a>
   </footer>`;
 }
@@ -117,21 +135,23 @@ function shell(content) {
         <div class="brand">
           <img class="brand-logo" src="/admin/assets/logo.svg" alt="YSK" width="40" height="40" />
           <div class="brand-text">
-            <strong>Grok Gateway</strong>
-            <small>Admin Panel</small>
+            <strong>${escapeHtml(t('brand'))}</strong>
+            <small>${escapeHtml(t('brandSub'))}</small>
           </div>
         </div>
-        ${nav('dashboard', '儀表板')}
-        ${nav('chats', 'Chat 記錄')}
-        ${nav('keys', 'API Keys')}
-        ${nav('documents', '文件')}
-        ${nav('audit', 'Audit Logs')}
-        ${nav('settings', '安全設定')}
-        ${nav('system', '系統狀態')}
+        ${langSwitchHtml()}
+        ${nav('dashboard', t('nav.dashboard'))}
+        ${nav('chats', t('nav.chats'))}
+        ${nav('keys', t('nav.keys'))}
+        ${nav('documents', t('nav.documents'))}
+        ${nav('audit', t('nav.audit'))}
+        ${nav('settings', t('nav.settings'))}
+        ${nav('usage', t('nav.usage'))}
+        ${nav('system', t('nav.system'))}
         <div class="sidebar-foot">
           <div>${escapeHtml(state.me?.name || '')}</div>
           <div>${escapeHtml(state.me?.keyPrefix || '')}…</div>
-          <button class="btn secondary sm" style="margin-top:10px;width:100%" id="btn-logout">登出</button>
+          <button class="btn secondary sm" style="margin-top:10px;width:100%" id="btn-logout">${escapeHtml(t('logout'))}</button>
         </div>
       </aside>
       <main class="main">
@@ -146,7 +166,52 @@ function shell(content) {
 }
 
 function nav(id, label) {
-  return `<button class="nav-btn ${state.page === id ? 'active' : ''}" data-nav="${id}">${label}</button>`;
+  return `<button class="nav-btn ${state.page === id ? 'active' : ''}" data-nav="${id}">${escapeHtml(label)}</button>`;
+}
+
+function bindShell() {
+  document.querySelectorAll('[data-nav]').forEach((b) => {
+    b.onclick = () => setPage(b.dataset.nav);
+  });
+  document.getElementById('btn-logout')?.addEventListener('click', () => logout(true));
+  document.querySelectorAll('[data-lang]').forEach((b) => {
+    b.onclick = () => {
+      setLocale(b.dataset.lang);
+      render().catch(onErr);
+    };
+  });
+}
+
+function onErr(e) {
+  console.error(e);
+  showError(e.message || String(e));
+}
+
+async function ensureMe() {
+  if (!state.key) return false;
+  const data = await api('/me');
+  state.me = data.data;
+  return true;
+}
+
+async function loadModels(refresh = false) {
+  try {
+    const res = await api(`/models${refresh ? '?refresh=1' : ''}`);
+    state.models = res.data?.models || [];
+    return res.data;
+  } catch {
+    state.models = [];
+    return { models: [], source: 'fallback', defaultModel: '' };
+  }
+}
+
+async function loadKeys() {
+  try {
+    const res = await api('/keys');
+    state.keys = res.data || [];
+  } catch {
+    state.keys = [];
+  }
 }
 
 async function renderLogin() {
@@ -155,27 +220,34 @@ async function renderLogin() {
       <div class="login-card">
         <div class="login-brand">
           <img src="/admin/assets/logo.svg" alt="YSK Limited" width="56" height="56" />
-          <h1 class="brand-title">Grok Gateway Admin</h1>
+          <h1 class="brand-title">${escapeHtml(t('loginTitle'))}</h1>
         </div>
-        <p>貼上 <strong>admin API key</strong>（seed 產生、只顯示一次）。資料會存放在本瀏覽器 sessionStorage。</p>
+        ${langSwitchHtml()}
+        <p>${t('loginHint')}</p>
         <div id="flash-error" class="error-box" ${state.error ? '' : 'hidden'}>${escapeHtml(state.error)}</div>
-        <label>Admin API Key</label>
+        <label>${escapeHtml(t('loginLabel'))}</label>
         <input id="login-key" type="password" placeholder="gk_live_..." autocomplete="off" />
-        <button class="btn" id="btn-login" style="width:100%">進入控制台</button>
+        <button class="btn" id="btn-login" style="width:100%">${escapeHtml(t('loginBtn'))}</button>
       </div>
       ${poweredByFooter()}
     </div>
   `;
+  document.querySelectorAll('[data-lang]').forEach((b) => {
+    b.onclick = () => {
+      setLocale(b.dataset.lang);
+      renderLogin().catch(onErr);
+    };
+  });
   document.getElementById('btn-login').onclick = async () => {
     const key = document.getElementById('login-key').value.trim();
-    if (!key) return showError('請輸入 API key');
+    if (!key) return showError(t('needKey'));
     state.key = key;
     try {
       await ensureMe();
       sessionStorage.setItem(KEY_STORAGE, key);
       state.page = 'dashboard';
       state.error = '';
-      render();
+      render().catch(onErr);
     } catch (e) {
       state.key = '';
       showError(e.message);
@@ -184,9 +256,10 @@ async function renderLogin() {
 }
 
 async function renderDashboard() {
-  const { data } = await api('/stats');
-  const t = data.totals;
-  const rows = (data.recentChats || [])
+  const res = await api('/stats');
+  const d = res.data || {};
+  const tot = d.totals || {};
+  const rows = (d.recentChats || [])
     .map(
       (c) => `
     <tr>
@@ -201,20 +274,20 @@ async function renderDashboard() {
     .join('');
 
   document.getElementById('app').innerHTML = shell(`
-    <div class="topbar"><h2>儀表板</h2><span class="muted">最近 24h 請求：${t.chats24h}</span></div>
+    <div class="topbar"><h2>${escapeHtml(t('dash.title'))}</h2><span class="muted">${escapeHtml(t('dash.last24'))}：${tot.chats24h ?? 0}</span></div>
     <div class="grid">
-      <div class="card"><div class="label">總 Chat</div><div class="value">${t.chats}</div></div>
-      <div class="card"><div class="label">成功</div><div class="value">${t.success}</div></div>
-      <div class="card"><div class="label">錯誤/逾時</div><div class="value">${t.errors}</div></div>
-      <div class="card"><div class="label">文件</div><div class="value">${t.documents}</div></div>
-      <div class="card"><div class="label">活躍 Keys</div><div class="value">${t.activeKeys}/${t.totalKeys}</div></div>
-      <div class="card"><div class="label">Grok 併發</div><div class="value">${data.concurrency.active}/${data.concurrency.max}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('dash.totalChat'))}</div><div class="value">${tot.chats ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('dash.success'))}</div><div class="value">${tot.success ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('dash.errors'))}</div><div class="value">${tot.errors ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('dash.docs'))}</div><div class="value">${tot.documents ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('dash.keys'))}</div><div class="value">${tot.activeKeys ?? 0}/${tot.totalKeys ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('dash.concurrent'))}</div><div class="value">${d.concurrency?.active ?? 0}/${d.concurrency?.max ?? 0}</div></div>
     </div>
     <div class="panel">
-      <div class="panel-h"><strong>最近 Chat</strong></div>
+      <div class="panel-h"><strong>${escapeHtml(t('dash.recent'))}</strong></div>
       <table>
-        <thead><tr><th>Request</th><th>Model</th><th>Status</th><th>Mode</th><th>耗時</th><th>時間</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty">暫無資料</td></tr>`}</tbody>
+        <thead><tr><th>${escapeHtml(t('chats.request'))}</th><th>Model</th><th>Status</th><th>Mode</th><th>${escapeHtml(t('chats.duration'))}</th><th>${escapeHtml(t('chats.time'))}</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">${escapeHtml(t('dash.empty'))}</td></tr>`}</tbody>
       </table>
     </div>
   `);
@@ -224,16 +297,56 @@ async function renderDashboard() {
   });
 }
 
+function attachChips(docs) {
+  if (!docs?.length) return `<span class="muted">—</span>`;
+  return docs
+    .map((d) => {
+      const img = isImageMime(d.mimeType);
+      return `<span class="chip ${img ? 'img' : ''}" title="${escapeHtml(d.mimeType)}">${escapeHtml(d.originalName || 'file')}</span>`;
+    })
+    .join(' ');
+}
+
 async function renderChats() {
-  const q = new URLSearchParams({ limit: '50' });
-  const status = document.getElementById('f-status')?.value;
-  const model = document.getElementById('f-model')?.value;
-  const search = document.getElementById('f-q')?.value;
-  if (status) q.set('status', status);
-  if (model) q.set('model', model);
-  if (search) q.set('q', search);
+  await Promise.all([loadModels(), loadKeys()]);
+  const f = state.chatFilter;
+  const q = new URLSearchParams();
+  q.set('limit', String(f.limit));
+  q.set('offset', String(f.offset));
+  if (f.status) q.set('status', f.status);
+  if (f.model) q.set('model', f.model);
+  if (f.apiKeyId) q.set('apiKeyId', f.apiKeyId);
+  if (f.q) q.set('q', f.q);
+  if (f.from) q.set('from', new Date(f.from).toISOString());
+  if (f.to) {
+    const end = new Date(f.to);
+    end.setHours(23, 59, 59, 999);
+    q.set('to', end.toISOString());
+  }
+  if (f.policyMode) q.set('policyMode', f.policyMode);
+  if (f.hasDocuments !== '') q.set('hasDocuments', f.hasDocuments);
 
   const data = await api(`/chats?${q}`);
+  const total = data.total || 0;
+  const page = Math.floor(f.offset / f.limit) + 1;
+  const pages = Math.max(1, Math.ceil(total / f.limit));
+
+  const modelOpts = [
+    `<option value="">${escapeHtml(t('chats.allModels'))}</option>`,
+    ...state.models.map(
+      (m) =>
+        `<option value="${escapeHtml(m)}" ${f.model === m ? 'selected' : ''}>${escapeHtml(m)}</option>`,
+    ),
+  ].join('');
+
+  const keyOpts = [
+    `<option value="">${escapeHtml(t('chats.allKeys'))}</option>`,
+    ...state.keys.map(
+      (k) =>
+        `<option value="${k.id}" ${f.apiKeyId === k.id ? 'selected' : ''}>${escapeHtml(k.name)} (${escapeHtml(k.keyPrefix)})</option>`,
+    ),
+  ].join('');
+
   const rows = (data.items || [])
     .map(
       (c) => `
@@ -242,6 +355,7 @@ async function renderChats() {
       <td>${escapeHtml(c.apiKey?.name || '')}<div class="muted">${escapeHtml(c.apiKey?.keyPrefix || '')}</div></td>
       <td>${escapeHtml(c.model)}</td>
       <td>${badgeStatus(c.status)} ${badgeMode(c.policyMode || '-')}</td>
+      <td>${attachChips(c.documents)} ${c.documentCount ? `<span class="muted">×${c.documentCount}</span>` : ''}</td>
       <td><div class="muted">${escapeHtml(c.promptPreview)}</div></td>
       <td><div class="muted">${escapeHtml(c.contentPreview)}</div></td>
       <td>${fmtTime(c.createdAt)}</td>
@@ -250,38 +364,131 @@ async function renderChats() {
     .join('');
 
   document.getElementById('app').innerHTML = shell(`
-    <div class="topbar"><h2>Chat 記錄</h2><span class="muted">共 ${data.total} 筆（可解密查看完整 in/out）</span></div>
+    <div class="topbar">
+      <h2>${escapeHtml(t('chats.title'))}</h2>
+      <span class="muted">${escapeHtml(t('chats.total'))} ${total} · ${escapeHtml(t('chats.decrypt'))}</span>
+    </div>
     <div class="panel">
-      <div class="panel-h">
-        <div class="toolbar">
+      <div class="filter-bar">
+        <label>${escapeHtml(t('chats.search'))}
+          <input class="wide" type="search" id="f-q" value="${escapeHtml(f.q)}" placeholder="${escapeHtml(t('chats.search'))}" />
+        </label>
+        <label>${escapeHtml(t('chats.status'))}
           <select id="f-status">
-            <option value="">全部狀態</option>
-            <option value="success">success</option>
-            <option value="error">error</option>
-            <option value="timeout">timeout</option>
-            <option value="pending">pending</option>
+            <option value="">${escapeHtml(t('chats.allStatus'))}</option>
+            ${['success', 'error', 'timeout', 'pending']
+              .map(
+                (s) =>
+                  `<option value="${s}" ${f.status === s ? 'selected' : ''}>${s}</option>`,
+              )
+              .join('')}
           </select>
-          <input id="f-model" placeholder="model 篩選" />
-          <input id="f-q" placeholder="搜尋 prompt/response 預覽" style="min-width:220px" />
-          <button class="btn secondary sm" id="btn-filter">篩選</button>
-        </div>
+        </label>
+        <label>${escapeHtml(t('chats.model'))}
+          <select id="f-model">${modelOpts}</select>
+        </label>
+        <label>${escapeHtml(t('chats.apiKey'))}
+          <select id="f-key">${keyOpts}</select>
+        </label>
+        <label>${escapeHtml(t('chats.mode'))}
+          <select id="f-mode">
+            <option value="">${escapeHtml(t('chats.allModes'))}</option>
+            <option value="safe" ${f.policyMode === 'safe' ? 'selected' : ''}>safe</option>
+            <option value="agent" ${f.policyMode === 'agent' ? 'selected' : ''}>agent</option>
+          </select>
+        </label>
+        <label>${escapeHtml(t('chats.from'))}
+          <input type="date" id="f-from" value="${escapeHtml(f.from)}" />
+        </label>
+        <label>${escapeHtml(t('chats.to'))}
+          <input type="date" id="f-to" value="${escapeHtml(f.to)}" />
+        </label>
+        <label class="check">
+          <input type="checkbox" id="f-docs" ${f.hasDocuments === 'true' ? 'checked' : ''} />
+          ${escapeHtml(t('chats.hasDocs'))}
+        </label>
+        <label>${escapeHtml(t('chats.perPage'))}
+          <select id="f-limit">
+            ${[20, 50, 100]
+              .map(
+                (n) =>
+                  `<option value="${n}" ${f.limit === n ? 'selected' : ''}>${n}</option>`,
+              )
+              .join('')}
+          </select>
+        </label>
+        <button class="btn sm" id="btn-filter">${escapeHtml(t('chats.filter'))}</button>
+        <button class="btn secondary sm" id="btn-reset">${escapeHtml(t('chats.reset'))}</button>
       </div>
       <table>
         <thead>
           <tr>
-            <th>Request</th><th>API Key</th><th>Model</th><th>狀態</th>
-            <th>Prompt 預覽</th><th>Response 預覽</th><th>時間</th>
+            <th>${escapeHtml(t('chats.request'))}</th>
+            <th>${escapeHtml(t('chats.apiKey'))}</th>
+            <th>Model</th>
+            <th>${escapeHtml(t('chats.status'))}</th>
+            <th>${escapeHtml(t('chats.attachments'))}</th>
+            <th>${escapeHtml(t('chats.prompt'))}</th>
+            <th>${escapeHtml(t('chats.response'))}</th>
+            <th>${escapeHtml(t('chats.time'))}</th>
           </tr>
         </thead>
-        <tbody>${rows || `<tr><td colspan="7" class="empty">暫無資料</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="8" class="empty">${escapeHtml(t('common.empty'))}</td></tr>`}</tbody>
       </table>
+      <div class="pagination">
+        <span class="muted">${escapeHtml(t('chats.page'))} ${page} / ${pages} · ${total}</span>
+        <div class="pages">
+          <button class="btn secondary sm" id="pg-prev" ${f.offset <= 0 ? 'disabled' : ''}>${escapeHtml(t('chats.prev'))}</button>
+          <button class="btn secondary sm" id="pg-next" ${f.offset + f.limit >= total ? 'disabled' : ''}>${escapeHtml(t('chats.next'))}</button>
+        </div>
+      </div>
     </div>
   `);
   bindShell();
-  if (status) document.getElementById('f-status').value = status;
-  if (model) document.getElementById('f-model').value = model;
-  if (search) document.getElementById('f-q').value = search;
-  document.getElementById('btn-filter').onclick = () => renderChats().catch(onErr);
+
+  const applyFilter = () => {
+    state.chatFilter.q = document.getElementById('f-q').value.trim();
+    state.chatFilter.status = document.getElementById('f-status').value;
+    state.chatFilter.model = document.getElementById('f-model').value;
+    state.chatFilter.apiKeyId = document.getElementById('f-key').value;
+    state.chatFilter.policyMode = document.getElementById('f-mode').value;
+    state.chatFilter.from = document.getElementById('f-from').value;
+    state.chatFilter.to = document.getElementById('f-to').value;
+    state.chatFilter.hasDocuments = document.getElementById('f-docs').checked
+      ? 'true'
+      : '';
+    state.chatFilter.limit = Number(document.getElementById('f-limit').value) || 50;
+    state.chatFilter.offset = 0;
+    renderChats().catch(onErr);
+  };
+
+  document.getElementById('btn-filter').onclick = applyFilter;
+  document.getElementById('f-q').onkeydown = (e) => {
+    if (e.key === 'Enter') applyFilter();
+  };
+  document.getElementById('btn-reset').onclick = () => {
+    state.chatFilter = {
+      q: '',
+      status: '',
+      model: '',
+      apiKeyId: '',
+      from: '',
+      to: '',
+      policyMode: '',
+      hasDocuments: '',
+      limit: 50,
+      offset: 0,
+    };
+    renderChats().catch(onErr);
+  };
+  document.getElementById('pg-prev').onclick = () => {
+    state.chatFilter.offset = Math.max(0, f.offset - f.limit);
+    renderChats().catch(onErr);
+  };
+  document.getElementById('pg-next').onclick = () => {
+    state.chatFilter.offset = f.offset + f.limit;
+    renderChats().catch(onErr);
+  };
   document.querySelectorAll('[data-chat]').forEach((b) => {
     b.onclick = () => openChat(b.dataset.chat);
   });
@@ -290,40 +497,74 @@ async function renderChats() {
 async function openChat(id) {
   const { data } = await api(`/chats/${id}`);
   const r = data.response || {};
+  const docs = data.documents || [];
+
+  let attachHtml = `<p class="muted">${escapeHtml(t('chats.noAttach'))}</p>`;
+  if (docs.length) {
+    const parts = [];
+    for (const d of docs) {
+      let preview = '';
+      if (isImageMime(d.mimeType)) {
+        try {
+          const full = await api(`/documents/${d.id}`);
+          if (full.data?.imageDataUrl) {
+            preview = `<img class="preview" src="${full.data.imageDataUrl}" alt="${escapeHtml(d.originalName)}" />`;
+          }
+        } catch {
+          preview = `<span class="muted">preview failed</span>`;
+        }
+      }
+      parts.push(`
+        <div class="attach-item">
+          <div style="flex:1;min-width:0">
+            <strong>${escapeHtml(d.originalName)}</strong>
+            <div class="muted">${escapeHtml(d.mimeType)} · ${fmtBytes(d.sizeBytes)}</div>
+            ${preview}
+          </div>
+          <button class="btn secondary sm" data-open-doc="${d.id}">${escapeHtml(t('chats.openFile'))}</button>
+        </div>`);
+    }
+    attachHtml = `<div class="attach-list">${parts.join('')}</div>`;
+  }
+
   state.modal = `
     <div class="modal-back" id="modal-back">
       <div class="modal">
         <div class="modal-h">
           <div>
-            <strong>Chat 詳情</strong>
+            <strong>${escapeHtml(t('chats.detail'))}</strong>
             <div class="muted">${escapeHtml(data.requestId)} · ${badgeStatus(data.status)} ${badgeMode(data.policyMode || '-')}</div>
           </div>
-          <button class="btn secondary sm" id="modal-close">關閉</button>
+          <button class="btn secondary sm" id="modal-close">${escapeHtml(t('chats.close'))}</button>
         </div>
         <div class="modal-b">
           <div class="grid" style="margin-bottom:14px">
             <div class="card"><div class="label">Model</div><div class="value" style="font-size:1rem">${escapeHtml(data.model)}</div></div>
-            <div class="card"><div class="label">耗時</div><div class="value" style="font-size:1rem">${data.durationMs ?? '-'} ms</div></div>
+            <div class="card"><div class="label">${escapeHtml(t('chats.duration'))}</div><div class="value" style="font-size:1rem">${data.durationMs ?? '-'} ms</div></div>
             <div class="card"><div class="label">API Key</div><div class="value" style="font-size:1rem">${escapeHtml(data.apiKey?.name || '')}</div></div>
-            <div class="card"><div class="label">Stream</div><div class="value" style="font-size:1rem">${data.stream ? 'yes' : 'no'}</div></div>
+            <div class="card"><div class="label">${escapeHtml(t('chats.stream'))}</div><div class="value" style="font-size:1rem">${data.stream ? 'yes' : 'no'}</div></div>
           </div>
           ${data.errorMessage ? `<div class="error-box">${escapeHtml(data.errorMessage)}</div>` : ''}
           <div class="block">
-            <h4>Prompt（輸入 · 完整明文）</h4>
+            <h4>${escapeHtml(t('chats.attachments'))}</h4>
+            ${attachHtml}
+          </div>
+          <div class="block">
+            <h4>Prompt</h4>
             <div class="pre">${escapeHtml(data.prompt)}</div>
-            <button class="btn secondary sm" data-copy="prompt">複製 Prompt</button>
+            <button class="btn secondary sm" data-copy="prompt">${escapeHtml(t('chats.copyPrompt'))}</button>
           </div>
           <div class="block">
-            <h4>Reasoning / Thought</h4>
-            <div class="pre">${escapeHtml(r.reasoning_content || '（無）')}</div>
+            <h4>${escapeHtml(t('chats.reasoning'))}</h4>
+            <div class="pre">${escapeHtml(r.reasoning_content || t('chats.none'))}</div>
           </div>
           <div class="block">
-            <h4>Content（輸出 · 完整明文）</h4>
-            <div class="pre">${escapeHtml(r.content || '（無）')}</div>
-            <button class="btn secondary sm" data-copy="content">複製 Content</button>
+            <h4>${escapeHtml(t('chats.content'))}</h4>
+            <div class="pre">${escapeHtml(r.content || t('chats.none'))}</div>
+            <button class="btn secondary sm" data-copy="content">${escapeHtml(t('chats.copyContent'))}</button>
           </div>
           <div class="block">
-            <h4>Raw Response 儲存值</h4>
+            <h4>${escapeHtml(t('chats.raw'))}</h4>
             <div class="pre">${escapeHtml(r.raw || '')}</div>
           </div>
           <div class="muted">IP: ${escapeHtml(data.ip || '-')} · UA: ${escapeHtml(data.userAgent || '-')} · ${fmtTime(data.createdAt)}</div>
@@ -331,11 +572,8 @@ async function openChat(id) {
       </div>
     </div>
   `;
-  // re-render current page body with modal - simpler: inject modal
-  const app = document.getElementById('app');
-  const existing = document.getElementById('modal-back');
-  if (existing) existing.remove();
-  app.insertAdjacentHTML('beforeend', state.modal);
+  document.getElementById('modal-back')?.remove();
+  document.getElementById('app').insertAdjacentHTML('beforeend', state.modal);
   document.getElementById('modal-close').onclick = () => {
     state.modal = null;
     document.getElementById('modal-back')?.remove();
@@ -352,37 +590,61 @@ async function openChat(id) {
   document.querySelector('[data-copy="content"]')?.addEventListener('click', () => {
     navigator.clipboard.writeText(r.content || '');
   });
+  document.querySelectorAll('[data-open-doc]').forEach((b) => {
+    b.onclick = () => openDocument(b.dataset.openDoc);
+  });
 }
 
 async function renderKeys() {
+  let usageMap = {};
+  try {
+    const u = await api('/usage');
+    for (const row of u.data?.perKey || []) {
+      usageMap[row.apiKeyId] = row;
+    }
+  } catch {
+    /* ignore */
+  }
   const { data } = await api('/keys');
   const rows = data
-    .map(
-      (k) => `
+    .map((k) => {
+      const u = usageMap[k.id];
+      const reqs = u?.requests ?? '—';
+      const util = u ? Math.round((u.utilization || 0) * 100) : 0;
+      return `
     <tr>
       <td>${escapeHtml(k.name)}<div class="muted">${escapeHtml(k.keyPrefix)}…</div></td>
       <td>${escapeHtml(k.role)}</td>
       <td>${badgeMode(k.mode)}</td>
       <td>${k.rateLimit}/min</td>
-      <td>${k.isActive ? '<span class="badge success">active</span>' : '<span class="badge error">revoked</span>'}</td>
+      <td>
+        <div>${reqs} <span class="muted">(${escapeHtml(t('keys.usage24'))})</span></div>
+        <div class="usage-bar ${util > 80 ? 'warn' : ''}"><span style="width:${util}%"></span></div>
+      </td>
+      <td>${k.isActive ? `<span class="badge success">${escapeHtml(t('common.active'))}</span>` : `<span class="badge error">${escapeHtml(t('common.revoked'))}</span>`}</td>
       <td>${fmtTime(k.createdAt)}</td>
       <td>
-        <button class="btn secondary sm" data-edit="${k.id}">編輯</button>
-        ${k.isActive ? `<button class="btn danger sm" data-revoke="${k.id}">撤銷</button>` : ''}
+        <button class="btn secondary sm" data-edit="${k.id}">${escapeHtml(t('keys.edit'))}</button>
+        ${k.isActive ? `<button class="btn danger sm" data-revoke="${k.id}">${escapeHtml(t('keys.revoke'))}</button>` : ''}
       </td>
-    </tr>`,
-    )
+    </tr>`;
+    })
     .join('');
 
   document.getElementById('app').innerHTML = shell(`
     <div class="topbar">
-      <h2>API Keys</h2>
-      <button class="btn" id="btn-new-key">新增 Key</button>
+      <h2>${escapeHtml(t('keys.title'))}</h2>
+      <button class="btn" id="btn-new-key">${escapeHtml(t('keys.new'))}</button>
     </div>
     <div class="panel">
       <table>
-        <thead><tr><th>名稱</th><th>Role</th><th>Mode</th><th>Rate</th><th>狀態</th><th>建立</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="7" class="empty">暫無</td></tr>`}</tbody>
+        <thead><tr>
+          <th>${escapeHtml(t('keys.name'))}</th><th>${escapeHtml(t('keys.role'))}</th>
+          <th>${escapeHtml(t('keys.mode'))}</th><th>${escapeHtml(t('keys.rate'))}</th>
+          <th>${escapeHtml(t('keys.usage24'))}</th><th>${escapeHtml(t('keys.status'))}</th>
+          <th>${escapeHtml(t('keys.created'))}</th><th></th>
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="8" class="empty">${escapeHtml(t('keys.empty'))}</td></tr>`}</tbody>
       </table>
     </div>
   `);
@@ -394,7 +656,7 @@ async function renderKeys() {
   });
   document.querySelectorAll('[data-revoke]').forEach((b) => {
     b.onclick = async () => {
-      if (!confirm('確定撤銷此 key？')) return;
+      if (!confirm(t('keys.confirmRevoke'))) return;
       await api(`/keys/${b.dataset.revoke}`, { method: 'DELETE' });
       renderKeys().catch(onErr);
     };
@@ -407,34 +669,30 @@ function showKeyForm(existing) {
     <div class="modal-back" id="modal-back">
       <div class="modal" style="max-width:560px">
         <div class="modal-h">
-          <strong>${isEdit ? '編輯 API Key' : '新增 API Key'}</strong>
-          <button class="btn secondary sm" id="modal-close">關閉</button>
+          <strong>${isEdit ? t('keys.edit') : t('keys.new')}</strong>
+          <button class="btn secondary sm" id="modal-close">${escapeHtml(t('common.cancel'))}</button>
         </div>
         <div class="modal-b">
           <div class="form-grid">
-            <label class="full">名稱<input id="k-name" value="${escapeHtml(existing?.name || '')}" /></label>
-            <label>Role
-              <select id="k-role">
-                <option value="client">client</option>
-                <option value="admin">admin</option>
-              </select>
+            <label class="full">${escapeHtml(t('keys.name'))}<input id="k-name" value="${escapeHtml(existing?.name || '')}" /></label>
+            <label>${escapeHtml(t('keys.role'))}
+              <select id="k-role"><option value="client">client</option><option value="admin">admin</option></select>
             </label>
-            <label>Mode
-              <select id="k-mode">
-                <option value="safe">safe（對外安全）</option>
-                <option value="agent">agent（全能力）</option>
-              </select>
+            <label>${escapeHtml(t('keys.mode'))}
+              <select id="k-mode"><option value="safe">safe</option><option value="agent">agent</option></select>
             </label>
-            <label>Rate limit / min<input id="k-rate" type="number" value="${existing?.rateLimit ?? 60}" /></label>
-            <label>Max turns（可空）<input id="k-turns" type="number" value="${existing?.maxTurns ?? ''}" /></label>
-            <label>Timeout ms（可空）<input id="k-timeout" type="number" value="${existing?.timeoutMs ?? ''}" /></label>
-            ${isEdit ? `<label class="full">啟用
+            <label>${escapeHtml(t('keys.rate'))}<input id="k-rate" type="number" value="${existing?.rateLimit ?? 60}" /></label>
+            <label>Max turns<input id="k-turns" type="number" value="${existing?.maxTurns ?? ''}" /></label>
+            <label>Timeout ms<input id="k-timeout" type="number" value="${existing?.timeoutMs ?? ''}" /></label>
+            ${
+              isEdit
+                ? `<label class="full">${escapeHtml(t('keys.status'))}
               <select id="k-active"><option value="true">active</option><option value="false">revoked</option></select>
-            </label>` : ''}
+            </label>`
+                : ''
+            }
           </div>
-          <div style="margin-top:14px;display:flex;gap:8px">
-            <button class="btn" id="k-save">儲存</button>
-          </div>
+          <div style="margin-top:14px"><button class="btn" id="k-save">${escapeHtml(t('common.save'))}</button></div>
           <pre id="k-created" class="pre" style="display:none;margin-top:12px"></pre>
         </div>
       </div>
@@ -467,7 +725,7 @@ function showKeyForm(existing) {
       const res = await api('/keys', { method: 'POST', body: JSON.stringify(body) });
       const box = document.getElementById('k-created');
       box.style.display = 'block';
-      box.textContent = `已建立（明文 key 只顯示一次）:\n${res.data.key}`;
+      box.textContent = res.data?.key || JSON.stringify(res.data);
     }
   };
 }
@@ -478,21 +736,25 @@ async function renderDocuments() {
     .map(
       (d) => `
     <tr>
-      <td><button class="linkish" data-doc="${d.id}">${escapeHtml(d.originalName)}</button></td>
+      <td><button class="linkish" data-doc="${d.id}">${escapeHtml(d.originalName)}</button>
+        ${isImageMime(d.mimeType) ? '<span class="chip img">img</span>' : ''}</td>
       <td>${escapeHtml(d.apiKey?.name || '')}</td>
       <td>${escapeHtml(d.mimeType)}</td>
-      <td>${d.sizeBytes}</td>
+      <td>${fmtBytes(d.sizeBytes)}</td>
       <td>${fmtTime(d.createdAt)}</td>
-      <td><button class="btn danger sm" data-del="${d.id}">刪除</button></td>
+      <td><button class="btn danger sm" data-del="${d.id}">${escapeHtml(t('docs.delete'))}</button></td>
     </tr>`,
     )
     .join('');
   document.getElementById('app').innerHTML = shell(`
-    <div class="topbar"><h2>文件</h2><span class="muted">共 ${data.total} 個</span></div>
+    <div class="topbar"><h2>${escapeHtml(t('docs.title'))}</h2><span class="muted">${escapeHtml(t('docs.total'))} ${data.total}</span></div>
     <div class="panel">
       <table>
-        <thead><tr><th>檔名</th><th>API Key</th><th>MIME</th><th>大小</th><th>時間</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty">暫無</td></tr>`}</tbody>
+        <thead><tr>
+          <th>${escapeHtml(t('docs.file'))}</th><th>API Key</th><th>${escapeHtml(t('docs.mime'))}</th>
+          <th>${escapeHtml(t('docs.size'))}</th><th>${escapeHtml(t('docs.time'))}</th><th></th>
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">${escapeHtml(t('docs.empty'))}</td></tr>`}</tbody>
       </table>
     </div>
   `);
@@ -502,7 +764,7 @@ async function renderDocuments() {
   });
   document.querySelectorAll('[data-del]').forEach((b) => {
     b.onclick = async () => {
-      if (!confirm('刪除此文件？')) return;
+      if (!confirm(t('docs.confirmDel'))) return;
       await api(`/documents/${b.dataset.del}`, { method: 'DELETE' });
       renderDocuments().catch(onErr);
     };
@@ -512,6 +774,9 @@ async function renderDocuments() {
 async function openDocument(id) {
   const { data: doc } = await api(`/documents/${id}`);
   document.getElementById('modal-back')?.remove();
+  const preview = doc.imageDataUrl
+    ? `<img class="preview" src="${doc.imageDataUrl}" alt="" style="max-width:100%;margin-bottom:12px" />`
+    : `<div class="pre" id="doc-content">${escapeHtml(doc.content || t('chats.none'))}</div>`;
   document.getElementById('app').insertAdjacentHTML(
     'beforeend',
     `
@@ -519,33 +784,29 @@ async function openDocument(id) {
       <div class="modal">
         <div class="modal-h">
           <div>
-            <strong>文件詳情</strong>
-            <div class="muted">${escapeHtml(doc.originalName)} · ${escapeHtml(doc.mimeType)} · ${doc.sizeBytes} bytes</div>
+            <strong>${escapeHtml(t('docs.detail'))}</strong>
+            <div class="muted">${escapeHtml(doc.originalName)} · ${escapeHtml(doc.mimeType)} · ${fmtBytes(doc.sizeBytes)}</div>
           </div>
-          <button class="btn secondary sm" id="modal-close">關閉</button>
+          <button class="btn secondary sm" id="modal-close">${escapeHtml(t('chats.close'))}</button>
         </div>
         <div class="modal-b">
-          <div class="grid" style="margin-bottom:14px">
-            <div class="card"><div class="label">API Key</div><div class="value" style="font-size:1rem">${escapeHtml(doc.apiKey?.name || '')}</div></div>
-            <div class="card"><div class="label">Checksum</div><div class="value" style="font-size:.75rem;word-break:break-all">${escapeHtml(doc.checksumSha256 || '')}</div></div>
-            <div class="card"><div class="label">建立時間</div><div class="value" style="font-size:1rem">${fmtTime(doc.createdAt)}</div></div>
-          </div>
           <div class="block">
-            <h4>解密內容預覽</h4>
-            <div class="pre" id="doc-content">${escapeHtml(doc.content || '（無）')}</div>
-            <button class="btn secondary sm" id="doc-copy">複製內容</button>
+            <h4>${escapeHtml(t('docs.preview'))}</h4>
+            ${preview}
+            ${doc.imageDataUrl ? '' : `<button class="btn secondary sm" id="doc-copy">${escapeHtml(t('docs.copy'))}</button>`}
           </div>
         </div>
       </div>
     </div>`,
   );
-  document.getElementById('modal-close').onclick = () => document.getElementById('modal-back')?.remove();
+  document.getElementById('modal-close').onclick = () =>
+    document.getElementById('modal-back')?.remove();
   document.getElementById('modal-back').onclick = (e) => {
     if (e.target.id === 'modal-back') document.getElementById('modal-back')?.remove();
   };
-  document.getElementById('doc-copy').onclick = () => {
+  document.getElementById('doc-copy')?.addEventListener('click', () => {
     navigator.clipboard.writeText(doc.content || '');
-  };
+  });
 }
 
 async function renderAudit() {
@@ -563,11 +824,15 @@ async function renderAudit() {
     )
     .join('');
   document.getElementById('app').innerHTML = shell(`
-    <div class="topbar"><h2>Audit Logs</h2></div>
+    <div class="topbar"><h2>${escapeHtml(t('audit.title'))}</h2></div>
     <div class="panel">
       <table>
-        <thead><tr><th>時間</th><th>Action</th><th>Resource</th><th>Key</th><th>Meta</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="5" class="empty">暫無</td></tr>`}</tbody>
+        <thead><tr>
+          <th>${escapeHtml(t('chats.time'))}</th><th>${escapeHtml(t('audit.action'))}</th>
+          <th>${escapeHtml(t('audit.resource'))}</th><th>${escapeHtml(t('audit.key'))}</th>
+          <th>${escapeHtml(t('audit.meta'))}</th>
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="empty">${escapeHtml(t('audit.empty'))}</td></tr>`}</tbody>
       </table>
     </div>
   `);
@@ -575,39 +840,55 @@ async function renderAudit() {
 }
 
 async function renderSettings() {
-  const { data } = await api('/settings');
+  const [{ data }, catalog] = await Promise.all([api('/settings'), loadModels()]);
+  const modelOpts = (catalog.models || state.models || [])
+    .map(
+      (m) =>
+        `<option value="${escapeHtml(m)}" ${data.defaultModel === m ? 'selected' : ''}>${escapeHtml(m)}</option>`,
+    )
+    .join('');
   document.getElementById('app').innerHTML = shell(`
-    <div class="topbar"><h2>安全設定</h2></div>
+    <div class="topbar">
+      <h2>${escapeHtml(t('settings.title'))}</h2>
+      <button class="btn secondary sm" id="btn-refresh-models">${escapeHtml(t('settings.refreshModels'))}</button>
+    </div>
     <div class="panel">
       <div class="modal-b">
-        <p class="muted">對外安全模式會強制 sandbox cwd、停 always-approve、限制 tools。全域開啟時即使 key 設 agent 也會降級為 safe。</p>
+        <p class="muted">${escapeHtml(t('settings.hint'))}</p>
         <div class="switch-row">
           <input type="checkbox" id="s-global" ${data.globalSafeMode ? 'checked' : ''} />
-          <label for="s-global">全域 Safe Mode（強制所有 key）</label>
+          <label for="s-global">${escapeHtml(t('settings.globalSafe'))}</label>
         </div>
         <div class="form-grid">
-          <label>Safe tools 模式
+          <label>${escapeHtml(t('settings.tools'))}
             <select id="s-tools">
-              <option value="none">none（禁危險 tools）</option>
-              <option value="readonly">readonly（只讀）</option>
+              <option value="none">none</option>
+              <option value="readonly">readonly</option>
             </select>
           </label>
-          <label>Safe max turns<input id="s-turns" type="number" value="${data.safeMaxTurns}" /></label>
-          <label>Safe timeout (ms)<input id="s-timeout" type="number" value="${data.safeTimeoutMs}" /></label>
-          <label>預設 model<input id="s-model" value="${escapeHtml(data.defaultModel)}" /></label>
+          <label>${escapeHtml(t('settings.maxTurns'))}<input id="s-turns" type="number" value="${data.safeMaxTurns}" /></label>
+          <label>${escapeHtml(t('settings.timeout'))}<input id="s-timeout" type="number" value="${data.safeTimeoutMs}" /></label>
+          <label class="full">${escapeHtml(t('settings.defaultModel'))}
+            <select id="s-model">${modelOpts || `<option value="${escapeHtml(data.defaultModel)}">${escapeHtml(data.defaultModel)}</option>`}</select>
+            <span class="muted" style="font-weight:500;text-transform:none;margin-top:4px">${escapeHtml(t('settings.modelSource'))}${catalog.source ? ` · ${catalog.source}` : ''}</span>
+          </label>
           <label class="full"><span class="switch-row" style="margin:0">
             <input type="checkbox" id="s-panel" ${data.adminPanelEnabled ? 'checked' : ''} />
-            啟用 Admin Panel API
+            ${escapeHtml(t('settings.panel'))}
           </span></label>
         </div>
         <div style="margin-top:16px">
-          <button class="btn" id="s-save">儲存設定</button>
+          <button class="btn" id="s-save">${escapeHtml(t('settings.save'))}</button>
         </div>
       </div>
     </div>
   `);
   bindShell();
   document.getElementById('s-tools').value = data.safeToolsMode || 'none';
+  document.getElementById('btn-refresh-models').onclick = async () => {
+    await loadModels(true);
+    renderSettings().catch(onErr);
+  };
   document.getElementById('s-save').onclick = async () => {
     try {
       await api('/settings', {
@@ -621,14 +902,13 @@ async function renderSettings() {
           adminPanelEnabled: document.getElementById('s-panel').checked,
         }),
       });
-      state.error = '';
       const bar = document.querySelector('#flash-error');
       if (bar) {
         bar.hidden = false;
-        bar.style.background = 'rgba(34,197,94,.15)';
-        bar.style.borderColor = 'rgba(34,197,94,.4)';
-        bar.style.color = '#bbf7d0';
-        bar.textContent = '設定已儲存';
+        bar.style.background = 'rgba(16,185,129,.12)';
+        bar.style.borderColor = 'rgba(16,185,129,.35)';
+        bar.style.color = '#047857';
+        bar.textContent = t('settings.saved');
         setTimeout(() => {
           bar.hidden = true;
           bar.removeAttribute('style');
@@ -640,35 +920,110 @@ async function renderSettings() {
   };
 }
 
+async function renderUsage() {
+  const { data } = await api('/usage');
+  const tot = data.totals || {};
+  const limits = data.limits || {};
+  const modelRows = (data.byModel || [])
+    .map(
+      (m) =>
+        `<tr><td>${escapeHtml(m.model)}</td><td>${m.requests}</td></tr>`,
+    )
+    .join('');
+  const keyRows = (data.perKey || [])
+    .map((k) => {
+      const util = Math.round((k.utilization || 0) * 100);
+      return `<tr>
+        <td>${escapeHtml(k.name)}<div class="muted">${escapeHtml(k.keyPrefix)}</div></td>
+        <td>${k.requests}</td>
+        <td>${k.rateLimit}/min</td>
+        <td>
+          <div>${util}%</div>
+          <div class="usage-bar ${util > 80 ? 'warn' : ''}"><span style="width:${util}%"></span></div>
+        </td>
+        <td>${k.isActive ? badgeStatus('success') : badgeStatus('error')}</td>
+      </tr>`;
+    })
+    .join('');
+
+  document.getElementById('app').innerHTML = shell(`
+    <div class="topbar">
+      <h2>${escapeHtml(t('usage.title'))}</h2>
+      <button class="btn secondary sm" id="btn-usage-refresh">${escapeHtml(t('usage.refresh'))}</button>
+    </div>
+    <p class="muted">${escapeHtml(t('usage.window'))}: ${fmtTime(data.from)} → ${fmtTime(data.to)} (${data.windowMinutes} min)</p>
+    <div class="grid">
+      <div class="card"><div class="label">${escapeHtml(t('usage.requests'))}</div><div class="value">${tot.requests ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('usage.success'))}</div><div class="value">${tot.success ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('usage.errors'))}</div><div class="value">${tot.errors ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('usage.errorRate'))}</div><div class="value">${Math.round((tot.errorRate || 0) * 100)}%</div></div>
+    </div>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="panel-h"><strong>${escapeHtml(t('usage.limits'))}</strong></div>
+      <div class="modal-b">
+        <div class="grid">
+          <div class="card"><div class="label">${escapeHtml(t('usage.global'))}</div><div class="value" style="font-size:1rem">${limits.globalMax} / ${limits.globalWindowMs}ms</div></div>
+          <div class="card"><div class="label">${escapeHtml(t('usage.ipMax'))}</div><div class="value" style="font-size:1rem">${limits.ipMax}</div></div>
+          <div class="card"><div class="label">${escapeHtml(t('usage.burst'))}</div><div class="value" style="font-size:1rem">${limits.chatBurstMax}</div></div>
+          <div class="card"><div class="label">${escapeHtml(t('usage.block'))}</div><div class="value" style="font-size:1rem">${limits.blockFailedAuthThreshold}</div></div>
+          <div class="card"><div class="label">${escapeHtml(t('usage.concurrent'))}</div><div class="value" style="font-size:1rem">${limits.grokMaxConcurrent}</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="panel-h"><strong>${escapeHtml(t('usage.byModel'))}</strong></div>
+      <table>
+        <thead><tr><th>Model</th><th>${escapeHtml(t('usage.requests'))}</th></tr></thead>
+        <tbody>${modelRows || `<tr><td colspan="2" class="empty">${escapeHtml(t('common.empty'))}</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="panel-h"><strong>${escapeHtml(t('usage.byKey'))}</strong></div>
+      <table>
+        <thead><tr>
+          <th>${escapeHtml(t('keys.name'))}</th>
+          <th>${escapeHtml(t('usage.requests'))}</th>
+          <th>${escapeHtml(t('usage.rateLimit'))}</th>
+          <th>${escapeHtml(t('usage.util'))}</th>
+          <th>${escapeHtml(t('keys.status'))}</th>
+        </tr></thead>
+        <tbody>${keyRows || `<tr><td colspan="5" class="empty">${escapeHtml(t('common.empty'))}</td></tr>`}</tbody>
+      </table>
+    </div>
+  `);
+  bindShell();
+  document.getElementById('btn-usage-refresh').onclick = () => renderUsage().catch(onErr);
+}
+
 async function renderSystem() {
   const { data } = await api('/system');
   const v = data.version || {};
   const updateBadge = v.updateAvailable
-    ? '<span class="badge warn">有更新</span>'
-    : '<span class="badge success">最新 / 未知</span>';
+    ? '<span class="badge warn">update</span>'
+    : '<span class="badge success">ok</span>';
   document.getElementById('app').innerHTML = shell(`
     <div class="topbar">
-      <h2>系統狀態</h2>
+      <h2>${escapeHtml(t('system.title'))}</h2>
       <div class="toolbar">
-        <button class="btn secondary sm" id="btn-check-update">檢查更新</button>
-        <button class="btn sm" id="btn-one-click-update">一鍵更新並重啟</button>
+        <button class="btn secondary sm" id="btn-check-update">${escapeHtml(t('system.checkUpdate'))}</button>
+        <button class="btn sm" id="btn-one-click-update">${escapeHtml(t('system.oneClick'))}</button>
       </div>
     </div>
     <div class="grid">
       <div class="card"><div class="label">Database</div><div class="value" style="font-size:1.2rem">${escapeHtml(data.database)}</div></div>
       <div class="card"><div class="label">Grok CLI</div><div class="value" style="font-size:1.2rem">${escapeHtml(data.grokCli)}</div></div>
       <div class="card"><div class="label">Concurrency</div><div class="value" style="font-size:1.2rem">${data.concurrency.active}/${data.concurrency.max}</div></div>
-      <div class="card"><div class="label">版本</div><div class="value" style="font-size:1.1rem">${escapeHtml(v.current || '?')} ${updateBadge}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('system.current'))}</div><div class="value" style="font-size:1.1rem">${escapeHtml(v.current || '?')} ${updateBadge}</div></div>
     </div>
     <div class="panel" style="margin-bottom:14px">
-      <div class="panel-h"><strong>自我更新</strong><span class="muted">等同 CLI：gctoac update</span></div>
+      <div class="panel-h"><strong>${escapeHtml(t('system.selfUpdate'))}</strong></div>
       <div class="modal-b">
-        <p class="muted">會按安裝方式自動選擇：git pull、npm global、或 GitHub 安裝。更新後會重啟 gateway（約 10–30 秒），之後請重新整理本頁。</p>
+        <p class="muted">${escapeHtml(t('system.selfHint'))}</p>
         <div class="grid">
-          <div class="card"><div class="label">目前版本</div><div class="value" style="font-size:1rem">${escapeHtml(v.current || '-')}</div></div>
-          <div class="card"><div class="label">npm latest</div><div class="value" style="font-size:1rem">${escapeHtml(v.latestNpm || 'n/a')}</div></div>
-          <div class="card"><div class="label">GitHub latest</div><div class="value" style="font-size:1rem">${escapeHtml(v.latestGithub || 'n/a')}</div></div>
-          <div class="card"><div class="label">安裝方式</div><div class="value" style="font-size:.9rem">${escapeHtml(v.channel || '-')} · ${escapeHtml(v.installSource || '')}</div></div>
+          <div class="card"><div class="label">${escapeHtml(t('system.current'))}</div><div class="value" style="font-size:1rem">${escapeHtml(v.current || '-')}</div></div>
+          <div class="card"><div class="label">${escapeHtml(t('system.npm'))}</div><div class="value" style="font-size:1rem">${escapeHtml(v.latestNpm || 'n/a')}</div></div>
+          <div class="card"><div class="label">${escapeHtml(t('system.github'))}</div><div class="value" style="font-size:1rem">${escapeHtml(v.latestGithub || 'n/a')}</div></div>
+          <div class="card"><div class="label">${escapeHtml(t('system.install'))}</div><div class="value" style="font-size:.9rem">${escapeHtml(v.channel || '-')} · ${escapeHtml(v.installSource || '')}</div></div>
         </div>
         <pre id="update-log" class="pre" style="display:none;margin-top:12px"></pre>
       </div>
@@ -681,7 +1036,7 @@ async function renderSystem() {
       const res = await api('/system/update-check');
       const d = res.data || {};
       alert(
-        `目前: ${d.current}\nnpm: ${d.latestNpm || 'n/a'}\nGitHub: ${d.latestGithub || 'n/a'}\n可更新: ${d.updateAvailable ? '是' : '否'}`,
+        `current: ${d.current}\nnpm: ${d.latestNpm || 'n/a'}\nGitHub: ${d.latestGithub || 'n/a'}\nupdate: ${d.updateAvailable}`,
       );
       renderSystem().catch(onErr);
     } catch (e) {
@@ -689,13 +1044,7 @@ async function renderSystem() {
     }
   };
   document.getElementById('btn-one-click-update').onclick = async () => {
-    if (
-      !confirm(
-        '確定要一鍵更新並重啟 gateway？\n過程約 10–30 秒，期間 API 會短暫中斷。',
-      )
-    ) {
-      return;
-    }
+    if (!confirm('Update & restart gateway?')) return;
     const logEl = document.getElementById('update-log');
     try {
       const btn = document.getElementById('btn-one-click-update');
@@ -710,26 +1059,11 @@ async function renderSystem() {
           (res.data && (res.data.message || JSON.stringify(res.data, null, 2))) ||
           'Update scheduled';
       }
-      alert(
-        (res.data && res.data.message) ||
-          '已排程更新，請約 30 秒後重新整理頁面。',
-      );
+      alert((res.data && res.data.message) || 'Scheduled');
     } catch (e) {
       onErr(e);
     }
   };
-}
-
-function bindShell() {
-  document.querySelectorAll('[data-nav]').forEach((b) => {
-    b.onclick = () => setPage(b.dataset.nav);
-  });
-  document.getElementById('btn-logout')?.addEventListener('click', () => logout(true));
-}
-
-function onErr(e) {
-  console.error(e);
-  showError(e.message || String(e));
 }
 
 async function render() {
@@ -746,6 +1080,7 @@ async function render() {
     else if (state.page === 'documents') await renderDocuments();
     else if (state.page === 'audit') await renderAudit();
     else if (state.page === 'settings') await renderSettings();
+    else if (state.page === 'usage') await renderUsage();
     else if (state.page === 'system') await renderSystem();
     else await renderDashboard();
   } catch (e) {

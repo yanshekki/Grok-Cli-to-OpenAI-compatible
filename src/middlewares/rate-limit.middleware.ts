@@ -1,16 +1,71 @@
 import rateLimit from 'express-rate-limit';
-import type { Request } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { env } from '../config/env';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 
+/** In-memory failed auth / abuse tracker (single-process). */
+const failedAuth = new Map<string, { count: number; resetAt: number }>();
+const blockedIps = new Map<string, number>();
+
+function clientIp(req: Request): string {
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
+export function recordFailedAuth(req: Request): void {
+  const ip = clientIp(req);
+  const now = Date.now();
+  const cur = failedAuth.get(ip);
+  if (!cur || now > cur.resetAt) {
+    failedAuth.set(ip, {
+      count: 1,
+      resetAt: now + env.BLOCK_FAILED_AUTH_WINDOW_MS,
+    });
+    return;
+  }
+  cur.count += 1;
+  if (cur.count >= env.BLOCK_FAILED_AUTH_THRESHOLD) {
+    blockedIps.set(ip, now + env.BLOCK_DURATION_MS);
+    failedAuth.delete(ip);
+  }
+}
+
+export function clearFailedAuth(req: Request): void {
+  failedAuth.delete(clientIp(req));
+}
+
+export function ipBlockMiddleware(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): void {
+  const ip = clientIp(req);
+  const until = blockedIps.get(ip);
+  if (until && Date.now() < until) {
+    next(
+      ExceptionFactory.rateLimited(
+        'IP temporarily blocked due to repeated abuse. Try again later.',
+      ),
+    );
+    return;
+  }
+  if (until && Date.now() >= until) {
+    blockedIps.delete(ip);
+  }
+  next();
+}
+
 export const globalRateLimiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
-  max: env.RATE_LIMIT_MAX,
+  max: (req: Request) => {
+    // Unauthenticated traffic: stricter IP cap
+    if (!req.apiKey) return env.RATE_LIMIT_IP_MAX;
+    return env.RATE_LIMIT_MAX;
+  },
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req: Request) => {
     if (req.apiKey?.id) return `key:${req.apiKey.id}`;
-    return req.ip || 'unknown';
+    return `ip:${clientIp(req)}`;
   },
   handler: () => {
     throw ExceptionFactory.rateLimited();
@@ -25,10 +80,26 @@ export const chatRateLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req: Request) => {
     if (req.apiKey?.id) return `chat:${req.apiKey.id}`;
-    return `chat-ip:${req.ip || 'unknown'}`;
+    return `chat-ip:${clientIp(req)}`;
   },
   handler: () => {
     throw ExceptionFactory.rateLimited('Chat rate limit exceeded for this API key');
+  },
+  validate: { xForwardedForHeader: false },
+});
+
+/** Short burst window to blunt floods even when per-minute budget remains */
+export const chatBurstLimiter = rateLimit({
+  windowMs: 10_000,
+  max: env.CHAT_BURST_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => {
+    if (req.apiKey?.id) return `burst:${req.apiKey.id}`;
+    return `burst-ip:${clientIp(req)}`;
+  },
+  handler: () => {
+    throw ExceptionFactory.rateLimited('Chat burst rate limit exceeded');
   },
   validate: { xForwardedForHeader: false },
 });

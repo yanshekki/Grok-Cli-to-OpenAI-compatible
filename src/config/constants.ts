@@ -20,6 +20,10 @@ export const ALLOWED_UPLOAD_MIME_TYPES = new Set([
   'text/x-python',
   'text/x-java-source',
   'application/octet-stream',
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
 ]);
 
 export const ALLOWED_UPLOAD_EXTENSIONS = new Set([
@@ -53,7 +57,16 @@ export const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   '.sql',
   '.log',
   '.pdf',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
 ]);
+
+export function isImageMime(mime: string): boolean {
+  return mime.toLowerCase().startsWith('image/');
+}
 
 export const CHAT_STATUS = {
   PENDING: 'pending',

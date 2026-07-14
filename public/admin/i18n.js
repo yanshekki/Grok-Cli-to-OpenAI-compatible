@@ -1,0 +1,376 @@
+/** Admin i18n — default: system zh* → zh-Hant, else en; manual choice wins. */
+const LANG_KEY = 'gog_admin_lang';
+
+const dict = {
+  en: {
+    brand: 'Grok Gateway',
+    brandSub: 'Admin Panel',
+    loginTitle: 'Admin Sign-in',
+    loginHint:
+      'Paste an <strong>admin API key</strong> (shown once at setup / key create). Stored in sessionStorage only.',
+    loginLabel: 'Admin API Key',
+    loginBtn: 'Enter console',
+    needKey: 'Please enter an API key',
+    logout: 'Log out',
+    nav: {
+      dashboard: 'Dashboard',
+      chats: 'Chats',
+      keys: 'API Keys',
+      documents: 'Documents',
+      audit: 'Audit Logs',
+      settings: 'Safety',
+      usage: 'Usage & Limits',
+      system: 'System',
+    },
+    dash: {
+      title: 'Dashboard',
+      last24: 'Requests (24h)',
+      totalChat: 'Total chats',
+      success: 'Success',
+      errors: 'Errors / timeout',
+      docs: 'Documents',
+      keys: 'Active keys',
+      concurrent: 'Grok concurrency',
+      recent: 'Recent chats',
+      empty: 'No data yet',
+    },
+    chats: {
+      title: 'Chat history',
+      total: 'Total',
+      decrypt: 'Full in/out is decrypted on open',
+      search: 'Search request / key / model…',
+      status: 'Status',
+      allStatus: 'All statuses',
+      model: 'Model',
+      allModels: 'All models',
+      apiKey: 'API key',
+      allKeys: 'All keys',
+      from: 'From',
+      to: 'To',
+      mode: 'Mode',
+      allModes: 'All modes',
+      hasDocs: 'Has attachments',
+      filter: 'Apply',
+      reset: 'Reset',
+      request: 'Request',
+      prompt: 'Prompt preview',
+      response: 'Response preview',
+      time: 'Time',
+      attachments: 'Attachments',
+      page: 'Page',
+      prev: 'Previous',
+      next: 'Next',
+      perPage: 'Per page',
+      detail: 'Chat detail',
+      noAttach: 'No attachments',
+      openFile: 'Open / preview',
+      close: 'Close',
+      copyPrompt: 'Copy prompt',
+      copyContent: 'Copy content',
+      duration: 'Duration',
+      stream: 'Stream',
+      reasoning: 'Reasoning / thought',
+      content: 'Content (output)',
+      raw: 'Raw stored response',
+      none: '(none)',
+    },
+    keys: {
+      title: 'API Keys',
+      new: 'New key',
+      name: 'Name',
+      role: 'Role',
+      mode: 'Mode',
+      rate: 'Rate / min',
+      status: 'Status',
+      created: 'Created',
+      edit: 'Edit',
+      revoke: 'Revoke',
+      confirmRevoke: 'Revoke this key?',
+      empty: 'No keys',
+      usage24: '24h use',
+    },
+    docs: {
+      title: 'Documents',
+      total: 'Total',
+      file: 'File',
+      mime: 'MIME',
+      size: 'Size',
+      time: 'Time',
+      delete: 'Delete',
+      confirmDel: 'Delete this document?',
+      detail: 'Document detail',
+      preview: 'Decrypted preview',
+      copy: 'Copy content',
+      empty: 'No documents',
+    },
+    audit: {
+      title: 'Audit logs',
+      action: 'Action',
+      resource: 'Resource',
+      key: 'Key',
+      meta: 'Meta',
+      empty: 'No logs',
+    },
+    settings: {
+      title: 'Safety settings',
+      hint: 'Global safe mode forces sandbox cwd, disables always-approve, and restricts tools — even for agent keys.',
+      globalSafe: 'Global safe mode (all keys)',
+      tools: 'Safe tools mode',
+      maxTurns: 'Safe max turns',
+      timeout: 'Safe timeout (ms)',
+      defaultModel: 'Default model',
+      modelSource: 'From Grok CLI install',
+      refreshModels: 'Refresh models',
+      panel: 'Enable Admin Panel API',
+      save: 'Save settings',
+      saved: 'Settings saved',
+    },
+    usage: {
+      title: 'Usage & anti-abuse',
+      window: 'Window',
+      requests: 'Requests',
+      success: 'Success',
+      errors: 'Errors',
+      errorRate: 'Error rate',
+      byModel: 'By model',
+      byKey: 'Per API key',
+      rateLimit: 'Limit / min',
+      util: 'Est. utilization',
+      limits: 'Gateway limits',
+      global: 'Global max / window',
+      ipMax: 'Unauth IP max',
+      burst: 'Chat burst (10s)',
+      block: 'Auth fail block threshold',
+      concurrent: 'Grok max concurrent',
+      refresh: 'Refresh',
+    },
+    system: {
+      title: 'System',
+      checkUpdate: 'Check update',
+      oneClick: 'One-click update & restart',
+      selfUpdate: 'Self-update',
+      selfHint: 'Uses npm channel (or git in dev). Gateway restarts after update.',
+      current: 'Current',
+      npm: 'npm latest',
+      github: 'GitHub latest',
+      install: 'Install source',
+    },
+    common: {
+      empty: 'No data',
+      active: 'active',
+      revoked: 'revoked',
+      save: 'Save',
+      cancel: 'Close',
+      loading: 'Loading…',
+      powered: 'Powered by',
+    },
+  },
+  'zh-Hant': {
+    brand: 'Grok Gateway',
+    brandSub: 'Admin Panel',
+    loginTitle: 'Admin 登入',
+    loginHint:
+      '貼上 <strong>admin API key</strong>（setup / key create 時只顯示一次）。資料只存 sessionStorage。',
+    loginLabel: 'Admin API Key',
+    loginBtn: '進入控制台',
+    needKey: '請輸入 API key',
+    logout: '登出',
+    nav: {
+      dashboard: '儀表板',
+      chats: 'Chat 記錄',
+      keys: 'API Keys',
+      documents: '文件',
+      audit: 'Audit Logs',
+      settings: '安全設定',
+      usage: '用量與防護',
+      system: '系統狀態',
+    },
+    dash: {
+      title: '儀表板',
+      last24: '最近 24h 請求',
+      totalChat: '總 Chat',
+      success: '成功',
+      errors: '錯誤/逾時',
+      docs: '文件',
+      keys: '活躍 Keys',
+      concurrent: 'Grok 併發',
+      recent: '最近 Chat',
+      empty: '暫無資料',
+    },
+    chats: {
+      title: 'Chat 記錄',
+      total: '共',
+      decrypt: '開啟後可解密完整 in/out',
+      search: '搜尋 request / key / model…',
+      status: '狀態',
+      allStatus: '全部狀態',
+      model: 'Model',
+      allModels: '全部 model',
+      apiKey: 'API Key',
+      allKeys: '全部 key',
+      from: '由',
+      to: '至',
+      mode: 'Mode',
+      allModes: '全部 mode',
+      hasDocs: '有附件',
+      filter: '套用篩選',
+      reset: '重設',
+      request: 'Request',
+      prompt: 'Prompt 預覽',
+      response: 'Response 預覽',
+      time: '時間',
+      attachments: '附件',
+      page: '頁',
+      prev: '上一頁',
+      next: '下一頁',
+      perPage: '每頁',
+      detail: 'Chat 詳情',
+      noAttach: '無附件',
+      openFile: '開啟 / 預覽',
+      close: '關閉',
+      copyPrompt: '複製 Prompt',
+      copyContent: '複製 Content',
+      duration: '耗時',
+      stream: 'Stream',
+      reasoning: 'Reasoning / Thought',
+      content: 'Content（輸出）',
+      raw: 'Raw Response 儲存值',
+      none: '（無）',
+    },
+    keys: {
+      title: 'API Keys',
+      new: '新增 Key',
+      name: '名稱',
+      role: 'Role',
+      mode: 'Mode',
+      rate: 'Rate / 分',
+      status: '狀態',
+      created: '建立',
+      edit: '編輯',
+      revoke: '撤銷',
+      confirmRevoke: '確定撤銷此 key？',
+      empty: '暫無',
+      usage24: '24h 用量',
+    },
+    docs: {
+      title: '文件',
+      total: '共',
+      file: '檔名',
+      mime: 'MIME',
+      size: '大小',
+      time: '時間',
+      delete: '刪除',
+      confirmDel: '刪除此文件？',
+      detail: '文件詳情',
+      preview: '解密內容預覽',
+      copy: '複製內容',
+      empty: '暫無',
+    },
+    audit: {
+      title: 'Audit Logs',
+      action: 'Action',
+      resource: 'Resource',
+      key: 'Key',
+      meta: 'Meta',
+      empty: '暫無',
+    },
+    settings: {
+      title: '安全設定',
+      hint: '全域 safe 會強制 sandbox、停 always-approve、限制 tools；即使 key 設 agent 也會降級。',
+      globalSafe: '全域 Safe Mode（強制所有 key）',
+      tools: 'Safe tools 模式',
+      maxTurns: 'Safe max turns',
+      timeout: 'Safe timeout (ms)',
+      defaultModel: '預設 model',
+      modelSource: '來源：本機 Grok CLI',
+      refreshModels: '重新整理 models',
+      panel: '啟用 Admin Panel API',
+      save: '儲存設定',
+      saved: '設定已儲存',
+    },
+    usage: {
+      title: '用量與防濫用',
+      window: '統計區間',
+      requests: '請求數',
+      success: '成功',
+      errors: '錯誤',
+      errorRate: '錯誤率',
+      byModel: '按 model',
+      byKey: '按 API key',
+      rateLimit: '上限 / 分',
+      util: '估計使用率',
+      limits: 'Gateway 限流設定',
+      global: '全域上限 / 視窗',
+      ipMax: '未認證 IP 上限',
+      burst: 'Chat 短窗 burst（10s）',
+      block: '認證失敗封鎖門檻',
+      concurrent: 'Grok 最大併發',
+      refresh: '重新整理',
+    },
+    system: {
+      title: '系統狀態',
+      checkUpdate: '檢查更新',
+      oneClick: '一鍵更新並重啟',
+      selfUpdate: '自我更新',
+      selfHint: '按安裝方式使用 npm（開發可用 git）。更新後會重啟 gateway。',
+      current: '目前版本',
+      npm: 'npm latest',
+      github: 'GitHub latest',
+      install: '安裝方式',
+    },
+    common: {
+      empty: '暫無資料',
+      active: 'active',
+      revoked: 'revoked',
+      save: '儲存',
+      cancel: '關閉',
+      loading: '載入中…',
+      powered: 'Powered by',
+    },
+  },
+};
+
+function detectLocale() {
+  const saved = localStorage.getItem(LANG_KEY);
+  if (saved === 'en' || saved === 'zh-Hant') return saved;
+  const nav = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+  if (nav.startsWith('zh')) return 'zh-Hant';
+  return 'en';
+}
+
+let locale = detectLocale();
+
+export function getLocale() {
+  return locale;
+}
+
+export function setLocale(next) {
+  if (next !== 'en' && next !== 'zh-Hant') return;
+  locale = next;
+  localStorage.setItem(LANG_KEY, next);
+}
+
+export function t(path) {
+  const parts = path.split('.');
+  let cur = dict[locale] || dict.en;
+  for (const p of parts) {
+    if (cur && typeof cur === 'object' && p in cur) cur = cur[p];
+    else {
+      cur = dict.en;
+      for (const q of parts) {
+        if (cur && typeof cur === 'object' && q in cur) cur = cur[q];
+        else return path;
+      }
+      break;
+    }
+  }
+  return typeof cur === 'string' ? cur : path;
+}
+
+export function langSwitchHtml() {
+  return `
+  <div class="lang-switch" role="group" aria-label="Language">
+    <button type="button" data-lang="en" class="${locale === 'en' ? 'is-active' : ''}">EN</button>
+    <button type="button" data-lang="zh-Hant" class="${locale === 'zh-Hant' ? 'is-active' : ''}">中文</button>
+  </div>`;
+}

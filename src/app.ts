@@ -8,7 +8,10 @@ import { corsOptions } from './config/cors';
 import routes from './routes';
 import adminRoutes from './routes/admin.routes';
 import { requestIdMiddleware } from './middlewares/request-id.middleware';
-import { globalRateLimiter } from './middlewares/rate-limit.middleware';
+import {
+  globalRateLimiter,
+  ipBlockMiddleware,
+} from './middlewares/rate-limit.middleware';
 import { errorMiddleware, notFoundHandler } from './middlewares/error.middleware';
 import { logger } from './utils/logger';
 import './interfaces/express.interface';
@@ -29,6 +32,7 @@ export function createApp() {
   );
   app.use(cors(corsOptions));
   app.use(requestIdMiddleware);
+  app.use(ipBlockMiddleware);
   app.use(
     pinoHttp({
       logger,

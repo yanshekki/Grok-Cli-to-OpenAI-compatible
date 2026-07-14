@@ -38,6 +38,14 @@ const envSchema = z.object({
   CORS_ORIGINS: z.string().default('http://localhost:3847,http://127.0.0.1:3847'),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
+  /** Stricter cap for unauthenticated / IP-only traffic */
+  RATE_LIMIT_IP_MAX: z.coerce.number().int().positive().default(60),
+  /** Short-window burst cap per chat API key (10s window) */
+  CHAT_BURST_MAX: z.coerce.number().int().positive().default(20),
+  /** Failed auth attempts before temporary IP block */
+  BLOCK_FAILED_AUTH_THRESHOLD: z.coerce.number().int().positive().default(20),
+  BLOCK_FAILED_AUTH_WINDOW_MS: z.coerce.number().int().positive().default(300_000),
+  BLOCK_DURATION_MS: z.coerce.number().int().positive().default(600_000),
   BODY_LIMIT: z.string().default('1mb'),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
   DOCUMENT_DB_MAX_BYTES: z.coerce.number().int().positive().default(1024 * 1024),

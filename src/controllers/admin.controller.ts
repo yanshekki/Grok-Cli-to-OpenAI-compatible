@@ -20,6 +20,9 @@ import { grokCliService } from '../services/grok-cli.service';
 import { settingsService } from '../services/settings.service';
 import { statsService } from '../services/stats.service';
 import { updateService } from '../services/update.service';
+import { usageService } from '../services/usage.service';
+import { modelsService } from '../services/models.service';
+import { isImageMime } from '../config/constants';
 import type { ApiKeyMode, ApiKeyRole } from '../interfaces/auth.interface';
 
 type CreateKeyBody = z.infer<typeof adminCreateKeySchema>;
@@ -44,6 +47,33 @@ export class AdminController {
   stats = asyncHandler(async (_req: Request, res: Response) => {
     const data = await statsService.getDashboard();
     res.json({ object: 'admin.stats', data });
+  });
+
+  usage = asyncHandler(async (req: Request, res: Response) => {
+    const fromRaw = typeof req.query.from === 'string' ? req.query.from : undefined;
+    const toRaw = typeof req.query.to === 'string' ? req.query.to : undefined;
+    const from = fromRaw ? new Date(fromRaw) : undefined;
+    const to = toRaw ? new Date(toRaw) : undefined;
+    const data = await usageService.getSummary({
+      from: from && !Number.isNaN(from.getTime()) ? from : undefined,
+      to: to && !Number.isNaN(to.getTime()) ? to : undefined,
+    });
+    res.json({ object: 'admin.usage', data });
+  });
+
+  models = asyncHandler(async (req: Request, res: Response) => {
+    const refreshRaw = req.query.refresh;
+    const refresh =
+      refreshRaw === '1' || refreshRaw === 'true' || refreshRaw === 'yes';
+    const data = await modelsService.getModelCatalog(refresh);
+    const settings = await settingsService.getAll();
+    res.json({
+      object: 'admin.models',
+      data: {
+        ...data,
+        defaultModel: settings.defaultModel || data.defaultModel,
+      },
+    });
   });
 
   listChats = asyncHandler(async (req: Request, res: Response) => {
@@ -152,12 +182,19 @@ export class AdminController {
 
     // decrypt using documentService path (owned by any key — admin bypass)
     let contentPreview: string | null = null;
+    let imageDataUrl: string | null = null;
     try {
       const buf = await documentService.readDecryptedContent(doc.apiKeyId, doc.id);
-      const text = buf.toString('utf8');
-      contentPreview = text.includes('\u0000')
-        ? `[binary ${doc.sizeBytes} bytes]`
-        : text.slice(0, 50_000);
+      if (isImageMime(doc.mimeType)) {
+        const b64 = buf.toString('base64');
+        imageDataUrl = `data:${doc.mimeType};base64,${b64}`;
+        contentPreview = `[image ${doc.sizeBytes} bytes]`;
+      } else {
+        const text = buf.toString('utf8');
+        contentPreview = text.includes('\u0000')
+          ? `[binary ${doc.sizeBytes} bytes]`
+          : text.slice(0, 50_000);
+      }
     } catch {
       contentPreview = '[decrypt_failed]';
     }
@@ -181,6 +218,8 @@ export class AdminController {
         createdAt: doc.createdAt,
         apiKey: doc.apiKey,
         content: contentPreview,
+        imageDataUrl,
+        isImage: isImageMime(doc.mimeType),
       },
     });
   });

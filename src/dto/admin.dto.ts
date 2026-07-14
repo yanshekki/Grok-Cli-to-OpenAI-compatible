@@ -9,6 +9,15 @@ export const adminListQuerySchema = z.object({
   model: z.string().optional(),
   q: z.string().max(200).optional(),
   action: z.string().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  hasDocuments: z
+    .union([z.boolean(), z.enum(['true', 'false', '1', '0', ''])])
+    .optional(),
+  policyMode: z.string().optional(),
+  refresh: z
+    .union([z.boolean(), z.enum(['true', 'false', '1', '0'])])
+    .optional(),
 });
 
 export type AdminListQueryDto = z.infer<typeof adminListQuerySchema>;

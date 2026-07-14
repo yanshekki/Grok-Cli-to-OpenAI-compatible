@@ -7,6 +7,7 @@ import {
   ALLOWED_UPLOAD_MIME_TYPES,
   AUDIT_ACTIONS,
   STORAGE_TYPES,
+  isImageMime,
 } from '../config/constants';
 import { env } from '../config/env';
 import type { DocumentPublicEntity } from '../entities/document.entity';
@@ -212,16 +213,31 @@ export class DocumentService {
 
     for (const id of documentIds) {
       const doc = await this.getOwned(apiKeyId, id);
+      const remaining = maxChars - used;
+      if (remaining <= 0) break;
+
+      const header = `--- Document: ${doc.originalName} (${doc.id}) ---\n`;
+
+      // Images: inject metadata only (no raw binary into prompt)
+      if (isImageMime(doc.mimeType)) {
+        const meta =
+          `[image attachment: name=${doc.originalName}, mime=${doc.mimeType}, ` +
+          `size=${doc.sizeBytes} bytes, document_id=${doc.id}, sha256=${doc.checksumSha256}]\n`;
+        const chunk =
+          header.length + meta.length > remaining
+            ? header + meta.slice(0, Math.max(0, remaining - header.length))
+            : header + meta;
+        parts.push(chunk);
+        used += chunk.length;
+        continue;
+      }
+
       const buf = await this.readDecryptedContent(apiKeyId, id);
       let text = buf.toString('utf8');
       // Skip clearly binary garbage for context
       if (text.includes('\u0000')) {
         text = `[binary file: ${doc.originalName}, ${doc.sizeBytes} bytes, sha256=${doc.checksumSha256}]`;
       }
-
-      const header = `--- Document: ${doc.originalName} (${doc.id}) ---\n`;
-      const remaining = maxChars - used;
-      if (remaining <= 0) break;
 
       const body =
         header.length + text.length > remaining

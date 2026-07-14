@@ -33,6 +33,8 @@ router.use(requireAdmin);
 
 router.get('/me', adminController.me);
 router.get('/stats', adminController.stats);
+router.get('/usage', adminController.usage);
+router.get('/models', adminController.models);
 router.get('/system', adminController.system);
 router.get('/system/update-check', adminController.checkUpdate);
 router.post('/system/update', adminController.runUpdate);
