@@ -20,6 +20,7 @@ async function cmdStatus(opts) {
     (0, print_1.info)(`Port:    ${port}`);
     (0, print_1.info)(`API:     ${urls.api}`);
     (0, print_1.info)(`Admin:   ${urls.admin}`);
+    let code = 0;
     try {
         const res = await fetch(urls.health, { signal: AbortSignal.timeout(3000) });
         if (res.ok) {
@@ -28,15 +29,17 @@ async function cmdStatus(opts) {
         }
         else {
             (0, print_1.fail)(`Health:  HTTP ${res.status}`);
-            process.exitCode = 1;
+            code = 1;
         }
     }
     catch {
         (0, print_1.fail)('Health:  unreachable');
-        process.exitCode = running ? 1 : 0;
+        code = running ? 1 : 0;
     }
     if (!running) {
-        process.exitCode = process.exitCode || 1;
+        code = code || 1;
     }
+    // Hard-exit: undici keep-alive after fetch can leave the process hanging
+    process.exit(code);
 }
 //# sourceMappingURL=status.js.map

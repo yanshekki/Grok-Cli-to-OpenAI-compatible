@@ -57,6 +57,18 @@ export function startDetached(paths: RuntimePaths, env: NodeJS.ProcessEnv): numb
     cwd: paths.packageRoot,
   });
 
+  // Close parent copies of log FDs so the CLI event loop can exit
+  try {
+    fs.closeSync(outFd);
+  } catch {
+    /* ignore */
+  }
+  try {
+    fs.closeSync(errFd);
+  } catch {
+    /* ignore */
+  }
+
   child.unref();
   if (!child.pid) {
     throw new Error('Failed to spawn server process');

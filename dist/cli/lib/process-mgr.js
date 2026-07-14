@@ -63,6 +63,19 @@ function startDetached(paths, env) {
         },
         cwd: paths.packageRoot,
     });
+    // Close parent copies of log FDs so the CLI event loop can exit
+    try {
+        node_fs_1.default.closeSync(outFd);
+    }
+    catch {
+        /* ignore */
+    }
+    try {
+        node_fs_1.default.closeSync(errFd);
+    }
+    catch {
+        /* ignore */
+    }
     child.unref();
     if (!child.pid) {
         throw new Error('Failed to spawn server process');
