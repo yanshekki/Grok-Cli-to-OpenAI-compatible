@@ -19,6 +19,21 @@ async function bootstrap(): Promise<void> {
     );
   });
 
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      logger.fatal(
+        {
+          port: env.PORT,
+          hint: 'Port busy — another gctoac/pm2 instance may be running. Try: gctoac stop && pm2 delete grok-openai-gateway',
+        },
+        `listen EADDRINUSE on port ${env.PORT}`,
+      );
+    } else {
+      logger.fatal({ err }, 'HTTP server error');
+    }
+    process.exit(1);
+  });
+
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutting down');
     server.close(async () => {

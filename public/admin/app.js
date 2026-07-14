@@ -1362,6 +1362,8 @@ async function renderPm2() {
   const st = await api('/pm2/status');
   const d = st.data || {};
   const app = d.app;
+  const conflict = d.portConflict?.conflict;
+  const conflictMsg = d.portConflict?.message || d.message || '';
   let logsText = '';
   try {
     const lg = await api('/pm2/logs?lines=80');
@@ -1369,34 +1371,48 @@ async function renderPm2() {
   } catch (e) {
     logsText = e.message || '';
   }
+  if (d.lastError) {
+    logsText = `===== last errors =====\n${d.lastError}\n\n${logsText}`;
+  }
 
-  const statusLabel = app
-    ? escapeHtml(app.status || '—')
-    : escapeHtml(d.message || t('pm2.empty'));
+  const statusRaw = app?.status || '—';
+  const statusBadge =
+    statusRaw === 'online'
+      ? `<span class="badge success">${escapeHtml(statusRaw)}</span>`
+      : statusRaw === 'errored'
+        ? `<span class="badge error">${escapeHtml(statusRaw)}</span>`
+        : escapeHtml(statusRaw);
+
+  const canStart = d.available;
+  // Allow start even if not in list; stop/restart need app or force restart after errored
+  const canControl = d.available && app;
 
   document.getElementById('app').innerHTML = shell(`
     <div class="topbar">
       <h2>${escapeHtml(t('pm2.title'))}</h2>
       <div class="toolbar">
         <button class="btn secondary sm" id="pm2-refresh">${escapeHtml(t('pm2.refresh'))}</button>
-        <button class="btn sm" id="pm2-start" ${!d.available ? 'disabled' : ''}>${escapeHtml(t('pm2.start'))}</button>
-        <button class="btn secondary sm" id="pm2-stop" ${!app ? 'disabled' : ''}>${escapeHtml(t('pm2.stop'))}</button>
-        <button class="btn sm" id="pm2-restart" ${!app ? 'disabled' : ''}>${escapeHtml(t('pm2.restart'))}</button>
-        <button class="btn secondary sm" id="pm2-reload" ${!app ? 'disabled' : ''}>${escapeHtml(t('pm2.reload'))}</button>
+        <button class="btn sm" id="pm2-start" ${!canStart ? 'disabled' : ''}>${escapeHtml(t('pm2.start'))}</button>
+        <button class="btn secondary sm" id="pm2-stop" ${!canControl ? 'disabled' : ''}>${escapeHtml(t('pm2.stop'))}</button>
+        <button class="btn sm" id="pm2-restart" ${!canStart ? 'disabled' : ''}>${escapeHtml(t('pm2.restart'))}</button>
+        <button class="btn secondary sm" id="pm2-reload" ${!canControl || app?.status !== 'online' ? 'disabled' : ''}>${escapeHtml(t('pm2.reload'))}</button>
       </div>
     </div>
     <p class="muted">${escapeHtml(t('pm2.hint'))}</p>
-    ${!d.available ? `<div class="error-box">${escapeHtml(d.message || t('pm2.unavailable'))}</div>` : ''}
+    <p class="muted">${escapeHtml(t('pm2.exclusive'))}</p>
+    ${conflict || statusRaw === 'errored' || !d.available ? `<div class="error-box">${escapeHtml(conflictMsg || d.message || t('pm2.unavailable'))}</div>` : ''}
     <div class="grid">
       <div class="card"><div class="label">${escapeHtml(t('pm2.app'))}</div><div class="value" style="font-size:1rem">${escapeHtml(d.appName || 'grok-openai-gateway')}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('pm2.status'))}</div><div class="value" style="font-size:1rem">${statusLabel}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('pm2.pid'))}</div><div class="value" style="font-size:1rem">${app?.pid ?? '—'}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('pm2.status'))}</div><div class="value" style="font-size:1rem">${statusBadge}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('pm2.pid'))}</div><div class="value" style="font-size:1rem">${app?.pid && app.pid !== 0 ? app.pid : '—'}</div></div>
       <div class="card"><div class="label">${escapeHtml(t('pm2.restarts'))}</div><div class="value" style="font-size:1rem">${app?.restarts ?? '—'}</div></div>
       <div class="card"><div class="label">${escapeHtml(t('pm2.cpu'))}</div><div class="value" style="font-size:1rem">${app?.cpu != null ? app.cpu + '%' : '—'}</div></div>
       <div class="card"><div class="label">${escapeHtml(t('pm2.memory'))}</div><div class="value" style="font-size:1rem">${app?.memory != null ? Math.round(app.memory / 1024 / 1024) + ' MB' : '—'}</div></div>
+      <div class="card"><div class="label">Port</div><div class="value" style="font-size:1rem">${d.port ?? '—'}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('pm2.portBusy'))}</div><div class="value" style="font-size:1rem">${conflict ? 'yes' : 'no'}</div></div>
     </div>
     <div class="panel">
-      <div class="panel-h"><strong>${escapeHtml(t('pm2.logs'))}</strong></div>
+      <div class="panel-h"><strong>${escapeHtml(t('pm2.logs'))}</strong><span class="muted">${escapeHtml(t('pm2.logsHint'))}</span></div>
       <div class="modal-b"><pre class="pre" style="max-height:420px">${escapeHtml(logsText || t('common.empty'))}</pre></div>
     </div>
   `);
@@ -1405,6 +1421,7 @@ async function renderPm2() {
   document.getElementById('pm2-start').onclick = async () => {
     try {
       await api('/pm2/start', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 800));
       renderPm2().catch(onErr);
     } catch (e) {
       onErr(e);
@@ -1423,6 +1440,7 @@ async function renderPm2() {
     if (!confirm(t('pm2.confirmRestart'))) return;
     try {
       await api('/pm2/restart', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 800));
       renderPm2().catch(onErr);
     } catch (e) {
       onErr(e);
