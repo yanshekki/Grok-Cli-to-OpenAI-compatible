@@ -1,18 +1,20 @@
 import { createHash, scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 import { prisma } from '../config/database';
-import { AUDIT_ACTIONS, ROLES } from '../config/constants';
+import { AUDIT_ACTIONS, KEY_MODES, ROLES } from '../config/constants';
 import type {
   ApiKeyCreatedEntity,
   ApiKeyPublicEntity,
 } from '../entities/api-key.entity';
-import type { AuthenticatedApiKey, ApiKeyRole } from '../interfaces/auth.interface';
+import type {
+  AuthenticatedApiKey,
+  ApiKeyMode,
+  ApiKeyRole,
+} from '../interfaces/auth.interface';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { apiKeyPrefix, createApiKeySecret, createId } from '../utils/id';
 import { auditService } from './audit.service';
 
 function hashApiKey(rawKey: string): string {
-  // scrypt with fixed salt derived from key prefix material for lookup-friendly uniqueness
-  // We store hash of full key; lookup uses SHA-256 fingerprint as unique keyHash
   return createHash('sha256').update(rawKey, 'utf8').digest('hex');
 }
 
@@ -25,10 +27,37 @@ function verifyApiKey(rawKey: string, keyHash: string): boolean {
   }
 }
 
-/** Optional slow hash for defense-in-depth when storing (not used for lookup) */
 export function scryptHash(rawKey: string, salt = randomBytes(16)): string {
   const hash = scryptSync(rawKey, salt, 32);
   return `${salt.toString('hex')}:${hash.toString('hex')}`;
+}
+
+function mapPublic(r: {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  role: string;
+  mode: string;
+  isActive: boolean;
+  rateLimit: number;
+  maxTurns: number | null;
+  timeoutMs: number | null;
+  createdAt: Date;
+  lastUsedAt: Date | null;
+}): ApiKeyPublicEntity {
+  return {
+    id: r.id,
+    name: r.name,
+    keyPrefix: r.keyPrefix,
+    role: r.role as ApiKeyRole,
+    mode: (r.mode === KEY_MODES.AGENT ? KEY_MODES.AGENT : KEY_MODES.SAFE) as ApiKeyMode,
+    isActive: r.isActive,
+    rateLimit: r.rateLimit,
+    maxTurns: r.maxTurns,
+    timeoutMs: r.timeoutMs,
+    createdAt: r.createdAt,
+    lastUsedAt: r.lastUsedAt,
+  };
 }
 
 export class ApiKeyService {
@@ -44,7 +73,6 @@ export class ApiKeyService {
       throw ExceptionFactory.unauthorized();
     }
 
-    // fire-and-forget last used
     void prisma.apiKey
       .update({
         where: { id: record.id },
@@ -57,15 +85,21 @@ export class ApiKeyService {
       name: record.name,
       keyPrefix: record.keyPrefix,
       role: record.role as ApiKeyRole,
+      mode: (record.mode === KEY_MODES.AGENT ? KEY_MODES.AGENT : KEY_MODES.SAFE) as ApiKeyMode,
       rateLimit: record.rateLimit,
       isActive: record.isActive,
+      maxTurns: record.maxTurns,
+      timeoutMs: record.timeoutMs,
     };
   }
 
   async create(input: {
     name: string;
     role?: ApiKeyRole;
+    mode?: ApiKeyMode;
     rateLimit?: number;
+    maxTurns?: number | null;
+    timeoutMs?: number | null;
     actorApiKeyId?: string;
     ip?: string;
     rawKey?: string;
@@ -80,6 +114,13 @@ export class ApiKeyService {
     }
 
     const id = createId();
+    const mode =
+      input.role === ROLES.ADMIN
+        ? KEY_MODES.AGENT
+        : input.mode === KEY_MODES.AGENT
+          ? KEY_MODES.AGENT
+          : KEY_MODES.SAFE;
+
     const created = await prisma.apiKey.create({
       data: {
         id,
@@ -87,7 +128,10 @@ export class ApiKeyService {
         keyPrefix: prefix,
         keyHash,
         role: input.role ?? ROLES.CLIENT,
+        mode,
         rateLimit: input.rateLimit ?? 60,
+        maxTurns: input.maxTurns ?? null,
+        timeoutMs: input.timeoutMs ?? null,
       },
     });
 
@@ -96,37 +140,67 @@ export class ApiKeyService {
       action: AUDIT_ACTIONS.API_KEY_CREATE,
       resource: 'api_key',
       resourceId: created.id,
-      meta: { name: created.name, role: created.role, keyPrefix: prefix },
+      meta: {
+        name: created.name,
+        role: created.role,
+        mode: created.mode,
+        keyPrefix: prefix,
+      },
       ip: input.ip,
     });
 
-    return {
-      id: created.id,
-      name: created.name,
-      keyPrefix: created.keyPrefix,
-      role: created.role as ApiKeyRole,
-      isActive: created.isActive,
-      rateLimit: created.rateLimit,
-      createdAt: created.createdAt,
-      lastUsedAt: created.lastUsedAt,
-      key,
-    };
+    return { ...mapPublic(created), key };
   }
 
   async list(): Promise<ApiKeyPublicEntity[]> {
     const rows = await prisma.apiKey.findMany({
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      keyPrefix: r.keyPrefix,
-      role: r.role as ApiKeyRole,
-      isActive: r.isActive,
-      rateLimit: r.rateLimit,
-      createdAt: r.createdAt,
-      lastUsedAt: r.lastUsedAt,
-    }));
+    return rows.map(mapPublic);
+  }
+
+  async update(
+    id: string,
+    input: {
+      name?: string;
+      role?: ApiKeyRole;
+      mode?: ApiKeyMode;
+      rateLimit?: number;
+      isActive?: boolean;
+      maxTurns?: number | null;
+      timeoutMs?: number | null;
+    },
+    actorApiKeyId: string,
+    ip?: string,
+  ): Promise<ApiKeyPublicEntity> {
+    const existing = await prisma.apiKey.findUnique({ where: { id } });
+    if (!existing) {
+      throw ExceptionFactory.notFound('API key');
+    }
+
+    const updated = await prisma.apiKey.update({
+      where: { id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.role !== undefined ? { role: input.role } : {}),
+        ...(input.mode !== undefined ? { mode: input.mode } : {}),
+        ...(input.rateLimit !== undefined ? { rateLimit: input.rateLimit } : {}),
+        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+        ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
+        ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+      },
+    });
+
+    await auditService.log({
+      apiKeyId: actorApiKeyId,
+      action: AUDIT_ACTIONS.API_KEY_UPDATE,
+      resource: 'api_key',
+      resourceId: id,
+      meta: input as Record<string, unknown>,
+      ip,
+    });
+
+    return mapPublic(updated);
   }
 
   async revoke(id: string, actorApiKeyId: string, ip?: string): Promise<void> {
@@ -152,6 +226,4 @@ export class ApiKeyService {
 }
 
 export const apiKeyService = new ApiKeyService();
-
-// re-export verify for tests
 export { hashApiKey, verifyApiKey };

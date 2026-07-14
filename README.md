@@ -10,6 +10,8 @@ Professional Node.js gateway that exposes **OpenAI-compatible** HTTP APIs backed
 - PM2
 - AES-256-GCM encryption for chat prompts, responses, and documents
 - API key auth, rate limits, concurrency limits, helmet, CORS, Zod validation
+- **Safe / Agent policy**（對外安全模式）
+- **Admin Panel** at `/admin/`（完整 in/out 解密檢視）
 
 ## Architecture
 
@@ -22,11 +24,14 @@ src/
   entities/      domain shapes
   exceptions/    HTTP errors (OpenAI-ish JSON)
   middlewares/   auth, rate-limit, validate, upload, error
-  controllers/   thin HTTP layer
+  controllers/   thin HTTP layer (+ admin.controller)
   routes/v1/     chat, models, documents, api-keys
-  services/      business logic + Grok CLI integration
+  routes/admin   /admin/api/*
+  services/      policy, settings, chat-admin, stats, grok-cli…
   utils/         logger, SSE, mappers, path safety
+public/admin/    Admin SPA UI
 data/            SQLite file (gateway.db, gitignored)
+storage/sandboxes/  per-key safe mode cwd
 ```
 
 ## Prerequisites
@@ -74,6 +79,31 @@ npm run build
 pm2 start ecosystem.config.cjs
 pm2 logs grok-openai-gateway
 ```
+
+## Admin Panel
+
+```text
+http://127.0.0.1:3000/admin/
+```
+
+1. `npm run seed` 取得 **admin API key**（只顯示一次）
+2. 開 Admin Panel，貼上 key 登入
+3. 可管理：Dashboard、**Chat 完整 prompt in/out**、API Keys（safe/agent）、文件、Audit、安全設定、系統狀態
+
+Admin JSON API 前綴：`/admin/api/*`（需要 `role=admin`）。
+
+> 解密後的 prompt/response 極敏感，唔好把 admin key 外洩。
+
+## 對外安全模式（Safe Mode）
+
+| Mode | 用途 | 行為 |
+|------|------|------|
+| `safe`（預設 client key） | 對外 | 強制 sandbox cwd、**唔** always-approve、限制 tools、較短 timeout / max-turns |
+| `agent` | 內網受信 | 全能力（可用 always-approve），cwd 仍受 allowlist |
+
+- 全域：`GROK_SAFE_MODE=true` 或 Admin → 安全設定 →「全域 Safe Mode」
+- Safe tools：`none`（禁危險 tools）或 `readonly`（只讀）
+- Client **無法** 靠 body 提權（safe 下忽略任意 cwd）
 
 ## Tests & CI
 

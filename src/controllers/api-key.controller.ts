@@ -5,7 +5,7 @@ import { ExceptionFactory } from '../exceptions/exception.factory';
 import { apiKeyService } from '../services/api-key.service';
 import { auditService } from '../services/audit.service';
 import { asyncHandler } from '../utils/async-handler';
-import type { ApiKeyRole } from '../interfaces/auth.interface';
+import type { ApiKeyMode, ApiKeyRole } from '../interfaces/auth.interface';
 
 export class ApiKeyController {
   create = asyncHandler(async (req: Request, res: Response) => {
@@ -16,6 +16,7 @@ export class ApiKeyController {
     const created = await apiKeyService.create({
       name: dto.name,
       role: dto.role as ApiKeyRole,
+      mode: dto.mode as ApiKeyMode,
       rateLimit: dto.rateLimit,
       actorApiKeyId: req.apiKey.id,
       ip: req.ip,

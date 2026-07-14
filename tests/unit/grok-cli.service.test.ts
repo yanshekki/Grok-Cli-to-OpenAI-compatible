@@ -11,6 +11,9 @@ describe('GrokCliService parsers', () => {
       cwd: '/tmp/ws',
       stream: true,
       sessionId: 'sess-1',
+      alwaysApprove: true,
+      maxTurns: 3,
+      toolsDenylist: 'web_search',
     });
     expect(args).toContain('-p');
     expect(args).toContain('hello');
@@ -21,6 +24,21 @@ describe('GrokCliService parsers', () => {
     expect(args).toContain('-s');
     expect(args).toContain('sess-1');
     expect(args).toContain('--always-approve');
+    expect(args).toContain('--max-turns');
+    expect(args).toContain('3');
+    expect(args).toContain('--disallowed-tools');
+    expect(args).toContain('web_search');
+  });
+
+  it('buildArgs omits always-approve when disabled by policy', () => {
+    const args = service.buildArgs({
+      prompt: 'x',
+      model: 'm',
+      cwd: '/tmp',
+      stream: false,
+      alwaysApprove: false,
+    });
+    expect(args).not.toContain('--always-approve');
   });
 
   it('parseJsonResult parses last JSON object', () => {

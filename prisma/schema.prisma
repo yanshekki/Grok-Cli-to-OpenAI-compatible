@@ -13,8 +13,12 @@ model ApiKey {
   keyPrefix  String
   keyHash    String    @unique
   role       String    @default("client")
+  /// safe | agent
+  mode       String    @default("safe")
   isActive   Boolean   @default(true)
   rateLimit  Int       @default(60)
+  maxTurns   Int?
+  timeoutMs  Int?
   createdAt  DateTime  @default(now())
   lastUsedAt DateTime?
 
@@ -24,6 +28,7 @@ model ApiKey {
 
   @@index([keyPrefix])
   @@index([isActive])
+  @@index([mode])
   @@map("api_keys")
 }
 
@@ -45,6 +50,8 @@ model ChatRequest {
   errorMessage       String?
   ip                 String?
   userAgent          String?
+  /// resolved policy mode used for this request
+  policyMode         String?
   createdAt          DateTime @default(now())
 
   apiKey    ApiKey                @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
@@ -104,4 +111,12 @@ model AuditLog {
   @@index([apiKeyId, createdAt])
   @@index([action, createdAt])
   @@map("audit_logs")
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
 }

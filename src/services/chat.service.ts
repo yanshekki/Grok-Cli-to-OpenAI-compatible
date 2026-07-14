@@ -6,13 +6,13 @@ import {
   MAX_DOCUMENT_CONTEXT_CHARS,
   MAX_TOTAL_PROMPT_CHARS,
 } from '../config/constants';
-import { env } from '../config/env';
 import type { CreateChatCompletionDto } from '../dto/chat.dto';
 import type { AuthenticatedApiKey } from '../interfaces/auth.interface';
 import type {
   GrokResponseMeta,
   OpenAiChatCompletion,
 } from '../interfaces/openai.interface';
+import type { GrokRunOptions } from '../interfaces/grok.interface';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { HttpException } from '../exceptions/http.exception';
 import { createChatCompletionId, createId } from '../utils/id';
@@ -24,13 +24,14 @@ import {
   mapTextDeltaChunk,
   messagesToPrompt,
 } from '../utils/openai-mapper';
-import { resolveSafeCwd } from '../utils/path-safe';
 import { initSse, writeSseData, writeSseDone } from '../utils/stream';
 import { logger } from '../utils/logger';
 import { auditService } from './audit.service';
 import { documentService } from './document.service';
 import { encryptionService } from './encryption.service';
 import { grokCliService } from './grok-cli.service';
+import { policyService, type ResolvedPolicy } from './policy.service';
+import { settingsService } from './settings.service';
 
 export interface ChatContext {
   apiKey: AuthenticatedApiKey;
@@ -47,10 +48,32 @@ interface GrokCollectedOutput {
   requestId?: string;
 }
 
-/** Convert Node Buffer to a value accepted by Prisma Bytes fields. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toBytes(buf: Buffer): any {
   return Buffer.from(buf);
+}
+
+function policyToRunOpts(
+  policy: ResolvedPolicy,
+  base: {
+    prompt: string;
+    model: string;
+    stream: boolean;
+    sessionId?: string;
+  },
+): GrokRunOptions {
+  return {
+    prompt: base.prompt,
+    model: base.model,
+    cwd: policy.cwd,
+    stream: base.stream,
+    sessionId: base.sessionId,
+    timeoutMs: policy.timeoutMs,
+    alwaysApprove: policy.alwaysApprove,
+    maxTurns: policy.maxTurns,
+    toolsAllowlist: policy.toolsAllowlist,
+    toolsDenylist: policy.toolsDenylist,
+  };
 }
 
 export class ChatService {
@@ -59,10 +82,11 @@ export class ChatService {
     ctx: ChatContext,
     res?: Response,
   ): Promise<OpenAiChatCompletion | void> {
-    const model = dto.model || env.GROK_DEFAULT_MODEL;
+    const settings = await settingsService.getAll();
+    const model = dto.model || settings.defaultModel;
     const stream = Boolean(dto.stream);
     const includeReasoning = dto.include_reasoning !== false;
-    const cwd = resolveSafeCwd(dto.cwd);
+    const policy = await policyService.resolve(ctx.apiKey, dto.cwd);
     const documentIds = dto.document_ids ?? [];
 
     let docContext = '';
@@ -115,6 +139,7 @@ export class ChatService {
         promptTag: toBytes(promptEnc.tag),
         ip: ctx.ip,
         userAgent: ctx.userAgent,
+        policyMode: policy.mode,
         documents: {
           create: documentIds.map((documentId) => ({ documentId })),
         },
@@ -131,7 +156,7 @@ export class ChatService {
           ctx,
           res,
           model,
-          cwd,
+          policy,
           prompt,
           completionId,
           chatRequestDbId,
@@ -141,13 +166,14 @@ export class ChatService {
         return;
       }
 
-      // Non-stream: use streaming-json internally so we can capture thought events
-      const collected = await this.collectFromGrokStream({
-        prompt,
-        model,
-        cwd,
-        sessionId: dto.session_id,
-      });
+      const collected = await this.collectFromGrokStream(
+        policyToRunOpts(policy, {
+          prompt,
+          model,
+          stream: true,
+          sessionId: dto.session_id,
+        }),
+      );
 
       const auditPayload = this.buildAuditPayload(collected, includeReasoning);
       const responseEnc = encryptionService.encrypt(auditPayload);
@@ -178,15 +204,10 @@ export class ChatService {
           documentCount: documentIds.length,
           includeReasoning,
           hasReasoning: collected.reasoning.length > 0,
+          policyMode: policy.mode,
         },
         ip: ctx.ip,
       });
-
-      const grokMeta: GrokResponseMeta = {
-        sessionId: collected.sessionId,
-        stopReason: collected.stopReason,
-        requestId: collected.requestId,
-      };
 
       return mapGrokToChatCompletion(
         model,
@@ -200,7 +221,11 @@ export class ChatService {
           completionId,
           reasoningContent: collected.reasoning || null,
           includeReasoning,
-          grok: grokMeta,
+          grok: {
+            sessionId: collected.sessionId,
+            stopReason: collected.stopReason,
+            requestId: collected.requestId,
+          },
         },
       );
     } catch (err) {
@@ -211,28 +236,16 @@ export class ChatService {
     }
   }
 
-  /**
-   * Collect full text + reasoning via Grok streaming-json (captures type:thought).
-   */
-  private async collectFromGrokStream(input: {
-    prompt: string;
-    model: string;
-    cwd: string;
-    sessionId?: string;
-  }): Promise<GrokCollectedOutput> {
+  private async collectFromGrokStream(
+    options: GrokRunOptions,
+  ): Promise<GrokCollectedOutput> {
     const textParts: string[] = [];
     const reasoningParts: string[] = [];
     let sessionId: string | undefined;
     let stopReason: string | undefined;
     let requestId: string | undefined;
 
-    for await (const event of grokCliService.stream({
-      prompt: input.prompt,
-      model: input.model,
-      cwd: input.cwd,
-      stream: true,
-      sessionId: input.sessionId,
-    })) {
+    for await (const event of grokCliService.stream({ ...options, stream: true })) {
       if (event.type === 'thought' && typeof event.data === 'string') {
         reasoningParts.push(event.data);
       } else if (event.type === 'text' && typeof event.data === 'string') {
@@ -271,7 +284,7 @@ export class ChatService {
     ctx: ChatContext;
     res: Response;
     model: string;
-    cwd: string;
+    policy: ResolvedPolicy;
     prompt: string;
     completionId: string;
     chatRequestDbId: string;
@@ -283,7 +296,7 @@ export class ChatService {
       ctx,
       res,
       model,
-      cwd,
+      policy,
       prompt,
       completionId,
       chatRequestDbId,
@@ -306,13 +319,14 @@ export class ChatService {
     writeSseData(res, mapRoleChunk(model, completionId, created));
 
     try {
-      for await (const event of grokCliService.stream({
-        prompt,
-        model,
-        cwd,
-        stream: true,
-        sessionId: dto.session_id,
-      })) {
+      for await (const event of grokCliService.stream(
+        policyToRunOpts(policy, {
+          prompt,
+          model,
+          stream: true,
+          sessionId: dto.session_id,
+        }),
+      )) {
         if (clientClosed) break;
 
         if (event.type === 'thought' && typeof event.data === 'string') {
@@ -383,6 +397,7 @@ export class ChatService {
           documentCount: (dto.document_ids ?? []).length,
           includeReasoning,
           hasReasoning: reasoningParts.length > 0,
+          policyMode: policy.mode,
         },
         ip: ctx.ip,
       });

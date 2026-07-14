@@ -1,3 +1,4 @@
+import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -5,6 +6,7 @@ import pinoHttp from 'pino-http';
 import { env } from './config/env';
 import { corsOptions } from './config/cors';
 import routes from './routes';
+import adminRoutes from './routes/admin.routes';
 import { requestIdMiddleware } from './middlewares/request-id.middleware';
 import { globalRateLimiter } from './middlewares/rate-limit.middleware';
 import { errorMiddleware, notFoundHandler } from './middlewares/error.middleware';
@@ -20,7 +22,11 @@ export function createApp() {
 
   app.disable('x-powered-by');
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: false, // admin SPA inline styles
+    }),
+  );
   app.use(cors(corsOptions));
   app.use(requestIdMiddleware);
   app.use(
@@ -31,13 +37,32 @@ export function createApp() {
         requestId: (req as express.Request).requestId,
       }),
       autoLogging: {
-        ignore: (req) => req.url === '/health' || req.url === '/ready',
+        ignore: (req) =>
+          req.url === '/health' ||
+          req.url === '/ready' ||
+          (req.url?.startsWith('/admin') && !req.url.startsWith('/admin/api')),
       },
     }),
   );
   app.use(express.json({ limit: env.BODY_LIMIT }));
   app.use(express.urlencoded({ extended: false, limit: env.BODY_LIMIT }));
   app.use(globalRateLimiter);
+
+  // Admin JSON API
+  app.use('/admin/api', adminRoutes);
+
+  // Admin SPA static files
+  const adminDir = path.join(process.cwd(), 'public', 'admin');
+  app.use('/admin', express.static(adminDir, { index: 'index.html' }));
+  app.get(['/admin', '/admin/*'], (req, res, next) => {
+    if (req.path.startsWith('/admin/api')) {
+      next();
+      return;
+    }
+    res.sendFile(path.join(adminDir, 'index.html'), (err) => {
+      if (err) next();
+    });
+  });
 
   app.use(routes);
 

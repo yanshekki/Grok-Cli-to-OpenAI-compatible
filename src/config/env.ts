@@ -22,6 +22,17 @@ const envSchema = z.object({
     .string()
     .default('true')
     .transform((v) => v === 'true' || v === '1'),
+  /** Force all keys into safe mode when true (overrides per-key agent). */
+  GROK_SAFE_MODE: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+  GROK_SAFE_MAX_TURNS: z.coerce.number().int().positive().default(4),
+  GROK_SAFE_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  ADMIN_PANEL_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v === 'true' || v === '1'),
 
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),

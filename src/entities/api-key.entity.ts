@@ -1,4 +1,4 @@
-import type { ApiKeyRole } from '../interfaces/auth.interface';
+import type { ApiKeyMode, ApiKeyRole } from '../interfaces/auth.interface';
 
 export interface ApiKeyEntity {
   id: string;
@@ -6,8 +6,11 @@ export interface ApiKeyEntity {
   keyPrefix: string;
   keyHash: string;
   role: ApiKeyRole;
+  mode: ApiKeyMode;
   isActive: boolean;
   rateLimit: number;
+  maxTurns: number | null;
+  timeoutMs: number | null;
   createdAt: Date;
   lastUsedAt: Date | null;
 }
@@ -17,8 +20,11 @@ export interface ApiKeyPublicEntity {
   name: string;
   keyPrefix: string;
   role: ApiKeyRole;
+  mode: ApiKeyMode;
   isActive: boolean;
   rateLimit: number;
+  maxTurns: number | null;
+  timeoutMs: number | null;
   createdAt: Date;
   lastUsedAt: Date | null;
 }

@@ -45,12 +45,28 @@ export class GrokCliService {
       options.stream ? 'streaming-json' : 'json',
     ];
 
-    if (env.GROK_ALWAYS_APPROVE) {
+    const alwaysApprove =
+      options.alwaysApprove !== undefined
+        ? options.alwaysApprove
+        : env.GROK_ALWAYS_APPROVE;
+    if (alwaysApprove) {
       args.push('--always-approve');
     }
 
     if (options.sessionId) {
       args.push('-s', options.sessionId);
+    }
+
+    if (options.maxTurns != null && options.maxTurns > 0) {
+      args.push('--max-turns', String(options.maxTurns));
+    }
+
+    if (options.toolsAllowlist) {
+      args.push('--tools', options.toolsAllowlist);
+    }
+
+    if (options.toolsDenylist) {
+      args.push('--disallowed-tools', options.toolsDenylist);
     }
 
     return args;
@@ -60,7 +76,18 @@ export class GrokCliService {
     const args = this.buildArgs({ ...options, stream: false });
     const timeout = options.timeoutMs ?? env.GROK_TIMEOUT_MS;
 
-    logger.debug({ bin: env.GROK_BIN, model: options.model, cwd: options.cwd }, 'Spawning grok');
+    logger.debug(
+      {
+        bin: env.GROK_BIN,
+        model: options.model,
+        cwd: options.cwd,
+        alwaysApprove: options.alwaysApprove,
+        maxTurns: options.maxTurns,
+        toolsAllowlist: options.toolsAllowlist,
+        toolsDenylist: options.toolsDenylist ? '[set]' : null,
+      },
+      'Spawning grok',
+    );
 
     try {
       const result = await execa(env.GROK_BIN, args, {

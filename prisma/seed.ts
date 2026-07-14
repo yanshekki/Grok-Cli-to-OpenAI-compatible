@@ -25,10 +25,16 @@ async function main(): Promise<void> {
   });
 
   if (existingAdmin) {
+    await prisma.apiKey.update({
+      where: { id: existingAdmin.id },
+      data: { mode: 'agent' },
+    });
     console.log('Admin API key already exists:');
     console.log(`  id:     ${existingAdmin.id}`);
     console.log(`  name:   ${existingAdmin.name}`);
     console.log(`  prefix: ${existingAdmin.keyPrefix}`);
+    console.log('  mode:   agent (ensured)');
+    console.log('Admin panel: http://127.0.0.1:3000/admin/');
     console.log('Plaintext key is not recoverable. Create a new admin key via API if needed.');
     return;
   }
@@ -44,6 +50,7 @@ async function main(): Promise<void> {
       keyPrefix: prefix,
       keyHash,
       role: 'admin',
+      mode: 'agent',
       rateLimit: 120,
     },
   });
@@ -52,9 +59,10 @@ async function main(): Promise<void> {
   console.log(`  id:   ${created.id}`);
   console.log(`  key:  ${rawKey}`);
   console.log('');
-  console.log('Example:');
+  console.log('Admin panel: http://127.0.0.1:3000/admin/');
+  console.log('API example:');
   console.log(
-    `  curl -s http://127.0.0.1:3000/v1/models -H "Authorization: Bearer ${rawKey}"`,
+    `  curl -s http://127.0.0.1:3000/admin/api/me -H "Authorization: Bearer ${rawKey}"`,
   );
 }
 
