@@ -39,4 +39,19 @@ describe('createChatCompletionSchema', () => {
     expect(parsed.session_id).toBe('abc');
     expect(parsed.document_ids).toHaveLength(1);
   });
+
+  it('defaults include_reasoning to true', () => {
+    const parsed = createChatCompletionSchema.parse({
+      messages: [{ role: 'user', content: 'x' }],
+    });
+    expect(parsed.include_reasoning).toBe(true);
+  });
+
+  it('allows disabling include_reasoning', () => {
+    const parsed = createChatCompletionSchema.parse({
+      messages: [{ role: 'user', content: 'x' }],
+      include_reasoning: false,
+    });
+    expect(parsed.include_reasoning).toBe(false);
+  });
 });

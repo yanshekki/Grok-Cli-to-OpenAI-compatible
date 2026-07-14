@@ -45,6 +45,11 @@ export const createChatCompletionSchema = z.object({
   cwd: z.string().max(1024).optional(),
   session_id: z.string().max(128).optional(),
   document_ids: z.array(z.string().uuid()).max(MAX_DOCUMENTS_PER_CHAT).optional(),
+  /**
+   * Include chain-of-thought as DeepSeek-compatible `reasoning_content`
+   * (and Grok alias `thought`). Default true.
+   */
+  include_reasoning: z.boolean().optional().default(true),
 });
 
 export type CreateChatCompletionDto = z.infer<typeof createChatCompletionSchema>;

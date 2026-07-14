@@ -110,7 +110,7 @@ Authorization: Bearer gk_live_...
 |--------|------|-------------|
 | GET | `/v1/models` | List models |
 | GET | `/v1/models/:model` | Get model |
-| POST | `/v1/chat/completions` | Chat (supports `stream: true`) |
+| POST | `/v1/chat/completions` | Chat (supports `stream` + thinking) |
 
 #### Chat request (extensions)
 
@@ -119,11 +119,43 @@ Authorization: Bearer gk_live_...
   "model": "grok-4.5",
   "messages": [{ "role": "user", "content": "Hello" }],
   "stream": false,
+  "include_reasoning": true,
   "cwd": "/allowed/workspace",
   "session_id": "optional-grok-session",
   "document_ids": ["uuid-of-uploaded-doc"]
 }
 ```
+
+#### Thinking / reasoning (DeepSeek-compatible + Grok)
+
+Grok CLI `thought` events are mapped as follows:
+
+| Grok event | Mainstream (DeepSeek) | Grok alias / meta |
+|------------|----------------------|-------------------|
+| `type: thought` | `message.reasoning_content` / `delta.reasoning_content` | `message.thought` / `delta.thought` |
+| `type: text` | `message.content` / `delta.content` | same |
+| `type: end` | `finish_reason` | top-level `grok.sessionId`, `grok.stopReason` |
+
+- `include_reasoning` defaults to **true**; set `false` to hide CoT from the client.
+- Multi-turn prompt building uses **`content` only** (prior `reasoning_content` is not required).
+
+Non-stream response shape (abridged):
+
+```json
+{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": "final answer",
+      "reasoning_content": "chain of thought...",
+      "thought": "chain of thought..."
+    }
+  }],
+  "grok": { "sessionId": "...", "stopReason": "EndTurn" }
+}
+```
+
+Stream: first `delta.reasoning_content` (+ `delta.thought`), then `delta.content`, then finish (+ `grok` on last chunk).
 
 #### Non-streaming example
 
@@ -146,6 +178,7 @@ curl -sN http://127.0.0.1:3000/v1/chat/completions \
   -d '{
     "model": "grok-4.5",
     "stream": true,
+    "include_reasoning": true,
     "messages": [{"role":"user","content":"Count to 3"}]
   }'
 ```
@@ -163,7 +196,16 @@ const client = new OpenAI({
 const res = await client.chat.completions.create({
   model: 'grok-4.5',
   messages: [{ role: 'user', content: 'Hello' }],
+  // @ts-expect-error extension field
+  include_reasoning: true,
 });
+
+// DeepSeek-style (may need casting depending on SDK types)
+const msg = res.choices[0].message as {
+  content?: string | null;
+  reasoning_content?: string | null;
+};
+console.log(msg.reasoning_content, msg.content);
 ```
 
 ### Documents (encrypted storage + audit)

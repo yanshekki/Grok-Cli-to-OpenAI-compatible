@@ -9,13 +9,17 @@ import {
 import { env } from '../config/env';
 import type { CreateChatCompletionDto } from '../dto/chat.dto';
 import type { AuthenticatedApiKey } from '../interfaces/auth.interface';
-import type { OpenAiChatCompletion } from '../interfaces/openai.interface';
+import type {
+  GrokResponseMeta,
+  OpenAiChatCompletion,
+} from '../interfaces/openai.interface';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { HttpException } from '../exceptions/http.exception';
 import { createChatCompletionId, createId } from '../utils/id';
 import {
   mapFinishChunk,
   mapGrokToChatCompletion,
+  mapReasoningDeltaChunk,
   mapRoleChunk,
   mapTextDeltaChunk,
   messagesToPrompt,
@@ -35,6 +39,14 @@ export interface ChatContext {
   userAgent?: string;
 }
 
+interface GrokCollectedOutput {
+  text: string;
+  reasoning: string;
+  sessionId?: string;
+  stopReason?: string;
+  requestId?: string;
+}
+
 /** Convert Node Buffer to a value accepted by Prisma Bytes fields. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toBytes(buf: Buffer): any {
@@ -49,6 +61,7 @@ export class ChatService {
   ): Promise<OpenAiChatCompletion | void> {
     const model = dto.model || env.GROK_DEFAULT_MODEL;
     const stream = Boolean(dto.stream);
+    const includeReasoning = dto.include_reasoning !== false;
     const cwd = resolveSafeCwd(dto.cwd);
     const documentIds = dto.document_ids ?? [];
 
@@ -123,19 +136,21 @@ export class ChatService {
           completionId,
           chatRequestDbId,
           started,
+          includeReasoning,
         });
         return;
       }
 
-      const result = await grokCliService.runOnce({
+      // Non-stream: use streaming-json internally so we can capture thought events
+      const collected = await this.collectFromGrokStream({
         prompt,
         model,
         cwd,
-        stream: false,
         sessionId: dto.session_id,
       });
 
-      const responseEnc = encryptionService.encrypt(result.text);
+      const auditPayload = this.buildAuditPayload(collected, includeReasoning);
+      const responseEnc = encryptionService.encrypt(auditPayload);
       const durationMs = Date.now() - started;
 
       await prisma.chatRequest.update({
@@ -143,7 +158,7 @@ export class ChatService {
         data: {
           status: CHAT_STATUS.SUCCESS,
           durationMs,
-          grokSessionId: result.sessionId ?? null,
+          grokSessionId: collected.sessionId ?? null,
           responseCiphertext: toBytes(responseEnc.ciphertext),
           responseIv: toBytes(responseEnc.iv),
           responseTag: toBytes(responseEnc.tag),
@@ -161,17 +176,94 @@ export class ChatService {
           stream: false,
           durationMs,
           documentCount: documentIds.length,
+          includeReasoning,
+          hasReasoning: collected.reasoning.length > 0,
         },
         ip: ctx.ip,
       });
 
-      return mapGrokToChatCompletion(model, result.raw, completionId);
+      const grokMeta: GrokResponseMeta = {
+        sessionId: collected.sessionId,
+        stopReason: collected.stopReason,
+        requestId: collected.requestId,
+      };
+
+      return mapGrokToChatCompletion(
+        model,
+        {
+          text: collected.text,
+          stopReason: collected.stopReason,
+          sessionId: collected.sessionId,
+          requestId: collected.requestId,
+        },
+        {
+          completionId,
+          reasoningContent: collected.reasoning || null,
+          includeReasoning,
+          grok: grokMeta,
+        },
+      );
     } catch (err) {
       await this.markFailed(chatRequestDbId, started, err);
       throw err;
     } finally {
       grokCliService.release();
     }
+  }
+
+  /**
+   * Collect full text + reasoning via Grok streaming-json (captures type:thought).
+   */
+  private async collectFromGrokStream(input: {
+    prompt: string;
+    model: string;
+    cwd: string;
+    sessionId?: string;
+  }): Promise<GrokCollectedOutput> {
+    const textParts: string[] = [];
+    const reasoningParts: string[] = [];
+    let sessionId: string | undefined;
+    let stopReason: string | undefined;
+    let requestId: string | undefined;
+
+    for await (const event of grokCliService.stream({
+      prompt: input.prompt,
+      model: input.model,
+      cwd: input.cwd,
+      stream: true,
+      sessionId: input.sessionId,
+    })) {
+      if (event.type === 'thought' && typeof event.data === 'string') {
+        reasoningParts.push(event.data);
+      } else if (event.type === 'text' && typeof event.data === 'string') {
+        textParts.push(event.data);
+      } else if (event.type === 'end') {
+        if (typeof event.stopReason === 'string') stopReason = event.stopReason;
+        if (typeof event.sessionId === 'string') sessionId = event.sessionId;
+        if (typeof event.requestId === 'string') requestId = event.requestId;
+      }
+    }
+
+    return {
+      text: textParts.join(''),
+      reasoning: reasoningParts.join(''),
+      sessionId,
+      stopReason,
+      requestId,
+    };
+  }
+
+  private buildAuditPayload(
+    collected: GrokCollectedOutput,
+    includeReasoning: boolean,
+  ): string {
+    if (!includeReasoning || !collected.reasoning) {
+      return collected.text;
+    }
+    return JSON.stringify({
+      content: collected.text,
+      reasoning_content: collected.reasoning,
+    });
   }
 
   private async runStream(args: {
@@ -184,13 +276,26 @@ export class ChatService {
     completionId: string;
     chatRequestDbId: string;
     started: number;
+    includeReasoning: boolean;
   }): Promise<void> {
-    const { dto, ctx, res, model, cwd, prompt, completionId, chatRequestDbId, started } =
-      args;
+    const {
+      dto,
+      ctx,
+      res,
+      model,
+      cwd,
+      prompt,
+      completionId,
+      chatRequestDbId,
+      started,
+      includeReasoning,
+    } = args;
     const created = Math.floor(Date.now() / 1000);
     const textParts: string[] = [];
+    const reasoningParts: string[] = [];
     let grokSessionId: string | undefined;
     let stopReason: string | undefined;
+    let grokRequestId: string | undefined;
     let clientClosed = false;
 
     res.on('close', () => {
@@ -210,25 +315,47 @@ export class ChatService {
       })) {
         if (clientClosed) break;
 
-        if (event.type === 'text' && typeof event.data === 'string') {
+        if (event.type === 'thought' && typeof event.data === 'string') {
+          reasoningParts.push(event.data);
+          if (includeReasoning) {
+            writeSseData(
+              res,
+              mapReasoningDeltaChunk(model, event.data, completionId, created, true),
+            );
+          }
+        } else if (event.type === 'text' && typeof event.data === 'string') {
           textParts.push(event.data);
           writeSseData(res, mapTextDeltaChunk(model, event.data, completionId, created));
         } else if (event.type === 'end') {
-          stopReason = typeof event.stopReason === 'string' ? event.stopReason : undefined;
-          if (typeof event.sessionId === 'string') {
-            grokSessionId = event.sessionId;
-          }
+          if (typeof event.stopReason === 'string') stopReason = event.stopReason;
+          if (typeof event.sessionId === 'string') grokSessionId = event.sessionId;
+          if (typeof event.requestId === 'string') grokRequestId = event.requestId;
         }
       }
 
       if (!clientClosed) {
-        writeSseData(res, mapFinishChunk(model, completionId, created, stopReason));
+        const grokMeta: GrokResponseMeta = {
+          sessionId: grokSessionId,
+          stopReason,
+          requestId: grokRequestId,
+        };
+        writeSseData(
+          res,
+          mapFinishChunk(model, completionId, created, stopReason, grokMeta),
+        );
         writeSseDone(res);
         res.end();
       }
 
-      const fullText = textParts.join('');
-      const responseEnc = encryptionService.encrypt(fullText);
+      const collected: GrokCollectedOutput = {
+        text: textParts.join(''),
+        reasoning: reasoningParts.join(''),
+        sessionId: grokSessionId,
+        stopReason,
+        requestId: grokRequestId,
+      };
+      const auditPayload = this.buildAuditPayload(collected, includeReasoning);
+      const responseEnc = encryptionService.encrypt(auditPayload);
       const durationMs = Date.now() - started;
 
       await prisma.chatRequest.update({
@@ -254,13 +381,13 @@ export class ChatService {
           stream: true,
           durationMs,
           documentCount: (dto.document_ids ?? []).length,
+          includeReasoning,
+          hasReasoning: reasoningParts.length > 0,
         },
         ip: ctx.ip,
       });
     } catch (err) {
-      if (!clientClosed && !res.headersSent) {
-        // should not happen after initSse
-      } else if (!clientClosed && !res.writableEnded) {
+      if (!clientClosed && !res.writableEnded) {
         const message = err instanceof Error ? err.message : 'Stream error';
         writeSseData(res, {
           error: {
@@ -283,8 +410,7 @@ export class ChatService {
   ): Promise<void> {
     const durationMs = Date.now() - started;
     const message = err instanceof Error ? err.message : 'Unknown error';
-    const isTimeout =
-      err instanceof HttpException && err.code === 'grok_timeout';
+    const isTimeout = err instanceof HttpException && err.code === 'grok_timeout';
 
     try {
       await prisma.chatRequest.update({
