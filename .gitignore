@@ -1,4 +1,6 @@
 node_modules/
+# Do not publish GitHub Actions / repo meta to the public repo
+.github/
 # Built output is published via npm only (not committed to git)
 dist/
 .env
