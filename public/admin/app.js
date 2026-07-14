@@ -99,28 +99,47 @@ async function ensureMe() {
   return true;
 }
 
+function poweredByFooter() {
+  return `
+  <footer class="site-footer">
+    <a class="powered-by" href="https://ysk.hk/" target="_blank" rel="noopener noreferrer">
+      <img src="/admin/assets/logo.svg" alt="" width="22" height="22" />
+      <span>Powered by <strong>YSK Limited</strong></span>
+    </a>
+  </footer>`;
+}
+
 function shell(content) {
   return `
-  <div class="layout">
-    <aside class="sidebar">
-      <div class="brand">Grok Gateway<small>Admin Panel</small></div>
-      ${nav('dashboard', '儀表板')}
-      ${nav('chats', 'Chat 記錄')}
-      ${nav('keys', 'API Keys')}
-      ${nav('documents', '文件')}
-      ${nav('audit', 'Audit Logs')}
-      ${nav('settings', '安全設定')}
-      ${nav('system', '系統狀態')}
-      <div class="sidebar-foot">
-        <div>${escapeHtml(state.me?.name || '')}</div>
-        <div>${escapeHtml(state.me?.keyPrefix || '')}…</div>
-        <button class="btn secondary sm" style="margin-top:10px;width:100%" id="btn-logout">登出</button>
-      </div>
-    </aside>
-    <main class="main">
-      <div id="flash-error" class="error-box" ${state.error ? '' : 'hidden'}>${escapeHtml(state.error)}</div>
-      ${content}
-    </main>
+  <div class="app-shell">
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <img class="brand-logo" src="/admin/assets/logo.svg" alt="YSK" width="40" height="40" />
+          <div class="brand-text">
+            <strong>Grok Gateway</strong>
+            <small>Admin Panel</small>
+          </div>
+        </div>
+        ${nav('dashboard', '儀表板')}
+        ${nav('chats', 'Chat 記錄')}
+        ${nav('keys', 'API Keys')}
+        ${nav('documents', '文件')}
+        ${nav('audit', 'Audit Logs')}
+        ${nav('settings', '安全設定')}
+        ${nav('system', '系統狀態')}
+        <div class="sidebar-foot">
+          <div>${escapeHtml(state.me?.name || '')}</div>
+          <div>${escapeHtml(state.me?.keyPrefix || '')}…</div>
+          <button class="btn secondary sm" style="margin-top:10px;width:100%" id="btn-logout">登出</button>
+        </div>
+      </aside>
+      <main class="main">
+        <div id="flash-error" class="error-box" ${state.error ? '' : 'hidden'}>${escapeHtml(state.error)}</div>
+        ${content}
+      </main>
+    </div>
+    ${poweredByFooter()}
   </div>
   ${state.modal || ''}
   `;
@@ -134,13 +153,17 @@ async function renderLogin() {
   document.getElementById('app').innerHTML = `
     <div class="login-wrap">
       <div class="login-card">
-        <h1>Admin 登入</h1>
+        <div class="login-brand">
+          <img src="/admin/assets/logo.svg" alt="YSK Limited" width="56" height="56" />
+          <h1 class="brand-title">Grok Gateway Admin</h1>
+        </div>
         <p>貼上 <strong>admin API key</strong>（seed 產生、只顯示一次）。資料會存放在本瀏覽器 sessionStorage。</p>
         <div id="flash-error" class="error-box" ${state.error ? '' : 'hidden'}>${escapeHtml(state.error)}</div>
         <label>Admin API Key</label>
         <input id="login-key" type="password" placeholder="gk_live_..." autocomplete="off" />
         <button class="btn" id="btn-login" style="width:100%">進入控制台</button>
       </div>
+      ${poweredByFooter()}
     </div>
   `;
   document.getElementById('btn-login').onclick = async () => {
