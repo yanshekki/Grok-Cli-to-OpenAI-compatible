@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+storage/*
+!storage/.gitkeep
+logs/*
+!logs/.gitkeep
+*.log
+.DS_Store
+coverage/
+.prisma/
+*.tsbuildinfo
+.vitest/

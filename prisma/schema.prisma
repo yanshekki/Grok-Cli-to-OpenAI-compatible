@@ -1,0 +1,107 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  name       String    @db.VarChar(128)
+  keyPrefix  String    @db.VarChar(32)
+  keyHash    String    @unique @db.VarChar(128)
+  role       String    @default("client") @db.VarChar(32)
+  isActive   Boolean   @default(true)
+  rateLimit  Int       @default(60)
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  chatRequests ChatRequest[]
+  documents    Document[]
+  auditLogs    AuditLog[]
+
+  @@index([keyPrefix])
+  @@index([isActive])
+  @@map("api_keys")
+}
+
+model ChatRequest {
+  id                 String   @id @default(uuid())
+  requestId          String   @unique @db.VarChar(64)
+  apiKeyId           String
+  model              String   @db.VarChar(128)
+  stream             Boolean  @default(false)
+  status             String   @db.VarChar(32)
+  durationMs         Int?
+  grokSessionId      String?  @db.VarChar(128)
+  promptCiphertext   Bytes
+  promptIv           Bytes
+  promptTag          Bytes
+  responseCiphertext Bytes?
+  responseIv         Bytes?
+  responseTag        Bytes?
+  errorMessage       String?  @db.Text
+  ip                 String?  @db.VarChar(64)
+  userAgent          String?  @db.Text
+  createdAt          DateTime @default(now())
+
+  apiKey    ApiKey                @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  documents ChatRequestDocument[]
+
+  @@index([apiKeyId, createdAt])
+  @@index([status])
+  @@map("chat_requests")
+}
+
+model Document {
+  id                String    @id @default(uuid())
+  apiKeyId          String
+  originalName      String    @db.VarChar(512)
+  mimeType          String    @db.VarChar(128)
+  sizeBytes         Int
+  storageType       String    @db.VarChar(32)
+  contentCiphertext Bytes?
+  contentIv         Bytes?
+  contentTag        Bytes?
+  storagePath       String?   @db.VarChar(1024)
+  checksumSha256    String    @db.VarChar(64)
+  createdAt         DateTime  @default(now())
+  deletedAt         DateTime?
+
+  apiKey       ApiKey                @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  chatRequests ChatRequestDocument[]
+
+  @@index([apiKeyId, createdAt])
+  @@index([deletedAt])
+  @@map("documents")
+}
+
+model ChatRequestDocument {
+  chatRequestId String
+  documentId    String
+
+  chatRequest ChatRequest @relation(fields: [chatRequestId], references: [id], onDelete: Cascade)
+  document    Document    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([chatRequestId, documentId])
+  @@map("chat_request_documents")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  apiKeyId   String?
+  action     String   @db.VarChar(64)
+  resource   String?  @db.VarChar(64)
+  resourceId String?  @db.VarChar(64)
+  metaJson   String?  @db.Text
+  ip         String?  @db.VarChar(64)
+  createdAt  DateTime @default(now())
+
+  apiKey ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([apiKeyId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}

@@ -1,0 +1,68 @@
+import { config as loadDotenv } from 'dotenv';
+import { createHash } from 'node:crypto';
+import { PrismaClient } from '@prisma/client';
+import { randomBytes, randomUUID } from 'node:crypto';
+
+loadDotenv();
+
+const prisma = new PrismaClient();
+
+function createApiKeySecret(): string {
+  return `gk_live_${randomBytes(24).toString('base64url')}`;
+}
+
+function hashApiKey(rawKey: string): string {
+  return createHash('sha256').update(rawKey, 'utf8').digest('hex');
+}
+
+function apiKeyPrefix(rawKey: string): string {
+  return rawKey.slice(0, 16);
+}
+
+async function main(): Promise<void> {
+  const existingAdmin = await prisma.apiKey.findFirst({
+    where: { role: 'admin', isActive: true },
+  });
+
+  if (existingAdmin) {
+    console.log('Admin API key already exists:');
+    console.log(`  id:     ${existingAdmin.id}`);
+    console.log(`  name:   ${existingAdmin.name}`);
+    console.log(`  prefix: ${existingAdmin.keyPrefix}`);
+    console.log('Plaintext key is not recoverable. Create a new admin key via API if needed.');
+    return;
+  }
+
+  const rawKey = process.env.ADMIN_BOOTSTRAP_KEY?.trim() || createApiKeySecret();
+  const keyHash = hashApiKey(rawKey);
+  const prefix = apiKeyPrefix(rawKey);
+
+  const created = await prisma.apiKey.create({
+    data: {
+      id: randomUUID(),
+      name: 'bootstrap-admin',
+      keyPrefix: prefix,
+      keyHash,
+      role: 'admin',
+      rateLimit: 120,
+    },
+  });
+
+  console.log('Created bootstrap admin API key (store it securely — shown once):');
+  console.log(`  id:   ${created.id}`);
+  console.log(`  key:  ${rawKey}`);
+  console.log('');
+  console.log('Example:');
+  console.log(
+    `  curl -s http://127.0.0.1:3000/v1/models -H "Authorization: Bearer ${rawKey}"`,
+  );
+}
+
+main()
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
