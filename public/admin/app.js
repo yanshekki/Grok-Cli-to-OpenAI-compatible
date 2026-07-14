@@ -475,10 +475,7 @@ async function renderDocuments() {
   `);
   bindShell();
   document.querySelectorAll('[data-doc]').forEach((b) => {
-    b.onclick = async () => {
-      const { data: doc } = await api(`/documents/${b.dataset.doc}`);
-      alert(`檔案：${doc.originalName}\n\n內容預覽：\n\n${(doc.content || '').slice(0, 4000)}`);
-    };
+    b.onclick = () => openDocument(b.dataset.doc);
   });
   document.querySelectorAll('[data-del]').forEach((b) => {
     b.onclick = async () => {
@@ -487,6 +484,45 @@ async function renderDocuments() {
       renderDocuments().catch(onErr);
     };
   });
+}
+
+async function openDocument(id) {
+  const { data: doc } = await api(`/documents/${id}`);
+  document.getElementById('modal-back')?.remove();
+  document.getElementById('app').insertAdjacentHTML(
+    'beforeend',
+    `
+    <div class="modal-back" id="modal-back">
+      <div class="modal">
+        <div class="modal-h">
+          <div>
+            <strong>文件詳情</strong>
+            <div class="muted">${escapeHtml(doc.originalName)} · ${escapeHtml(doc.mimeType)} · ${doc.sizeBytes} bytes</div>
+          </div>
+          <button class="btn secondary sm" id="modal-close">關閉</button>
+        </div>
+        <div class="modal-b">
+          <div class="grid" style="margin-bottom:14px">
+            <div class="card"><div class="label">API Key</div><div class="value" style="font-size:1rem">${escapeHtml(doc.apiKey?.name || '')}</div></div>
+            <div class="card"><div class="label">Checksum</div><div class="value" style="font-size:.75rem;word-break:break-all">${escapeHtml(doc.checksumSha256 || '')}</div></div>
+            <div class="card"><div class="label">建立時間</div><div class="value" style="font-size:1rem">${fmtTime(doc.createdAt)}</div></div>
+          </div>
+          <div class="block">
+            <h4>解密內容預覽</h4>
+            <div class="pre" id="doc-content">${escapeHtml(doc.content || '（無）')}</div>
+            <button class="btn secondary sm" id="doc-copy">複製內容</button>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  );
+  document.getElementById('modal-close').onclick = () => document.getElementById('modal-back')?.remove();
+  document.getElementById('modal-back').onclick = (e) => {
+    if (e.target.id === 'modal-back') document.getElementById('modal-back')?.remove();
+  };
+  document.getElementById('doc-copy').onclick = () => {
+    navigator.clipboard.writeText(doc.content || '');
+  };
 }
 
 async function renderAudit() {
@@ -550,19 +586,34 @@ async function renderSettings() {
   bindShell();
   document.getElementById('s-tools').value = data.safeToolsMode || 'none';
   document.getElementById('s-save').onclick = async () => {
-    await api('/settings', {
-      method: 'PUT',
-      body: JSON.stringify({
-        globalSafeMode: document.getElementById('s-global').checked,
-        safeToolsMode: document.getElementById('s-tools').value,
-        safeMaxTurns: Number(document.getElementById('s-turns').value),
-        safeTimeoutMs: Number(document.getElementById('s-timeout').value),
-        defaultModel: document.getElementById('s-model').value.trim(),
-        adminPanelEnabled: document.getElementById('s-panel').checked,
-      }),
-    });
-    alert('已儲存');
-    renderSettings().catch(onErr);
+    try {
+      await api('/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          globalSafeMode: document.getElementById('s-global').checked,
+          safeToolsMode: document.getElementById('s-tools').value,
+          safeMaxTurns: Number(document.getElementById('s-turns').value),
+          safeTimeoutMs: Number(document.getElementById('s-timeout').value),
+          defaultModel: document.getElementById('s-model').value.trim(),
+          adminPanelEnabled: document.getElementById('s-panel').checked,
+        }),
+      });
+      state.error = '';
+      const bar = document.querySelector('#flash-error');
+      if (bar) {
+        bar.hidden = false;
+        bar.style.background = 'rgba(34,197,94,.15)';
+        bar.style.borderColor = 'rgba(34,197,94,.4)';
+        bar.style.color = '#bbf7d0';
+        bar.textContent = '設定已儲存';
+        setTimeout(() => {
+          bar.hidden = true;
+          bar.removeAttribute('style');
+        }, 2000);
+      }
+    } catch (e) {
+      onErr(e);
+    }
   };
 }
 
