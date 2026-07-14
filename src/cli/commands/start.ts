@@ -8,11 +8,13 @@ import { ensureEnvFile, loadEnvIntoProcess } from '../lib/env-file';
 import fs from 'node:fs';
 import {
   clearPid,
+  findPidsOnPort,
   isProcessRunning,
   readPid,
   startDetached,
+  stopGateway,
 } from '../lib/process-mgr';
-import { baseUrls, fail, info, ok } from '../lib/print';
+import { baseUrls, fail, info, ok, warn } from '../lib/print';
 
 function tailLog(file: string, maxLines = 30): string {
   try {
@@ -36,6 +38,14 @@ export async function cmdStart(opts: {
   });
   ensureHomeDirs(paths);
 
+  const envFile = ensureEnvFile(paths, opts.port ?? DEFAULT_PORT);
+  if (opts.port) {
+    envFile.PORT = String(opts.port);
+  }
+  loadEnvIntoProcess(paths.envFile);
+
+  const port = Number(opts.port || envFile.PORT || DEFAULT_PORT);
+
   const existing = readPid(paths.pidFile);
   if (existing && isProcessRunning(existing)) {
     fail(`Already running (pid ${existing}). Use: gctoac stop`);
@@ -46,13 +56,25 @@ export async function cmdStart(opts: {
     clearPid(paths.pidFile);
   }
 
-  const envFile = ensureEnvFile(paths, opts.port ?? DEFAULT_PORT);
-  if (opts.port) {
-    envFile.PORT = String(opts.port);
+  // Orphan: port busy but no valid pid file
+  const orphans = findPidsOnPort(port);
+  if (orphans.length) {
+    warn(
+      `Port ${port} already in use (pid ${orphans.join(', ')}). Cleaning up…`,
+    );
+    await stopGateway({ pidFile: paths.pidFile, port });
+    await new Promise((r) => setTimeout(r, 400));
+    const still = findPidsOnPort(port);
+    if (still.length) {
+      fail(
+        `Port ${port} still in use (pid ${still.join(', ')}). Kill manually: kill ${still.join(' ')}`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    ok(`Port ${port} freed`);
   }
-  loadEnvIntoProcess(paths.envFile);
 
-  const port = Number(opts.port || envFile.PORT || DEFAULT_PORT);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...envFile,
@@ -64,7 +86,6 @@ export async function cmdStart(opts: {
 
   if (opts.foreground) {
     info(`Starting foreground on port ${port}…`);
-    // Apply env then require server (side-effect bootstrap)
     for (const [k, v] of Object.entries(env)) {
       if (v !== undefined) process.env[k] = v;
     }
@@ -74,7 +95,6 @@ export async function cmdStart(opts: {
   }
 
   const pid = startDetached(paths, env);
-  // Brief wait: catch immediate crash (e.g. missing deps / bad env)
   await new Promise((r) => setTimeout(r, 800));
   if (!isProcessRunning(pid)) {
     clearPid(paths.pidFile);
@@ -86,6 +106,10 @@ export async function cmdStart(opts: {
       info('--- last error log ---');
       console.error(tail);
       info('----------------------');
+    }
+    // If crash was EADDRINUSE, hint
+    if (tail.includes('EADDRINUSE')) {
+      warn(`Port still busy. Try: gctoac stop && gctoac start`);
     }
     process.exitCode = 1;
     return;

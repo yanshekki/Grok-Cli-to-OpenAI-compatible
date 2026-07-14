@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import type { RuntimePaths } from './paths';
 
 export function readPid(pidFile: string): number | null {
@@ -33,6 +33,86 @@ export function clearPid(pidFile: string): void {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Find PIDs listening on a TCP port (Linux ss/fuser/lsof fallbacks).
+ */
+export function findPidsOnPort(port: number): number[] {
+  const pids = new Set<number>();
+
+  // ss -lptn 'sport = :PORT'
+  try {
+    const out = execFileSync(
+      'ss',
+      ['-lptn', `sport = :${port}`],
+      { encoding: 'utf8', timeout: 3000 },
+    );
+    for (const m of out.matchAll(/pid=(\d+)/g)) {
+      const n = Number(m[1]);
+      if (n > 0) pids.add(n);
+    }
+  } catch {
+    /* try next */
+  }
+
+  if (pids.size === 0) {
+    try {
+      const out = execFileSync('fuser', [`${port}/tcp`], {
+        encoding: 'utf8',
+        timeout: 3000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      for (const part of out.trim().split(/\s+/)) {
+        const n = Number(part);
+        if (n > 0) pids.add(n);
+      }
+    } catch {
+      /* try next */
+    }
+  }
+
+  if (pids.size === 0) {
+    try {
+      const out = execFileSync('lsof', ['-t', `-i:${port}`, '-sTCP:LISTEN'], {
+        encoding: 'utf8',
+        timeout: 3000,
+      });
+      for (const line of out.split(/\n/)) {
+        const n = Number(line.trim());
+        if (n > 0) pids.add(n);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Never kill ourselves
+  pids.delete(process.pid);
+  return [...pids];
+}
+
+export async function killPid(
+  pid: number,
+  timeoutMs = 10_000,
+): Promise<boolean> {
+  if (!isProcessRunning(pid)) return false;
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    return false;
+  }
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (!isProcessRunning(pid)) return true;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    /* ignore */
+  }
+  return !isProcessRunning(pid);
 }
 
 export function startDetached(paths: RuntimePaths, env: NodeJS.ProcessEnv): number {
@@ -85,27 +165,40 @@ export async function stopProcess(pidFile: string, timeoutMs = 10_000): Promise<
     return false;
   }
 
-  try {
-    process.kill(pid, 'SIGTERM');
-  } catch {
-    clearPid(pidFile);
-    return false;
-  }
-
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (!isProcessRunning(pid)) {
-      clearPid(pidFile);
-      return true;
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-
-  try {
-    process.kill(pid, 'SIGKILL');
-  } catch {
-    /* ignore */
-  }
+  const ok = await killPid(pid, timeoutMs);
   clearPid(pidFile);
-  return true;
+  return ok;
+}
+
+/**
+ * Stop by pid file and/or any process listening on port (orphan cleanup).
+ */
+export async function stopGateway(opts: {
+  pidFile: string;
+  port: number;
+}): Promise<{ stoppedPid: boolean; freedPort: number[] }> {
+  let stoppedPid = false;
+  const pid = readPid(opts.pidFile);
+  if (pid && isProcessRunning(pid)) {
+    stoppedPid = await killPid(pid);
+  }
+  clearPid(opts.pidFile);
+
+  const onPort = findPidsOnPort(opts.port);
+  const freedPort: number[] = [];
+  for (const p of onPort) {
+    // Don't kill if we already handled the same pid
+    if (pid && p === pid) continue;
+    const killed = await killPid(p);
+    if (killed) freedPort.push(p);
+  }
+
+  // Final sweep if still occupied
+  await new Promise((r) => setTimeout(r, 300));
+  for (const p of findPidsOnPort(opts.port)) {
+    await killPid(p, 3000);
+    if (!freedPort.includes(p)) freedPort.push(p);
+  }
+
+  return { stoppedPid, freedPort };
 }
