@@ -203,7 +203,13 @@ program
     },
   );
 
-program.parseAsync(process.argv).catch((err: unknown) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+program
+  .parseAsync(process.argv)
+  .catch((err: unknown) => {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  })
+  .then(() => {
+    // Commands that use undici/fetch must hard-exit themselves (e.g. update).
+    // If still alive and no open handles intended, allow natural exit.
+  });

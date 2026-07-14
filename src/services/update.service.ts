@@ -1,7 +1,9 @@
-import { execSync, spawn } from 'node:child_process';
+import { execFileSync, execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ExceptionFactory } from '../exceptions/exception.factory';
+
+const PRISMA_VERSION = '6.5.0';
 
 export const GITHUB_REPO = 'yanshekki/Grok-Cli-to-OpenAI-compatible';
 export const NPM_PACKAGE = 'grok-cli-to-openai-compatible';
@@ -150,16 +152,62 @@ async function fetchLatestGithub(): Promise<string | null> {
   }
 }
 
-function run(cmd: string, cwd: string, log: string[]): void {
+function run(cmd: string, cwd: string, log: string[], env?: NodeJS.ProcessEnv): void {
   log.push(`$ ${cmd}`);
   const out = execSync(cmd, {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: process.env,
+    env: { ...process.env, ...env },
     maxBuffer: 20 * 1024 * 1024,
   });
   if (out?.trim()) log.push(out.trim());
+}
+
+/**
+ * Prefer local prisma package (no flaky npx cache). Falls back to npm exec.
+ */
+function runPrisma(
+  args: string[],
+  packageRoot: string,
+  log: string[],
+  env?: NodeJS.ProcessEnv,
+): void {
+  const entry = path.join(packageRoot, 'node_modules', 'prisma', 'build', 'index.js');
+  const runEnv = { ...process.env, ...env };
+  if (fs.existsSync(entry)) {
+    log.push(`$ node prisma ${args.join(' ')}`);
+    const out = execFileSync(process.execPath, [entry, ...args], {
+      cwd: packageRoot,
+      encoding: 'utf8',
+      env: runEnv,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    if (out?.trim()) log.push(out.trim());
+    return;
+  }
+  run(
+    `npx --yes prisma@${PRISMA_VERSION} ${args.map((a) => JSON.stringify(a)).join(' ')}`,
+    packageRoot,
+    log,
+    runEnv,
+  );
+}
+
+/** Generate client + migrate deploy against the given DATABASE_URL. */
+export function runPostUpdateMigrate(
+  packageRoot: string,
+  databaseUrl: string,
+  log: string[],
+): void {
+  const env = { DATABASE_URL: databaseUrl };
+  try {
+    runPrisma(['generate'], packageRoot, log, env);
+  } catch (e) {
+    log.push(`prisma generate warn: ${e instanceof Error ? e.message : e}`);
+  }
+  runPrisma(['migrate', 'deploy'], packageRoot, log, env);
+  log.push('Database migrations applied (migrate deploy)');
 }
 
 export class UpdateService {
@@ -199,6 +247,8 @@ export class UpdateService {
   async performUpdate(options?: {
     channel?: InstallChannel | 'auto';
     skipMigrate?: boolean;
+    /** Absolute SQLite/file DATABASE_URL for migrate deploy (user data home) */
+    databaseUrl?: string;
   }): Promise<UpdateResult> {
     if (this.updating) {
       throw ExceptionFactory.validation('Update already in progress');
@@ -240,18 +290,37 @@ export class UpdateService {
         }
       }
 
-      // Always regenerate prisma client + migrate when possible
-      try {
-        run('npx --yes prisma@6.5.0 generate', packageRoot, log);
-      } catch (e) {
-        log.push(`prisma generate warn: ${e instanceof Error ? e.message : e}`);
-      }
-
+      // Auto migrate after package update (local prisma binary preferred)
       if (!options?.skipMigrate) {
+        const dbUrl =
+          options?.databaseUrl ||
+          process.env.DATABASE_URL ||
+          `file:${path.join(packageRoot, 'data', 'gateway.db')}`;
+        log.push(`migrate DATABASE_URL=${dbUrl}`);
         try {
-          run('npx --yes prisma@6.5.0 migrate deploy', packageRoot, log);
+          runPostUpdateMigrate(packageRoot, dbUrl, log);
         } catch (e) {
           log.push(`migrate warn: ${e instanceof Error ? e.message : e}`);
+          // Retry once with npx if local prisma missing after global install
+          try {
+            run(
+              `npx --yes prisma@${PRISMA_VERSION} generate`,
+              packageRoot,
+              log,
+              { DATABASE_URL: dbUrl },
+            );
+            run(
+              `npx --yes prisma@${PRISMA_VERSION} migrate deploy`,
+              packageRoot,
+              log,
+              { DATABASE_URL: dbUrl },
+            );
+            log.push('Database migrations applied (npx fallback)');
+          } catch (e2) {
+            log.push(
+              `migrate failed: ${e2 instanceof Error ? e2.message : e2}`,
+            );
+          }
         }
       }
 
@@ -271,7 +340,7 @@ export class UpdateService {
         log,
         restartRequired: true,
         message:
-          'Update finished. Restart the gateway (gctoac restart) to load the new code.',
+          'Update finished (code + DB migrate). Restart the gateway to load new code.',
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
