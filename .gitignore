@@ -6,6 +6,12 @@ storage/*
 !storage/.gitkeep
 logs/*
 !logs/.gitkeep
+data/*
+!data/.gitkeep
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 *.log
 .DS_Store
 coverage/

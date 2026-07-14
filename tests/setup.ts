@@ -7,7 +7,7 @@ process.env.NODE_ENV = 'test';
 process.env.PORT = '3099';
 process.env.HOST = '127.0.0.1';
 process.env.DATABASE_URL =
-  process.env.DATABASE_URL || 'mysql://grok:grok@127.0.0.1:3307/grok_gateway';
+  process.env.DATABASE_URL || `file:${path.join(workspace, 'data', 'test.db')}`;
 process.env.ENCRYPTION_KEY =
   process.env.ENCRYPTION_KEY || randomBytes(32).toString('base64');
 process.env.GROK_BIN = process.env.GROK_BIN || 'grok';

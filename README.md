@@ -6,7 +6,7 @@ Professional Node.js gateway that exposes **OpenAI-compatible** HTTP APIs backed
 
 - Node.js 20+ / TypeScript
 - Express.js
-- Prisma + MySQL
+- Prisma + **SQLite** (zero external DB server)
 - PM2
 - AES-256-GCM encryption for chat prompts, responses, and documents
 - API key auth, rate limits, concurrency limits, helmet, CORS, Zod validation
@@ -26,22 +26,15 @@ src/
   routes/v1/     chat, models, documents, api-keys
   services/      business logic + Grok CLI integration
   utils/         logger, SSE, mappers, path safety
+data/            SQLite file (gateway.db, gitignored)
 ```
 
 ## Prerequisites
 
 1. **Grok CLI** installed and logged in (`grok login`)
-2. **MySQL 8** (local or Docker)
-3. **Node.js** >= 20
+2. **Node.js** >= 20
 
-### MySQL via Docker Compose (recommended)
-
-```bash
-npm run db:up
-# equivalent: docker compose up -d mysql
-```
-
-Host port **3307** → container 3306. Default credentials: `grok` / `grok`, database `grok_gateway`.
+No MySQL/Docker required — the database is a local SQLite file at `data/gateway.db`.
 
 ## Setup
 
@@ -56,9 +49,16 @@ openssl rand -base64 32
 # GROK_CWD_ALLOWLIST=/path/to/workspace
 
 npm install
-npm run db:up
-npx prisma migrate dev
-npm run seed   # prints bootstrap admin API key once
+npm run db:setup   # migrate + seed (prints admin API key once)
+# or:
+# npm run prisma:migrate
+# npm run seed
+```
+
+`DATABASE_URL` default:
+
+```bash
+DATABASE_URL="file:./data/gateway.db"
 ```
 
 ## Run
@@ -76,7 +76,7 @@ pm2 logs grok-openai-gateway
 ## Tests & CI
 
 ```bash
-npm test              # unit + integration (Vitest)
+npm test              # unit + integration (Vitest + SQLite)
 npm run test:coverage
 npm run typecheck
 npm run build
@@ -85,7 +85,7 @@ npm run build
 API_KEY=gk_live_... npm run smoke
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR: install → migrate → build → test with MySQL service.
+GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR: install → SQLite migrate → build → test.
 
 ## API
 

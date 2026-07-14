@@ -3,16 +3,16 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
 model ApiKey {
   id         String    @id @default(uuid())
-  name       String    @db.VarChar(128)
-  keyPrefix  String    @db.VarChar(32)
-  keyHash    String    @unique @db.VarChar(128)
-  role       String    @default("client") @db.VarChar(32)
+  name       String
+  keyPrefix  String
+  keyHash    String    @unique
+  role       String    @default("client")
   isActive   Boolean   @default(true)
   rateLimit  Int       @default(60)
   createdAt  DateTime  @default(now())
@@ -29,22 +29,22 @@ model ApiKey {
 
 model ChatRequest {
   id                 String   @id @default(uuid())
-  requestId          String   @unique @db.VarChar(64)
+  requestId          String   @unique
   apiKeyId           String
-  model              String   @db.VarChar(128)
+  model              String
   stream             Boolean  @default(false)
-  status             String   @db.VarChar(32)
+  status             String
   durationMs         Int?
-  grokSessionId      String?  @db.VarChar(128)
+  grokSessionId      String?
   promptCiphertext   Bytes
   promptIv           Bytes
   promptTag          Bytes
   responseCiphertext Bytes?
   responseIv         Bytes?
   responseTag        Bytes?
-  errorMessage       String?  @db.Text
-  ip                 String?  @db.VarChar(64)
-  userAgent          String?  @db.Text
+  errorMessage       String?
+  ip                 String?
+  userAgent          String?
   createdAt          DateTime @default(now())
 
   apiKey    ApiKey                @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
@@ -58,15 +58,15 @@ model ChatRequest {
 model Document {
   id                String    @id @default(uuid())
   apiKeyId          String
-  originalName      String    @db.VarChar(512)
-  mimeType          String    @db.VarChar(128)
+  originalName      String
+  mimeType          String
   sizeBytes         Int
-  storageType       String    @db.VarChar(32)
+  storageType       String
   contentCiphertext Bytes?
   contentIv         Bytes?
   contentTag        Bytes?
-  storagePath       String?   @db.VarChar(1024)
-  checksumSha256    String    @db.VarChar(64)
+  storagePath       String?
+  checksumSha256    String
   createdAt         DateTime  @default(now())
   deletedAt         DateTime?
 
@@ -92,11 +92,11 @@ model ChatRequestDocument {
 model AuditLog {
   id         String   @id @default(uuid())
   apiKeyId   String?
-  action     String   @db.VarChar(64)
-  resource   String?  @db.VarChar(64)
-  resourceId String?  @db.VarChar(64)
-  metaJson   String?  @db.Text
-  ip         String?  @db.VarChar(64)
+  action     String
+  resource   String?
+  resourceId String?
+  metaJson   String?
+  ip         String?
   createdAt  DateTime @default(now())
 
   apiKey ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
