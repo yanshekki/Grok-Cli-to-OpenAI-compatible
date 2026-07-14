@@ -13,7 +13,7 @@ export const corsOptions: CorsOptions = {
     }
     callback(new Error(`CORS origin not allowed: ${origin}`));
   },
-  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
   exposedHeaders: ['X-Request-Id'],
   maxAge: 600,

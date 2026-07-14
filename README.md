@@ -496,9 +496,29 @@ npm publish --access public --otp=<2FA_CODE>
 - API keys stored as **SHA-256 hashes** only  
 - Chat + documents encrypted at rest with **AES-256-GCM**  
 - Prefer **`safe`** keys for any external client  
-- Behind a reverse proxy, set **trust hops** / IP source so bans target real clients  
+- **Client IP:** `CF-Connecting-IP` / `X-Real-IP` / `X-Forwarded-For` are trusted **only** when the TCP peer is in **Trusted proxy IPs** (default `127.0.0.1`). Direct clients cannot spoof headers to bypass rate limits or ban others.  
+- Expose Admin only on localhost/VPN; admin bearer lives in `sessionStorage` (XSS = full takeover)  
 - Never commit `.env` or share admin keys  
 - Admin can be fully disabled: `gctoac admin off` (re-enable only via `gctoac admin on`)  
+- One-click update / PM2 / port change require admin role (treat admin keys as root)
+
+---
+
+## 👤 Creator
+
+**Ki (yanshekki)** — Full-stack developer, quant trader, founder of [YSK Limited](https://ysk.hk/).
+
+🌐 [linktr.ee/yanshekki](https://linktr.ee/yanshekki) · 🏢 [ysk.hk](https://ysk.hk/)
+
+### ☕ Support / Donate
+
+If this Grok → OpenAI gateway helps your work, consider buying me a coffee!
+
+| Network | Address |
+| --- | --- |
+| **EVM** (ETH/BSC/AVAX) | `yanshekki.eth` |
+| **NEAR** | `yanshekki.near` |
+| **ADA** (Cardano) | `$yanshekki` |
 
 ---
 

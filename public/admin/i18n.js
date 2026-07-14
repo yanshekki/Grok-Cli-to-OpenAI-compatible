@@ -517,6 +517,9 @@ const dict = {
       proxySrcNginx: 'nginx (X-Real-IP)',
       proxySrcXff: 'X-Forwarded-For only',
       proxySrcSocket: 'TCP socket only (no proxy)',
+      trustedProxies: 'Trusted proxy IPs / CIDRs',
+      trustedProxiesHint:
+        'Only these peers may set CF-Connecting-IP / X-Real-IP / XFF. Default 127.0.0.1 — add your nginx/LB host if remote. Direct clients cannot spoof headers.',
       sectionLimits: 'Rate limits',
       sectionAuth: 'Failed authentication',
       sectionRate: 'Rate-limit abuse (429)',
@@ -1269,6 +1272,9 @@ const dict = {
       proxySrcNginx: 'nginx（X-Real-IP）',
       proxySrcXff: '僅 X-Forwarded-For',
       proxySrcSocket: '僅 TCP socket（無代理）',
+      trustedProxies: '可信代理 IP / CIDR',
+      trustedProxiesHint:
+        '只有呢啲 peer 先可以設定 CF-Connecting-IP / X-Real-IP / XFF。預設 127.0.0.1（本機 nginx）。遠端代理請加其 IP。直連客戶無法偽造 header。',
       sectionLimits: '限流',
       sectionAuth: '失敗認證',
       sectionRate: '限流濫用（429）',

@@ -2867,6 +2867,10 @@ function readDdosPolicyForm() {
     .split(/[\n,]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+  const trustedProxies = (document.getElementById('dp-trustedProxies')?.value || '')
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
   return {
     autoBanEnabled: boolVal('dp-autoBanEnabled'),
     rateLimitWindowMs: secToMs(numVal('dp-rateWindowSec', 60)),
@@ -2895,6 +2899,7 @@ function readDdosPolicyForm() {
     whitelist: wl,
     proxyTrustHops: Math.max(0, Math.min(10, Math.floor(numVal('dp-proxyTrustHops', 1)))),
     proxyIpSource: document.getElementById('dp-proxyIpSource')?.value || 'auto',
+    trustedProxies: trustedProxies.length ? trustedProxies : ['127.0.0.1', '::1'],
   };
 }
 
@@ -3089,6 +3094,13 @@ function applyDdosPolicyToForm(p) {
   set('dp-whitelist', (p.whitelist || []).join('\n'));
   set('dp-proxyTrustHops', p.proxyTrustHops ?? 1);
   set('dp-proxyIpSource', p.proxyIpSource || 'auto');
+  set(
+    'dp-trustedProxies',
+    (p.trustedProxies && p.trustedProxies.length
+      ? p.trustedProxies
+      : ['127.0.0.1', '::1']
+    ).join('\n'),
+  );
   updateDdosAutoBadge(p.autoBanEnabled);
   updateDdosPresetUI();
 }
@@ -3160,6 +3172,10 @@ function ddosPolicyPanelHtml(p) {
                 <option value="socket" ${p.proxyIpSource === 'socket' ? 'selected' : ''}>${escapeHtml(t('ddos.proxySrcSocket'))}</option>
               </select>
               <span class="field-hint">${escapeHtml(t('ddos.proxyIpSourceHint'))}</span>
+            </label>
+            <label class="full">${escapeHtml(t('ddos.trustedProxies'))}
+              <textarea id="dp-trustedProxies" rows="3" class="policy-whitelist">${escapeHtml((p.trustedProxies && p.trustedProxies.length ? p.trustedProxies : ['127.0.0.1', '::1']).join('\n'))}</textarea>
+              <span class="field-hint">${escapeHtml(t('ddos.trustedProxiesHint'))}</span>
             </label>
           </div>
         </div>
@@ -3425,6 +3441,7 @@ async function renderDdos(opts = {}) {
       whitelist: ['127.0.0.1', '::1'],
       proxyTrustHops: 1,
       proxyIpSource: 'auto',
+      trustedProxies: ['127.0.0.1', '::1'],
     };
 
     document.getElementById('app').innerHTML = shell(`

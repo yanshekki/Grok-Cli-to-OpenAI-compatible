@@ -67,13 +67,13 @@ async function isAdminPanelOpen(): Promise<boolean> {
 }
 
 export function createApp() {
-  // Seed proxy IP config from env before first request; policy load may override
+  // Seed proxy IP config from env; bootstrap + policy load override with DB policy
   setProxyIpConfig({
     trustHops: env.trustProxyHops,
     source: env.PROXY_IP_SOURCE,
   });
 
-  // Fire-and-forget load of persistent IP bans + DDoS policy (rebuilds rate limiters)
+  // Prefer already-loaded state from bootstrap; still safe if called early (tests)
   void ipBlacklistService.ensureLoaded().catch(() => undefined);
 
   const app = express();
@@ -84,15 +84,32 @@ export function createApp() {
   void import('./services/ddos-policy.service')
     .then(({ ddosPolicyService }) => {
       ddosPolicyService.onRebuild(() => applyExpressTrustProxy(app));
+      // load() is idempotent; bootstrap usually already loaded
       return ddosPolicyService.load();
     })
+    .then(() => applyExpressTrustProxy(app))
     .catch(() => undefined);
 
   app.disable('x-powered-by');
 
   app.use(
     helmet({
-      contentSecurityPolicy: false, // admin SPA inline styles
+      // Allow Admin SPA (same-origin scripts/styles). Tighten object/base/frame.
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          'default-src': ["'self'"],
+          'script-src': ["'self'"],
+          'style-src': ["'self'", "'unsafe-inline'"],
+          'img-src': ["'self'", 'data:', 'blob:'],
+          'font-src': ["'self'", 'data:'],
+          'connect-src': ["'self'"],
+          'object-src': ["'none'"],
+          'base-uri': ["'self'"],
+          'frame-ancestors': ["'none'"],
+          'form-action': ["'self'"],
+        },
+      },
     }),
   );
   app.use(cors(corsOptions));

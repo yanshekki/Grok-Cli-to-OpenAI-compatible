@@ -11,11 +11,20 @@ const memoryBan = new Map<string, { expiresAt: number | null; reason?: string }>
 
 export class IpBlacklistService {
   private loaded = false;
+  private loadPromise: Promise<void> | null = null;
 
   async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
-    await this.reload();
-    this.loaded = true;
+    if (!this.loadPromise) {
+      this.loadPromise = this.reload()
+        .then(() => {
+          this.loaded = true;
+        })
+        .finally(() => {
+          this.loadPromise = null;
+        });
+    }
+    await this.loadPromise;
   }
 
   async reload(): Promise<void> {

@@ -50,6 +50,11 @@ export const ddosPolicySchema = z.object({
     'x-forwarded-for',
     'socket',
   ]),
+  /**
+   * IPs/CIDRs of reverse proxies allowed to set CF-Connecting-IP / X-Real-IP / XFF.
+   * Default loopback only — direct clients cannot spoof headers.
+   */
+  trustedProxies: z.array(z.string().min(1).max(64)).max(200),
 });
 
 export type DdosPolicyDto = z.infer<typeof ddosPolicySchema>;
@@ -57,6 +62,7 @@ export type DdosPolicyDto = z.infer<typeof ddosPolicySchema>;
 /** Partial update — all fields optional. */
 export const ddosPolicyUpdateSchema = ddosPolicySchema.partial().extend({
   whitelist: z.array(z.string().min(1).max(64)).max(200).optional(),
+  trustedProxies: z.array(z.string().min(1).max(64)).max(200).optional(),
 });
 
 export type DdosPolicyUpdateDto = z.infer<typeof ddosPolicyUpdateSchema>;

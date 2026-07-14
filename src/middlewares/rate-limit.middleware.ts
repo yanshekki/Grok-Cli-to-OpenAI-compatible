@@ -23,6 +23,7 @@ export function ipBlockMiddleware(
   _res: Response,
   next: NextFunction,
 ): void {
+  // Always wait for load so first requests after boot cannot bypass bans
   void ipBlacklistService
     .ensureLoaded()
     .then(() => {

@@ -11,6 +11,15 @@ async function bootstrap(): Promise<void> {
   await prisma.$connect();
   logger.info('Database connected');
 
+  // Load bans + DDoS policy before accepting traffic (no race on first request)
+  const { ipBlacklistService } = await import('./services/ip-blacklist.service');
+  const { ddosPolicyService } = await import('./services/ddos-policy.service');
+  await Promise.all([
+    ipBlacklistService.ensureLoaded(),
+    ddosPolicyService.load(),
+  ]);
+  logger.info('IP blacklist and DDoS policy loaded');
+
   const app = createApp();
   const server = app.listen(env.PORT, env.HOST, () => {
     logger.info(

@@ -496,9 +496,29 @@ npm publish --access public --otp=<2FA六位碼>
 - API key 只存 **SHA-256 hash**  
 - Chat prompt/response 與文件以 **AES-256-GCM** 靜態加密  
 - 對外 client 請用 **`safe`** mode  
-- 經反向代理時請設定 **信任層數／IP 來源**，避免 ban 到代理 IP  
+- **客戶端 IP：** 只有 **可信代理列表** 內的 TCP peer（預設 `127.0.0.1`）先會採信 `CF-Connecting-IP`／`X-Real-IP`／`XFF`。直連客戶**無法偽造 header** 繞過限流或 ban 他人。遠端 nginx 請把其 IP 加進 Admin → DDoS → 可信代理。  
+- Admin 只應開喺本機／VPN；admin key 存 `sessionStorage`（XSS = 完全接管）  
 - 不要 commit `.env`，不要外洩 admin key  
 - 可完全關閉 Admin：`gctoac admin off`（只能用 `gctoac admin on` 重開）  
+- 一鍵更新／PM2／改 port 需 admin（視 admin key 為 root）
+
+---
+
+## 👤 作者
+
+**Ki (yanshekki)** — 全端工程師、量化交易者，[YSK Limited](https://ysk.hk/) 創辦人。
+
+🌐 [linktr.ee/yanshekki](https://linktr.ee/yanshekki) · 🏢 [ysk.hk](https://ysk.hk/)
+
+### ☕ 支持 / 打賞
+
+如果呢個 Grok → OpenAI Gateway 對你有幫助，歡迎請我飲杯咖啡！
+
+| 網路 | 地址 |
+| --- | --- |
+| **EVM** (ETH/BSC/AVAX) | `yanshekki.eth` |
+| **NEAR** | `yanshekki.near` |
+| **ADA** (Cardano) | `$yanshekki` |
 
 ---
 

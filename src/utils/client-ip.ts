@@ -1,13 +1,15 @@
 import type { Request } from 'express';
-import { normalizeIp } from './ip-match';
+import {
+  ipAllowed,
+  isValidIpOrCidr,
+  normalizeIp,
+  parseIpList,
+} from './ip-match';
 
 /**
  * How to resolve the real client IP when behind reverse proxies.
- * - auto: CF-Connecting-IP → True-Client-IP → X-Real-IP → Express req.ip / XFF → socket
- * - cloudflare: prefer CF-Connecting-IP / True-Client-IP
- * - nginx: prefer X-Real-IP then X-Forwarded-For
- * - x-forwarded-for: use Express trust-proxy / XFF chain
- * - socket: always use TCP peer (ignore headers)
+ * Headers (CF / X-Real-IP / XFF) are ONLY trusted when the TCP peer
+ * is in `trustedProxies` (default: loopback). Otherwise socket IP is used.
  */
 export type ProxyIpSource =
   | 'auto'
@@ -20,14 +22,26 @@ export type ProxyIpConfig = {
   /** Express trust proxy hops; 0 = do not trust any proxy headers */
   trustHops: number;
   source: ProxyIpSource;
+  /**
+   * CIDR/IP of reverse proxies allowed to set client-IP headers.
+   * Default loopback only — add e.g. 10.0.0.0/8 if nginx is on another host.
+   */
+  trustedProxies: string[];
 };
+
+/** Default: only local reverse proxies (same host) may inject IP headers. */
+export const DEFAULT_TRUSTED_PROXIES = ['127.0.0.1', '::1'];
 
 const DEFAULT_CFG: ProxyIpConfig = {
   trustHops: 1,
   source: 'auto',
+  trustedProxies: [...DEFAULT_TRUSTED_PROXIES],
 };
 
-let runtimeCfg: ProxyIpConfig = { ...DEFAULT_CFG };
+let runtimeCfg: ProxyIpConfig = {
+  ...DEFAULT_CFG,
+  trustedProxies: [...DEFAULT_TRUSTED_PROXIES],
+};
 
 export function getProxyIpConfig(): ProxyIpConfig {
   return runtimeCfg;
@@ -39,6 +53,11 @@ export function setProxyIpConfig(partial: Partial<ProxyIpConfig>): ProxyIpConfig
       partial.trustHops != null ? partial.trustHops : runtimeCfg.trustHops,
     ),
     source: normalizeSource(partial.source ?? runtimeCfg.source),
+    trustedProxies: sanitizeTrusted(
+      partial.trustedProxies !== undefined
+        ? partial.trustedProxies
+        : runtimeCfg.trustedProxies,
+    ),
   };
   return runtimeCfg;
 }
@@ -48,8 +67,12 @@ export function resetProxyIpConfig(cfg?: ProxyIpConfig): void {
     ? {
         trustHops: clampHops(cfg.trustHops),
         source: normalizeSource(cfg.source),
+        trustedProxies: sanitizeTrusted(cfg.trustedProxies),
       }
-    : { ...DEFAULT_CFG };
+    : {
+        ...DEFAULT_CFG,
+        trustedProxies: [...DEFAULT_TRUSTED_PROXIES],
+      };
 }
 
 function clampHops(n: number): number {
@@ -71,6 +94,14 @@ function normalizeSource(s: unknown): ProxyIpSource {
   return 'auto';
 }
 
+function sanitizeTrusted(list: string[] | undefined): string[] {
+  const parsed = parseIpList(list ?? []);
+  if (!parsed.length) return [...DEFAULT_TRUSTED_PROXIES];
+  // Always keep loopback as safe defaults alongside custom list
+  const set = new Set([...DEFAULT_TRUSTED_PROXIES, ...parsed]);
+  return [...set].filter(isValidIpOrCidr);
+}
+
 function header(req: Request, name: string): string {
   const raw = req.headers[name];
   if (!raw) return '';
@@ -79,9 +110,33 @@ function header(req: Request, name: string): string {
 }
 
 function firstIpFromList(value: string): string {
-  // "client, proxy1, proxy2"
-  const part = value.split(',')[0]?.trim() || '';
-  return part;
+  return value.split(',')[0]?.trim() || '';
+}
+
+/** TCP peer (immediate connection), never from headers. */
+export function getSocketIp(req: Request): string {
+  const socketRaw =
+    req.socket?.remoteAddress ||
+    (req.connection as { remoteAddress?: string } | undefined)?.remoteAddress ||
+    '';
+  return socketRaw ? normalizeIp(socketRaw) : '';
+}
+
+/**
+ * True when the connecting peer is allowed to set client-IP headers.
+ * Uses exact + CIDR match via ipAllowed.
+ */
+export function isTrustedProxyPeer(
+  peerIp: string,
+  trustedProxies?: string[],
+): boolean {
+  const list =
+    trustedProxies && trustedProxies.length
+      ? trustedProxies
+      : runtimeCfg.trustedProxies;
+  if (!peerIp || peerIp === 'unknown') return false;
+  // ipAllowed: empty list = allow all — we never pass empty after sanitize
+  return ipAllowed(peerIp, list.length ? list : DEFAULT_TRUSTED_PROXIES);
 }
 
 /** Prefer middleware-resolved clientIp; fall back to live resolve. */
@@ -92,22 +147,32 @@ export function requestIp(req: Request): string {
 
 /**
  * Resolve client IP for rate-limit / ban / audit / DDoS.
- * Always returns a normalized string (may be "unknown").
+ *
+ * Security: proxy headers are ignored unless the TCP peer is in trustedProxies.
+ * Untrusted peers always get the socket IP (cannot spoof CF-Connecting-IP etc.).
  */
-export function getClientIp(req: Request, override?: Partial<ProxyIpConfig>): string {
+export function getClientIp(
+  req: Request,
+  override?: Partial<ProxyIpConfig>,
+): string {
   const cfg: ProxyIpConfig = {
     trustHops: clampHops(override?.trustHops ?? runtimeCfg.trustHops),
     source: normalizeSource(override?.source ?? runtimeCfg.source),
+    trustedProxies: sanitizeTrusted(
+      override?.trustedProxies ?? runtimeCfg.trustedProxies,
+    ),
   };
 
-  const socketRaw =
-    req.socket?.remoteAddress ||
-    (req.connection as { remoteAddress?: string } | undefined)?.remoteAddress ||
-    '';
-  const socketIp = socketRaw ? normalizeIp(socketRaw) : '';
+  const socketIp = getSocketIp(req);
+  if (!socketIp) return 'unknown';
 
   if (cfg.source === 'socket' || cfg.trustHops <= 0) {
-    return socketIp || 'unknown';
+    return socketIp;
+  }
+
+  // CRITICAL: never trust client-supplied IP headers from untrusted peers
+  if (!isTrustedProxyPeer(socketIp, cfg.trustedProxies)) {
+    return socketIp;
   }
 
   const pickHeader = (name: string): string | null => {
@@ -117,23 +182,20 @@ export function getClientIp(req: Request, override?: Partial<ProxyIpConfig>): st
     return ip && ip !== 'unknown' ? ip : null;
   };
 
-  // Cloudflare
+  // Cloudflare (only from trusted peer)
   if (cfg.source === 'cloudflare' || cfg.source === 'auto') {
     const cf =
       pickHeader('cf-connecting-ip') || pickHeader('true-client-ip');
     if (cf) return cf;
-    if (cfg.source === 'cloudflare') {
-      // fall through to XFF / express when CF header missing
-    }
   }
 
-  // nginx (and similar): X-Real-IP is set by the proxy to the client
+  // nginx X-Real-IP
   if (cfg.source === 'nginx' || cfg.source === 'auto') {
     const real = pickHeader('x-real-ip');
     if (real) return real;
   }
 
-  // Express trust proxy populates req.ip from X-Forwarded-For
+  // Express trust-proxy hop parsing of X-Forwarded-For
   if (
     cfg.source === 'x-forwarded-for' ||
     cfg.source === 'auto' ||
@@ -144,23 +206,11 @@ export function getClientIp(req: Request, override?: Partial<ProxyIpConfig>): st
       const fromExpress = normalizeIp(req.ip);
       if (fromExpress && fromExpress !== 'unknown') return fromExpress;
     }
-    const xff = header(req, 'x-forwarded-for');
-    if (xff) {
-      // With N trusted hops, client is typically the left-most entry
-      // when proxies append. Express already handles this for req.ip;
-      // here we use left-most as a last-resort parse.
-      const parts = xff
-        .split(',')
-        .map((s) => normalizeIp(s.trim()))
-        .filter(Boolean);
-      if (parts.length) {
-        // If hops=1, left-most is original client when format is client, proxy
-        return parts[0]!;
-      }
-    }
+    // Trusted peer only: take rightmost-1 style is Express job; if missing,
+    // do NOT use leftmost (attacker-controlled). Prefer socket as last resort.
   }
 
-  return socketIp || 'unknown';
+  return socketIp;
 }
 
 /** Express `trust proxy` setting from hops count. */

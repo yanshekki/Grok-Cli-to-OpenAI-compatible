@@ -8,6 +8,7 @@ import {
 } from '../dto/ddos.dto';
 import { ipAllowed, normalizeIp, parseIpList } from '../utils/ip-match';
 import {
+  DEFAULT_TRUSTED_PROXIES,
   setProxyIpConfig,
   type ProxyIpSource,
 } from '../utils/client-ip';
@@ -66,6 +67,8 @@ export function defaultDdosPolicyFromEnv(): DdosPolicy {
 
     proxyTrustHops: env.trustProxyHops,
     proxyIpSource: envProxySource(),
+    // Only loopback by default — remote nginx/CF edge must be listed explicitly
+    trustedProxies: [...DEFAULT_TRUSTED_PROXIES],
   };
 }
 
@@ -73,6 +76,9 @@ function applyProxyRuntime(policy: DdosPolicy): void {
   setProxyIpConfig({
     trustHops: policy.proxyTrustHops,
     source: policy.proxyIpSource,
+    trustedProxies: policy.trustedProxies?.length
+      ? policy.trustedProxies
+      : [...DEFAULT_TRUSTED_PROXIES],
   });
 }
 
@@ -133,6 +139,18 @@ function mergePolicy(raw: unknown, fallback: DdosPolicy): DdosPolicy {
     merged.whitelist = sanitizeWhitelist(
       (raw as { whitelist: string[] }).whitelist,
     );
+  }
+  if (Array.isArray((raw as { trustedProxies?: unknown }).trustedProxies)) {
+    merged.trustedProxies = sanitizeWhitelist(
+      (raw as { trustedProxies: string[] }).trustedProxies,
+    );
+    if (!(merged.trustedProxies as string[]).length) {
+      merged.trustedProxies = [...DEFAULT_TRUSTED_PROXIES];
+    }
+  }
+  // Older saved policies without trustedProxies keep fallback (loopback)
+  if (!Array.isArray(merged.trustedProxies)) {
+    merged.trustedProxies = [...DEFAULT_TRUSTED_PROXIES];
   }
   const parsed = ddosPolicySchema.safeParse(merged);
   return parsed.success ? parsed.data : fallback;
@@ -196,6 +214,13 @@ export class DdosPolicyService {
 
   async update(partial: DdosPolicyUpdateDto): Promise<DdosPolicy> {
     const current = await this.get();
+    let trustedProxies = current.trustedProxies;
+    if (partial.trustedProxies !== undefined) {
+      trustedProxies = sanitizeWhitelist(partial.trustedProxies);
+      if (!trustedProxies.length) {
+        trustedProxies = [...DEFAULT_TRUSTED_PROXIES];
+      }
+    }
     const nextRaw = {
       ...current,
       ...partial,
@@ -203,6 +228,7 @@ export class DdosPolicyService {
         partial.whitelist !== undefined
           ? sanitizeWhitelist(partial.whitelist)
           : current.whitelist,
+      trustedProxies,
     };
     const parsed = ddosPolicySchema.parse(nextRaw);
     await prisma.setting.upsert({
