@@ -159,6 +159,7 @@ function shell(content) {
         </div>
         ${langSwitchHtml()}
         ${nav('dashboard', t('nav.dashboard'))}
+        ${nav('chat', t('nav.chat'))}
         ${nav('chats', t('nav.chats'))}
         ${nav('keys', t('nav.keys'))}
         ${nav('documents', t('nav.documents'))}
@@ -255,6 +256,7 @@ async function renderLogin() {
           <code id="login-cmd-text">${escapeHtml(cmd)}</code>
           <button type="button" class="btn-copy" id="btn-copy-cmd">${escapeHtml(t('loginCopy'))}</button>
         </div>
+        <p class="login-cmd-hint">${escapeHtml(t('loginLostKey'))}</p>
       </div>
       ${poweredByFooter()}
     </div>
@@ -1130,11 +1132,16 @@ async function renderSystem() {
 }
 
 
-async function renderDdos() {
+async function renderDdos(opts = {}) {
+  const soft = Boolean(opts.soft) && document.getElementById('ddos-root');
+  const mainEl = document.querySelector('.main');
+  const savedScroll = mainEl ? mainEl.scrollTop : 0;
+
   if (ddosTimer) {
     clearInterval(ddosTimer);
     ddosTimer = null;
   }
+
   const [conn, bl, st] = await Promise.all([
     api('/ddos/connections'),
     api('/ddos/blacklist'),
@@ -1192,7 +1199,29 @@ async function renderDdos() {
       <td><button class="btn danger sm" data-ban="${escapeHtml(x.ip)}">${escapeHtml(t('ddos.ban'))}</button></td></tr>`)
     .join('');
 
-  document.getElementById('app').innerHTML = shell(`
+  const emptyLive = `<tr><td colspan="7" class="empty">${escapeHtml(t('ddos.emptyLive'))}</td></tr>`;
+  const emptyRecent = `<tr><td colspan="5" class="empty">${escapeHtml(t('common.empty'))}</td></tr>`;
+  const emptyBan = `<tr><td colspan="5" class="empty">${escapeHtml(t('ddos.emptyBan'))}</td></tr>`;
+  const emptyTop = `<tr><td colspan="3" class="empty">${escapeHtml(t('common.empty'))}</td></tr>`;
+
+  if (soft) {
+    const set = (id, html) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = html;
+    };
+    set('ddos-stat-active', String(stats.activeConnections ?? active.length));
+    set('ddos-stat-rate', String(stats.rateLimitedHits ?? 0));
+    set('ddos-stat-blocked', String(stats.blockedHits ?? 0));
+    set('ddos-stat-ban', String(bans.length));
+    set('ddos-live-body', liveRows || emptyLive);
+    set('ddos-recent-body', recentRows || emptyRecent);
+    set('ddos-ban-body', banRows || emptyBan);
+    set('ddos-top-body', topIps || emptyTop);
+    bindDdosActions();
+    if (mainEl) mainEl.scrollTop = savedScroll;
+  } else {
+    document.getElementById('app').innerHTML = shell(`
+    <div id="ddos-root">
     <div class="topbar">
       <h2>${escapeHtml(t('ddos.title'))}</h2>
       <div class="toolbar">
@@ -1201,10 +1230,10 @@ async function renderDdos() {
       </div>
     </div>
     <div class="grid">
-      <div class="card"><div class="label">${escapeHtml(t('ddos.activeConn'))}</div><div class="value">${stats.activeConnections ?? active.length}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('ddos.rateHits'))}</div><div class="value">${stats.rateLimitedHits ?? 0}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('ddos.blockedHits'))}</div><div class="value">${stats.blockedHits ?? 0}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('ddos.blacklist'))}</div><div class="value">${bans.length}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('ddos.activeConn'))}</div><div class="value" id="ddos-stat-active">${stats.activeConnections ?? active.length}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('ddos.rateHits'))}</div><div class="value" id="ddos-stat-rate">${stats.rateLimitedHits ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('ddos.blockedHits'))}</div><div class="value" id="ddos-stat-blocked">${stats.blockedHits ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('ddos.blacklist'))}</div><div class="value" id="ddos-stat-ban">${bans.length}</div></div>
     </div>
     <div class="panel" style="margin-bottom:14px">
       <div class="panel-h"><strong>${escapeHtml(t('ddos.live'))}</strong></div>
@@ -1215,7 +1244,7 @@ async function renderDdos() {
           <th>${escapeHtml(t('ddos.state'))}</th><th>${escapeHtml(t('ddos.duration'))}</th>
           <th>${escapeHtml(t('common.actions'))}</th>
         </tr></thead>
-        <tbody>${liveRows || `<tr><td colspan="7" class="empty">${escapeHtml(t('ddos.emptyLive'))}</td></tr>`}</tbody>
+        <tbody id="ddos-live-body">${liveRows || emptyLive}</tbody>
       </table>
     </div>
     <div class="panel" style="margin-bottom:14px">
@@ -1225,7 +1254,7 @@ async function renderDdos() {
           <th>${escapeHtml(t('ddos.ip'))}</th><th>${escapeHtml(t('ddos.path'))}</th>
           <th>HTTP</th><th>${escapeHtml(t('ddos.duration'))}</th><th></th>
         </tr></thead>
-        <tbody>${recentRows || `<tr><td colspan="5" class="empty">${escapeHtml(t('common.empty'))}</td></tr>`}</tbody>
+        <tbody id="ddos-recent-body">${recentRows || emptyRecent}</tbody>
       </table>
     </div>
     <div class="panel" style="margin-bottom:14px">
@@ -1248,26 +1277,46 @@ async function renderDdos() {
           <th>${escapeHtml(t('ddos.ip'))}</th><th>${escapeHtml(t('ddos.reason'))}</th>
           <th>${escapeHtml(t('ddos.source'))}</th><th>${escapeHtml(t('ddos.expires'))}</th><th></th>
         </tr></thead>
-        <tbody>${banRows || `<tr><td colspan="5" class="empty">${escapeHtml(t('ddos.emptyBan'))}</td></tr>`}</tbody>
+        <tbody id="ddos-ban-body">${banRows || emptyBan}</tbody>
       </table>
     </div>
     <div class="panel">
       <div class="panel-h"><strong>${escapeHtml(t('ddos.topIps'))}</strong></div>
       <table>
         <thead><tr><th>${escapeHtml(t('ddos.ip'))}</th><th>${escapeHtml(t('usage.requests'))}</th><th></th></tr></thead>
-        <tbody>${topIps || `<tr><td colspan="3" class="empty">${escapeHtml(t('common.empty'))}</td></tr>`}</tbody>
+        <tbody id="ddos-top-body">${topIps || emptyTop}</tbody>
       </table>
     </div>
+    </div>
   `);
-  bindShell();
+    bindShell();
+    bindDdosActions(true);
+    const main2 = document.querySelector('.main');
+    if (main2) {
+      main2.onscroll = () => {
+        // pause auto-refresh briefly while user scrolls
+        state._ddosScrollPauseUntil = Date.now() + 4000;
+      };
+    }
+  }
 
+  if (!ddosPaused && state.page === 'ddos') {
+    ddosTimer = setInterval(() => {
+      if (state.page !== 'ddos' || ddosPaused) return;
+      if (state._ddosScrollPauseUntil && Date.now() < state._ddosScrollPauseUntil) return;
+      renderDdos({ soft: true }).catch(() => undefined);
+    }, 2000);
+  }
+}
+
+function bindDdosActions(full = false) {
   const banIp = async (ip) => {
     if (!ip || !confirm(t('ddos.banConfirm'))) return;
     await api('/ddos/blacklist', {
       method: 'POST',
       body: JSON.stringify({ ip, reason: 'manual from admin', ttlSeconds: null }),
     });
-    renderDdos().catch(onErr);
+    renderDdos({ soft: true }).catch(onErr);
   };
 
   document.querySelectorAll('[data-ban]').forEach((b) => {
@@ -1279,33 +1328,33 @@ async function renderDdos() {
       await api(`/ddos/blacklist/${encodeURIComponent(b.dataset.unban)}`, {
         method: 'DELETE',
       });
-      renderDdos().catch(onErr);
+      renderDdos({ soft: true }).catch(onErr);
     };
   });
-  document.getElementById('ban-add').onclick = async () => {
-    const ip = document.getElementById('ban-ip').value.trim();
-    if (!ip) return;
-    const ttl = document.getElementById('ban-ttl').value;
-    await api('/ddos/blacklist', {
-      method: 'POST',
-      body: JSON.stringify({
-        ip,
-        reason: document.getElementById('ban-reason').value.trim() || undefined,
-        ttlSeconds: ttl ? Number(ttl) : null,
-      }),
-    });
-    renderDdos().catch(onErr);
-  };
-  document.getElementById('ddos-refresh').onclick = () => renderDdos().catch(onErr);
-  document.getElementById('ddos-pause').onclick = () => {
-    ddosPaused = !ddosPaused;
-    renderDdos().catch(onErr);
-  };
 
-  if (!ddosPaused && state.page === 'ddos') {
-    ddosTimer = setInterval(() => {
-      if (state.page === 'ddos' && !ddosPaused) renderDdos().catch(() => undefined);
-    }, 2000);
+  if (full) {
+    document.getElementById('ban-add').onclick = async () => {
+      const ip = document.getElementById('ban-ip').value.trim();
+      if (!ip) return;
+      const ttl = document.getElementById('ban-ttl').value;
+      await api('/ddos/blacklist', {
+        method: 'POST',
+        body: JSON.stringify({
+          ip,
+          reason: document.getElementById('ban-reason').value.trim() || undefined,
+          ttlSeconds: ttl ? Number(ttl) : null,
+        }),
+      });
+      renderDdos({ soft: true }).catch(onErr);
+    };
+    document.getElementById('ddos-refresh').onclick = () =>
+      renderDdos({ soft: false }).catch(onErr);
+    document.getElementById('ddos-pause').onclick = () => {
+      ddosPaused = !ddosPaused;
+      const btn = document.getElementById('ddos-pause');
+      if (btn) btn.textContent = ddosPaused ? t('ddos.resume') : t('ddos.pause');
+      if (!ddosPaused) renderDdos({ soft: true }).catch(onErr);
+    };
   }
 }
 
@@ -1389,6 +1438,212 @@ async function renderPm2() {
   };
 }
 
+
+/** @type {{ role: string, content: string, reasoning?: string, streaming?: boolean }[]} */
+let chatMessages = [];
+/** @type {AbortController | null} */
+let chatAbort = null;
+
+function playgroundKey() {
+  const mode = document.getElementById('chat-key-mode')?.value || 'session';
+  if (mode === 'custom') {
+    return document.getElementById('chat-custom-key')?.value.trim() || '';
+  }
+  return state.key;
+}
+
+function renderChatBubbles() {
+  const box = document.getElementById('chat-messages');
+  if (!box) return;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  box.innerHTML = chatMessages
+    .map((m) => {
+      const role = m.role === 'user' ? 'user' : 'assistant';
+      const reasoning = m.reasoning
+        ? `<details class="chat-reasoning"><summary>${escapeHtml(t('chat.reasoning'))}</summary><pre>${escapeHtml(m.reasoning)}</pre></details>`
+        : '';
+      return `<div class="chat-bubble ${role}">
+        <div class="chat-role">${escapeHtml(role)}</div>
+        ${reasoning}
+        <div class="chat-content">${escapeHtml(m.content || (m.streaming ? '…' : ''))}${m.streaming ? '<span class="chat-cursor">▍</span>' : ''}</div>
+      </div>`;
+    })
+    .join('');
+  if (nearBottom || chatMessages.some((m) => m.streaming)) {
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
+async function renderChatPlayground() {
+  await loadModels(false);
+  const modelOpts = (state.models || [])
+    .map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)
+    .join('');
+
+  document.getElementById('app').innerHTML = shell(`
+    <div class="chat-page">
+      <div class="topbar">
+        <h2>${escapeHtml(t('chat.title'))}</h2>
+        <div class="toolbar">
+          <button class="btn secondary sm" id="chat-new">${escapeHtml(t('chat.new'))}</button>
+        </div>
+      </div>
+      <div class="chat-toolbar">
+        <label>${escapeHtml(t('chat.keyMode'))}
+          <select id="chat-key-mode">
+            <option value="session">${escapeHtml(t('chat.useSessionKey'))}</option>
+            <option value="custom">${escapeHtml(t('chat.useCustomKey'))}</option>
+          </select>
+        </label>
+        <label id="chat-custom-wrap" style="display:none">${escapeHtml(t('chat.customKey'))}
+          <input id="chat-custom-key" type="password" placeholder="gk_live_…" style="min-width:220px" />
+        </label>
+        <label>${escapeHtml(t('chats.model'))}
+          <select id="chat-model">${modelOpts || '<option value="grok-4.5">grok-4.5</option>'}</select>
+        </label>
+        <label class="check" style="padding-bottom:0">
+          <input type="checkbox" id="chat-reasoning" checked />
+          ${escapeHtml(t('chat.includeReasoning'))}
+        </label>
+      </div>
+      <div id="chat-messages" class="chat-messages"></div>
+      <div class="chat-composer">
+        <textarea id="chat-input" rows="2" placeholder="${escapeHtml(t('chat.placeholder'))}"></textarea>
+        <div class="chat-composer-actions">
+          <button class="btn secondary sm" id="chat-stop" disabled>${escapeHtml(t('chat.stop'))}</button>
+          <button class="btn sm" id="chat-send">${escapeHtml(t('chat.send'))}</button>
+        </div>
+      </div>
+    </div>
+  `);
+  bindShell();
+  renderChatBubbles();
+
+  document.getElementById('chat-key-mode').onchange = () => {
+    const custom = document.getElementById('chat-key-mode').value === 'custom';
+    document.getElementById('chat-custom-wrap').style.display = custom ? '' : 'none';
+  };
+  document.getElementById('chat-new').onclick = () => {
+    if (chatAbort) chatAbort.abort();
+    chatMessages = [];
+    renderChatBubbles();
+  };
+  document.getElementById('chat-stop').onclick = () => {
+    if (chatAbort) chatAbort.abort();
+  };
+  document.getElementById('chat-send').onclick = () => sendChatMessage();
+  document.getElementById('chat-input').onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChatMessage();
+    }
+  };
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById('chat-input');
+  const text = input?.value.trim();
+  if (!text) return;
+  const key = playgroundKey();
+  if (!key) {
+    showError(t('chat.needKey'));
+    return;
+  }
+  const model = document.getElementById('chat-model')?.value || 'grok-4.5';
+  const includeReasoning = document.getElementById('chat-reasoning')?.checked !== false;
+
+  chatMessages.push({ role: 'user', content: text });
+  input.value = '';
+  const assistant = { role: 'assistant', content: '', reasoning: '', streaming: true };
+  chatMessages.push(assistant);
+  renderChatBubbles();
+
+  const apiMessages = chatMessages
+    .filter((m) => !m.streaming)
+    .map((m) => ({ role: m.role, content: m.content }));
+
+  const sendBtn = document.getElementById('chat-send');
+  const stopBtn = document.getElementById('chat-stop');
+  if (sendBtn) sendBtn.disabled = true;
+  if (stopBtn) stopBtn.disabled = false;
+
+  chatAbort = new AbortController();
+  try {
+    const res = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        stream: true,
+        include_reasoning: includeReasoning,
+        messages: apiMessages,
+      }),
+      signal: chatAbort.signal,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      let msg = errText;
+      try {
+        const j = JSON.parse(errText);
+        msg = j.error?.message || errText;
+      } catch {
+        /* */
+      }
+      throw new Error(msg || res.statusText);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n');
+      buffer = parts.pop() || '';
+      for (const line of parts) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === '[DONE]') continue;
+        try {
+          const json = JSON.parse(data);
+          const delta = json.choices?.[0]?.delta || {};
+          if (delta.reasoning_content) {
+            assistant.reasoning = (assistant.reasoning || '') + delta.reasoning_content;
+          }
+          if (delta.thought) {
+            assistant.reasoning = (assistant.reasoning || '') + delta.thought;
+          }
+          if (delta.content) {
+            assistant.content = (assistant.content || '') + delta.content;
+          }
+          renderChatBubbles();
+        } catch {
+          /* skip */
+        }
+      }
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      assistant.content = (assistant.content || '') + `\n[${t('chat.stopped')}]`;
+    } else {
+      assistant.content = (assistant.content || '') + `\n✗ ${e.message || e}`;
+      showError(e.message || String(e));
+    }
+  } finally {
+    assistant.streaming = false;
+    chatAbort = null;
+    renderChatBubbles();
+    if (sendBtn) sendBtn.disabled = false;
+    if (stopBtn) stopBtn.disabled = true;
+  }
+}
+
 async function render() {
   const app = document.getElementById('app');
   try {
@@ -1398,6 +1653,7 @@ async function render() {
     }
     if (!state.me) await ensureMe();
     if (state.page === 'dashboard') await renderDashboard();
+    else if (state.page === 'chat') await renderChatPlayground();
     else if (state.page === 'chats') await renderChats();
     else if (state.page === 'keys') await renderKeys();
     else if (state.page === 'documents') await renderDocuments();

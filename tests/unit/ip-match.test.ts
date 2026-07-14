@@ -7,8 +7,14 @@ import {
 } from '../../src/utils/ip-match';
 
 describe('ip-match', () => {
-  it('normalizes IPv4-mapped IPv6', () => {
+  it('normalizes IPv4-mapped IPv6 and loopback', () => {
     expect(normalizeIp('::ffff:127.0.0.1')).toBe('127.0.0.1');
+    expect(normalizeIp('::1')).toBe('127.0.0.1');
+  });
+
+  it('matches loopback whitelist variants', () => {
+    expect(ipAllowed('::1', ['127.0.0.1'])).toBe(true);
+    expect(ipAllowed('127.0.0.1', ['::1'])).toBe(true);
   });
 
   it('validates IP and CIDR', () => {

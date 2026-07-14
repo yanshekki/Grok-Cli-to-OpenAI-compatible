@@ -46,7 +46,7 @@ export function ipBlockMiddleware(
     if (ipBlacklistService.checkAndRecord(ip)) {
       next(
         ExceptionFactory.forbidden(
-          'IP is blacklisted. Contact the administrator if this is a mistake.',
+          `IP ${ip} is blacklisted. Unban via Admin → DDoS Center, or: remove from ip_blacklist table.`,
         ),
       );
       return;

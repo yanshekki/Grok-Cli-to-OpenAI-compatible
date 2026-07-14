@@ -1,5 +1,5 @@
 import { prisma } from '../config/database';
-import { normalizeIp } from '../utils/ip-match';
+import { ipMatchesExact, normalizeIp } from '../utils/ip-match';
 import { recordBlockedHit } from '../middlewares/connection-tracker';
 import { env } from '../config/env';
 import { createId } from '../utils/id';
@@ -33,15 +33,16 @@ export class IpBlacklistService {
   }
 
   isBlocked(ip: string): boolean {
-    const key = normalizeIp(ip);
-    const hit = memoryBan.get(key);
-    if (!hit) return false;
-    if (hit.expiresAt != null && Date.now() >= hit.expiresAt) {
-      memoryBan.delete(key);
-      void prisma.ipBlacklist.deleteMany({ where: { ip: key } }).catch(() => undefined);
-      return false;
+    const now = Date.now();
+    for (const [banned, hit] of memoryBan.entries()) {
+      if (hit.expiresAt != null && now >= hit.expiresAt) {
+        memoryBan.delete(banned);
+        void prisma.ipBlacklist.deleteMany({ where: { ip: banned } }).catch(() => undefined);
+        continue;
+      }
+      if (ipMatchesExact(ip, banned)) return true;
     }
-    return true;
+    return false;
   }
 
   checkAndRecord(ip: string): boolean {

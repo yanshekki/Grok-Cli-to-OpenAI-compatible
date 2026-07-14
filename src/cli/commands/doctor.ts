@@ -68,6 +68,14 @@ export async function cmdDoctor(opts: {
     info('Server not running');
   }
 
+  try {
+    const which = execSync('which pm2', { encoding: 'utf8' }).trim();
+    ok(`pm2: ${which}`);
+  } catch {
+    warn('pm2 not found — Admin PM2 page needs it. Install: npm install -g pm2');
+    warn('Or run: gctoac update (auto-installs pm2)');
+  }
+
   if (issues === 0) {
     ok('Doctor: all checks passed');
   } else {

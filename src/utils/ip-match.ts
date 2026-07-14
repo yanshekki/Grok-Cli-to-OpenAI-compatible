@@ -18,7 +18,20 @@ export function normalizeIp(ip: string): string {
   if (s.startsWith('[') && s.endsWith(']')) {
     s = s.slice(1, -1);
   }
+  // Treat common loopback forms as 127.0.0.1 for matching
+  if (s === '::1' || s === '0:0:0:0:0:0:0:1') {
+    return '127.0.0.1';
+  }
   return s;
+}
+
+/** Aliases that should match the same client (loopback). */
+export function ipEquivalents(ip: string): string[] {
+  const n = normalizeIp(ip);
+  if (n === '127.0.0.1' || n === 'localhost') {
+    return ['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost'];
+  }
+  return [n];
 }
 
 export function isValidIpOrCidr(entry: string): boolean {
@@ -53,17 +66,26 @@ function matchCidr(ip: string, cidr: string): boolean {
 /** True if clientIp matches any whitelist entry (exact or CIDR). Empty list = allow all. */
 export function ipAllowed(clientIp: string, whitelist: string[] | null | undefined): boolean {
   if (!whitelist || whitelist.length === 0) return true;
-  const ip = normalizeIp(clientIp);
-  for (const raw of whitelist) {
-    const entry = normalizeIp(raw);
-    if (!entry) continue;
-    if (entry.includes('/')) {
-      if (matchCidr(ip, entry)) return true;
-    } else if (entry === ip) {
-      return true;
+  const candidates = ipEquivalents(clientIp);
+  for (const ip of candidates) {
+    for (const raw of whitelist) {
+      const entry = normalizeIp(raw);
+      if (!entry) continue;
+      if (entry.includes('/')) {
+        if (IPV4_RE.test(ip) && matchCidr(ip, entry)) return true;
+      } else if (entry === ip || ipEquivalents(entry).includes(ip)) {
+        return true;
+      }
     }
   }
   return false;
+}
+
+/** True if client IP is exactly (or loopback-equivalent) in a ban set. */
+export function ipMatchesExact(clientIp: string, bannedIp: string): boolean {
+  const a = ipEquivalents(clientIp);
+  const b = ipEquivalents(bannedIp);
+  return a.some((x) => b.includes(x));
 }
 
 export function parseIpList(input: unknown): string[] {

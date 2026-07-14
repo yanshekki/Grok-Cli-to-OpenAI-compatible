@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import {
   ensureHomeDirs,
   resolveRuntimePaths,
@@ -32,6 +33,17 @@ export async function cmdSetup(opts: {
     ENCRYPTION_KEY: env.ENCRYPTION_KEY,
     PORT: env.PORT || String(port),
   };
+
+  try {
+    info('Ensuring pm2 is installed (for Admin PM2 control)…');
+    execSync('npm install -g pm2', {
+      stdio: 'inherit',
+      env: process.env,
+    });
+    ok('pm2 ready');
+  } catch {
+    warn('pm2 install skipped/failed — run: npm install -g pm2');
+  }
 
   info('Running prisma migrate deploy…');
   runPrisma(['migrate', 'deploy'], {

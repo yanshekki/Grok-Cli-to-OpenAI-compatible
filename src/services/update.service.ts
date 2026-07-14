@@ -408,6 +408,17 @@ export class UpdateService {
         });
       }
 
+      // Ensure pm2 is available for Admin PM2 control page
+      doStep('npm install -g pm2', () => {
+        try {
+          run('npm install -g pm2', packageRoot, log, undefined, live);
+        } catch (e) {
+          log.push(
+            `pm2 install warn: ${e instanceof Error ? e.message : e} (optional)`,
+          );
+        }
+      });
+
       // Auto migrate after package update (local prisma binary preferred)
       if (!options?.skipMigrate) {
         const dbUrl =

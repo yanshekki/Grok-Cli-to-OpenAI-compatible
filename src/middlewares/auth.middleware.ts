@@ -22,6 +22,12 @@ function clientIp(req: Request): string {
   return normalizeIp(req.ip || req.socket.remoteAddress || 'unknown');
 }
 
+function normalizeRole(role: string | undefined): string {
+  return String(role || '')
+    .trim()
+    .toLowerCase();
+}
+
 export const requireApiKey = asyncHandler(async (req, _res, next) => {
   const token = extractBearer(req);
   if (!token) {
@@ -36,13 +42,13 @@ export const requireApiKey = asyncHandler(async (req, _res, next) => {
     throw err;
   }
 
-  // Per-key IP whitelist (empty = allow all)
+  // Per-key IP whitelist (empty / null = allow all)
   const wl = req.apiKey.ipWhitelist;
-  if (wl && wl.length > 0) {
+  if (Array.isArray(wl) && wl.length > 0) {
     const ip = clientIp(req);
     if (!ipAllowed(ip, wl)) {
       throw ExceptionFactory.forbidden(
-        `API key not allowed from IP ${ip} (whitelist enforced)`,
+        `API key not allowed from IP ${ip} (whitelist enforced). Clear whitelist or add this IP.`,
       );
     }
   }
@@ -54,8 +60,10 @@ export const requireAdmin = asyncHandler(async (req, _res, next) => {
   if (!req.apiKey) {
     throw ExceptionFactory.unauthorized();
   }
-  if (req.apiKey.role !== ROLES.ADMIN) {
-    throw ExceptionFactory.forbidden('Admin role required');
+  if (normalizeRole(req.apiKey.role) !== ROLES.ADMIN) {
+    throw ExceptionFactory.forbidden(
+      `Admin role required (this key has role "${req.apiKey.role}"). Create an admin key: gctoac key create`,
+    );
   }
   next();
 });
