@@ -235,19 +235,26 @@ async function loadKeys() {
 }
 
 async function renderLogin() {
+  const cmd = 'gctoac key create';
   document.getElementById('app').innerHTML = `
     <div class="login-wrap">
-      <div class="login-card">
-        <div class="login-brand">
-          <img src="/admin/assets/logo.svg" alt="YSK Limited" width="56" height="56" />
-          <h1 class="brand-title">${escapeHtml(t('loginTitle'))}</h1>
+      <div class="login-stage">
+        <div class="login-card">
+          <div class="login-brand">
+            <img src="/admin/assets/logo.svg" alt="YSK" width="48" height="48" />
+            <h1 class="brand-title">${escapeHtml(t('loginTitle'))}</h1>
+          </div>
+          ${langSwitchHtml()}
+          <div id="flash-error" class="error-box" ${state.error ? '' : 'hidden'}>${escapeHtml(state.error)}</div>
+          <label for="login-key">${escapeHtml(t('loginLabel'))}</label>
+          <input id="login-key" type="password" placeholder="gk_live_…" autocomplete="off" autofocus />
+          <button class="btn" id="btn-login">${escapeHtml(t('loginBtn'))}</button>
         </div>
-        ${langSwitchHtml()}
-        <p>${t('loginHint')}</p>
-        <div id="flash-error" class="error-box" ${state.error ? '' : 'hidden'}>${escapeHtml(state.error)}</div>
-        <label>${escapeHtml(t('loginLabel'))}</label>
-        <input id="login-key" type="password" placeholder="gk_live_..." autocomplete="off" />
-        <button class="btn" id="btn-login" style="width:100%">${escapeHtml(t('loginBtn'))}</button>
+        <p class="login-cmd-hint">${escapeHtml(t('loginCmdHint'))}</p>
+        <div class="login-cmd">
+          <code id="login-cmd-text">${escapeHtml(cmd)}</code>
+          <button type="button" class="btn-copy" id="btn-copy-cmd">${escapeHtml(t('loginCopy'))}</button>
+        </div>
       </div>
       ${poweredByFooter()}
     </div>
@@ -258,6 +265,18 @@ async function renderLogin() {
       renderLogin().catch(onErr);
     };
   });
+  document.getElementById('btn-copy-cmd').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      const btn = document.getElementById('btn-copy-cmd');
+      btn.textContent = t('loginCopied');
+      setTimeout(() => {
+        btn.textContent = t('loginCopy');
+      }, 1500);
+    } catch {
+      /* ignore */
+    }
+  };
   document.getElementById('btn-login').onclick = async () => {
     const key = document.getElementById('login-key').value.trim();
     if (!key) return showError(t('needKey'));
@@ -272,6 +291,9 @@ async function renderLogin() {
       state.key = '';
       showError(e.message);
     }
+  };
+  document.getElementById('login-key').onkeydown = (e) => {
+    if (e.key === 'Enter') document.getElementById('btn-login').click();
   };
 }
 

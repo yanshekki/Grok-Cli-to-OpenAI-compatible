@@ -103,47 +103,54 @@ svg {
   display: block;
 }
 
-/* ——— Login ——— */
+/* ——— Login (centered, minimal) ——— */
 .login-wrap {
   min-height: 100vh;
   min-height: 100dvh;
-  height: 100%;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px 72px;
+  box-sizing: border-box;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 40%, rgba(59, 130, 246, 0.08), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 50% 80%, rgba(16, 185, 129, 0.06), transparent 50%),
+    var(--bg-page);
+  position: relative;
+}
+.login-stage {
+  width: min(380px, 100%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 28px;
-  padding: 32px 20px;
-  background:
-    radial-gradient(circle at 12% 18%, rgba(59, 130, 246, 0.12), transparent 42%),
-    radial-gradient(circle at 88% 8%, rgba(16, 185, 129, 0.1), transparent 38%),
-    var(--bg-page);
+  gap: 16px;
 }
 .login-card {
-  width: min(440px, 100%);
+  width: 100%;
   background: var(--bg-white);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-xl);
-  padding: 32px 28px 28px;
-  box-shadow: var(--shadow-md);
+  border-radius: 20px;
+  padding: 36px 28px 28px;
+  box-shadow: var(--shadow-lg);
+  text-align: center;
 }
 .login-brand {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 22px;
-  text-align: center;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 .login-brand img {
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
 }
 .login-brand h1 {
   margin: 0;
-  font-size: 1.45rem;
+  font-size: 1.35rem;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
 }
 .login-brand .brand-title {
   background: var(--brand-gradient);
@@ -151,33 +158,94 @@ svg {
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-.login-card > p {
-  margin: 0 0 20px;
-  color: var(--text-sub);
-  line-height: 1.55;
-  font-size: 0.95rem;
-  text-align: center;
+.login-card .lang-switch {
+  margin: 12px auto 20px;
 }
 .login-card label {
   display: block;
   margin-bottom: 8px;
   color: var(--text-sub);
-  font-size: 0.9rem;
-  font-weight: 600;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: left;
+  letter-spacing: 0.02em;
 }
 .login-card input {
   width: 100%;
-  padding: 12px 14px;
-  border-radius: var(--radius-md);
+  padding: 13px 14px;
+  border-radius: 12px;
   border: 1.5px solid var(--border-color);
-  background: var(--bg-white);
-  margin-bottom: 16px;
-  transition: border-color var(--transition), box-shadow var(--transition);
+  background: var(--bg-subtle);
+  margin-bottom: 14px;
+  font-size: 0.95rem;
+  text-align: left;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
 }
 .login-card input:focus {
   outline: none;
   border-color: var(--brand-blue);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+.login-card .btn {
+  width: 100%;
+  padding: 13px 16px;
+  border-radius: 12px;
+  font-size: 0.95rem;
+}
+.login-cmd {
+  width: 100%;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+.login-cmd code {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #86efac;
+  word-break: break-all;
+}
+.login-cmd .btn-copy {
+  flex-shrink: 0;
+  border: 0;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.login-cmd .btn-copy:hover {
+  background: rgba(59, 130, 246, 0.5);
+}
+.login-cmd-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.login-wrap .site-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: transparent;
+  padding: 16px;
+}
+.login-wrap .error-box {
+  text-align: left;
+  margin-bottom: 12px;
 }
 
 /* ——— Buttons ——— */
@@ -758,10 +826,6 @@ tr:hover td {
 .powered-by strong {
   color: #fff;
   font-weight: 700;
-}
-.login-wrap .site-footer {
-  background: transparent;
-  padding: 0;
 }
 .login-wrap .powered-by {
   color: var(--text-sub);

@@ -5,12 +5,13 @@ const dict = {
   en: {
     brand: 'Grok Gateway',
     brandSub: 'Admin Panel',
-    loginTitle: 'Admin Sign-in',
-    loginHint:
-      'Paste an <strong>admin API key</strong> (shown once at setup / key create). Stored in sessionStorage only.',
-    loginLabel: 'Admin API Key',
-    loginBtn: 'Enter console',
-    needKey: 'Please enter an API key',
+    loginTitle: 'Admin',
+    loginLabel: 'API Key',
+    loginBtn: 'Sign in',
+    loginCmdHint: 'Get a key in terminal:',
+    loginCopy: 'Copy',
+    loginCopied: 'Copied',
+    needKey: 'Enter API key',
     logout: 'Log out',
     nav: {
       dashboard: 'Dashboard',
@@ -261,11 +262,12 @@ const dict = {
   'zh-Hant': {
     brand: 'Grok Gateway',
     brandSub: 'Admin Panel',
-    loginTitle: 'Admin 登入',
-    loginHint:
-      '貼上 <strong>admin API key</strong>（setup / key create 時只顯示一次）。資料只存 sessionStorage。',
-    loginLabel: 'Admin API Key',
-    loginBtn: '進入控制台',
+    loginTitle: 'Admin',
+    loginLabel: 'API Key',
+    loginBtn: '登入',
+    loginCmdHint: '終端機取得 key：',
+    loginCopy: '複製',
+    loginCopied: '已複製',
     needKey: '請輸入 API key',
     logout: '登出',
     nav: {
