@@ -39,31 +39,50 @@ Client (OpenAI SDK / curl)
 
 ### Global (recommended)
 
+**Option A — install script (most reliable from GitHub)**
+
 ```bash
-# Prefer a clean install (avoids leftover partial installs):
-npm uninstall -g grok-cli-to-openai-compatible 2>/dev/null || true
+curl -fsSL https://raw.githubusercontent.com/yanshekki/Grok-Cli-to-OpenAI-compatible/main/scripts/install.sh | bash
+```
 
-# From npm (after publish):
+**Option B — clone + link**
+
+```bash
+git clone https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible.git
+cd Grok-Cli-to-OpenAI-compatible
+npm install
+npm run build
+npm link                 # exposes gctoac / gcoa on PATH
+```
+
+**Option C — npm registry (after `npm publish`)**
+
+```bash
 npm install -g grok-cli-to-openai-compatible
+```
 
-# From GitHub (always available):
-npm install -g github:yanshekki/Grok-Cli-to-OpenAI-compatible
+**Option D — local tarball**
 
-# If you still see many tar TAR_ENTRY_ERROR warnings, retry once:
-npm cache clean --force
-npm install -g github:yanshekki/Grok-Cli-to-OpenAI-compatible --prefer-online
+```bash
+git clone https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible.git
+cd Grok-Cli-to-OpenAI-compatible && npm install && npm run build && npm pack
+npm install -g ./grok-cli-to-openai-compatible-*.tgz
+```
 
+> ⚠️ **`npm install -g github:yanshekki/...` is unreliable** on some npm versions  
+> (empty/partial git clones, Prisma postinstall `spawn sh` / `TAR_ENTRY_ERROR`).  
+> Prefer **A / B / D**. After install you should see:
+
+```bash
+which gctoac
+gctoac version
 gctoac doctor
 gctoac setup          # ~/.gctoac — .env, DB migrate, admin key
 gctoac start          # background on port 3847
 gctoac status
-gcoa open             # same binary, short name
 ```
 
 Global data directory: **`~/.gctoac/`** (override with `GCTOAC_HOME` or `gctoac --home /path`).
-
-> **Note:** Harmless `TAR_ENTRY_ERROR … effect/` warnings can come from npm + Prisma unpack races.  
-> What matters: `which gctoac` and `gctoac doctor` succeed after install. The repo ships a prebuilt `dist/` so GitHub installs work even if the compile step is skipped.
 
 ### Local project
 
