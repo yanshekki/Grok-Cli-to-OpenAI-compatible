@@ -1,125 +1,183 @@
 # Grok CLI → OpenAI-Compatible Gateway
 
-Professional Node.js gateway that exposes **OpenAI-compatible** HTTP APIs backed by local **Grok CLI** (`grok -p` headless mode).
+[![CI](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/actions/workflows/ci.yml/badge.svg)](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org/)
 
-## Stack
+Turn local **[Grok CLI](https://x.ai)** headless mode (`grok -p`) into a production-ready **OpenAI-compatible HTTP API**, with encryption, audit logging, per-key **safe/agent** security policy, and a full **Admin Panel**.
 
-- Node.js 20+ / TypeScript
-- Express.js
-- Prisma + **SQLite** (zero external DB server)
-- PM2
-- AES-256-GCM encryption for chat prompts, responses, and documents
-- API key auth, rate limits, concurrency limits, helmet, CORS, Zod validation
-- **Safe / Agent policy**（對外安全模式）
-- **Admin Panel** at `/admin/`（完整 in/out 解密檢視）
+Any OpenAI SDK / Open WebUI / Cursor-compatible client can point `baseURL` here and use Grok CLI as the backend.
 
-## Architecture
-
+```text
+Client (OpenAI SDK / curl)
+        │  Authorization: Bearer gk_live_...
+        ▼
+┌───────────────────────────────────────┐
+│  Express Gateway (this project)       │
+│  · Auth / rate limit / validation     │
+│  · Safe | Agent policy                │
+│  · Encrypt + audit every chat         │
+│  · Admin Panel @ /admin               │
+└───────────────────┬───────────────────┘
+                    │ spawn
+                    ▼
+              grok -p …  (local CLI)
 ```
-src/
-  app.ts / server.ts
-  config/        env, database, cors, constants
-  dto/           Zod request schemas
-  interfaces/    OpenAI / Grok / Express types
-  entities/      domain shapes
-  exceptions/    HTTP errors (OpenAI-ish JSON)
-  middlewares/   auth, rate-limit, validate, upload, error
-  controllers/   thin HTTP layer (+ admin.controller)
-  routes/v1/     chat, models, documents, api-keys
-  routes/admin   /admin/api/*
-  services/      policy, settings, chat-admin, stats, grok-cli…
-  utils/         logger, SSE, mappers, path safety
-public/admin/    Admin SPA UI
-data/            SQLite file (gateway.db, gitignored)
-storage/sandboxes/  per-key safe mode cwd
-```
+
+---
+
+## Features
+
+| Area | Details |
+|------|---------|
+| **OpenAI API** | `POST /v1/chat/completions` (stream + non-stream), `GET /v1/models` |
+| **Thinking** | DeepSeek-style `reasoning_content` + Grok `thought` alias + `grok.*` metadata |
+| **Documents** | Encrypted upload; attach via `document_ids` in chat |
+| **Security modes** | Per-key `safe` / `agent`; optional global force-safe |
+| **Encryption** | AES-256-GCM for prompts, responses, document bodies |
+| **Admin UI** | Dashboard, full chat in/out decrypt, keys, docs, audit, settings |
+| **Ops** | SQLite (zero DB server), PM2, GitHub Actions CI, structured logging |
+
+---
+
+## Tech stack
+
+- **Runtime:** Node.js 20+, TypeScript (strict)
+- **HTTP:** Express, Helmet, CORS, express-rate-limit, Zod
+- **Data:** Prisma + **SQLite**
+- **Process:** PM2 (fork, single instance)
+- **Grok:** Local CLI via `execa` (argv only, no shell)
+
+---
 
 ## Prerequisites
 
-1. **Grok CLI** installed and logged in (`grok login`)
-2. **Node.js** >= 20
-
-No MySQL/Docker required — the database is a local SQLite file at `data/gateway.db`.
-
-## Setup
+1. [Node.js](https://nodejs.org/) ≥ 20  
+2. [Grok CLI](https://x.ai) installed and authenticated:
 
 ```bash
-cp .env.example .env
-# Generate encryption key:
-openssl rand -base64 32
-# → set ENCRYPTION_KEY= in .env
+curl -fsSL https://x.ai/cli/install.sh | bash
+grok login
+grok --version
+```
 
-# Restrict Grok working directories if needed:
-# GROK_DEFAULT_CWD=/path/to/workspace
-# GROK_CWD_ALLOWLIST=/path/to/workspace
+---
+
+## Quick start
+
+```bash
+git clone https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible.git
+cd Grok-Cli-to-OpenAI-compatible
+
+cp .env.example .env
+# Generate a 32-byte key and paste into ENCRYPTION_KEY=
+openssl rand -base64 32
 
 npm install
-npm run db:setup   # migrate + seed (prints admin API key once)
-# or:
-# npm run prisma:migrate
-# npm run seed
-```
+npm run db:setup    # migrate + seed (prints admin API key ONCE)
 
-`DATABASE_URL` default (path is relative to `prisma/schema.prisma`):
-
-```bash
-DATABASE_URL="file:../data/gateway.db"
-```
-
-DB file on disk: `data/gateway.db`
-
-## Run
-
-```bash
-# Development
 npm run dev
+# → API:   http://127.0.0.1:3000
+# → Admin: http://127.0.0.1:3000/admin/
+```
 
-# Production build + PM2
+### First admin login
+
+1. Copy the **admin API key** printed by `npm run seed` (only shown once).  
+2. Open **http://127.0.0.1:3000/admin/**  
+3. Paste the key to sign in.  
+4. Create a **client** key (`mode=safe` for external apps, `mode=agent` for trusted internal use).
+
+> **Security:** Admin can decrypt all chat prompts/responses. Never commit `.env` or share admin keys.
+
+---
+
+## Production (PM2)
+
+```bash
 npm run build
 pm2 start ecosystem.config.cjs
+pm2 status
 pm2 logs grok-openai-gateway
 ```
 
-## Admin Panel
+Uses **fork mode, 1 instance** so concurrent Grok child processes stay predictable.
+
+---
+
+## Project layout
 
 ```text
-http://127.0.0.1:3000/admin/
+src/
+  app.ts / server.ts          # Express app + graceful shutdown
+  config/                     # env, database, cors, constants
+  dto/                        # Zod request schemas
+  interfaces/                 # OpenAI / Grok / auth types
+  entities/                   # Domain shapes
+  exceptions/                 # HTTP errors (OpenAI-ish JSON)
+  middlewares/                # auth, rate-limit, validate, upload…
+  controllers/                # HTTP layer (+ admin)
+  routes/v1/                  # public OpenAI-compatible API
+  routes/admin.routes.ts      # /admin/api/*
+  services/                   # business logic
+    grok-cli.service.ts       # spawn + parse CLI
+    policy.service.ts         # safe/agent resolution
+    chat.service.ts           # completions + audit encrypt
+    chat-admin.service.ts     # decrypt for admin
+    settings.service.ts       # runtime settings (DB)
+    …
+  utils/                      # logger, SSE, mappers, path-safe
+public/admin/                 # Admin SPA (static)
+prisma/                       # schema + migrations + seed
+data/                         # gateway.db (gitignored)
+storage/                      # encrypted files + sandboxes
+tests/                        # Vitest unit + integration
 ```
 
-1. `npm run seed` 取得 **admin API key**（只顯示一次）
-2. 開 Admin Panel，貼上 key 登入
-3. 可管理：Dashboard、**Chat 完整 prompt in/out**、API Keys（safe/agent）、文件、Audit、安全設定、系統狀態
+---
 
-Admin JSON API 前綴：`/admin/api/*`（需要 `role=admin`）。
+## Admin Panel
 
-> 解密後的 prompt/response 極敏感，唔好把 admin key 外洩。
+| Page | Capabilities |
+|------|----------------|
+| **Dashboard** | Totals, 24h volume, concurrency, recent chats |
+| **Chat 記錄** | List + **full decrypted prompt / reasoning / content** |
+| **API Keys** | Create / edit `role` + `mode` + rate limit / revoke |
+| **文件** | List, decrypt preview modal, soft-delete |
+| **Audit Logs** | Lifecycle events |
+| **安全設定** | Global safe mode, tools policy, timeouts, default model |
+| **系統狀態** | DB / Grok CLI / env summary (no secrets) |
 
-## 對外安全模式（Safe Mode）
+**Admin JSON API** (Bearer admin key):
 
-| Mode | 用途 | 行為 |
-|------|------|------|
-| `safe`（預設 client key） | 對外 | 強制 sandbox cwd、**唔** always-approve、限制 tools、較短 timeout / max-turns |
-| `agent` | 內網受信 | 全能力（可用 always-approve），cwd 仍受 allowlist |
+| Method | Path |
+|--------|------|
+| GET | `/admin/api/me` |
+| GET | `/admin/api/stats` |
+| GET | `/admin/api/chats`, `/admin/api/chats/:id` |
+| GET/POST/PATCH/DELETE | `/admin/api/keys`… |
+| GET/DELETE | `/admin/api/documents`… |
+| GET | `/admin/api/audit-logs` |
+| GET/PUT | `/admin/api/settings` |
+| GET | `/admin/api/system` |
 
-- 全域：`GROK_SAFE_MODE=true` 或 Admin → 安全設定 →「全域 Safe Mode」
-- Safe tools：`none`（禁危險 tools）或 `readonly`（只讀）
-- Client **無法** 靠 body 提權（safe 下忽略任意 cwd）
+---
 
-## Tests & CI
+## Safe / Agent policy
 
-```bash
-npm test              # unit + integration (Vitest + SQLite)
-npm run test:coverage
-npm run typecheck
-npm run build
+| Mode | Default for | Behavior |
+|------|-------------|----------|
+| **`safe`** | New client keys | Forced sandbox cwd under `storage/sandboxes/{keyId}`, **no** `--always-approve`, tool denylist (or readonly allowlist), shorter timeout / max-turns |
+| **`agent`** | Admin / trusted | Full CLI capability (optional always-approve), cwd still limited by `GROK_CWD_ALLOWLIST` |
 
-# Live smoke against a running server:
-API_KEY=gk_live_... npm run smoke
-```
+- **Global force-safe:** `GROK_SAFE_MODE=true` **or** Admin → 安全設定 →「全域 Safe Mode」  
+- Clients **cannot** escalate privileges via request body (safe mode ignores arbitrary `cwd`).
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR: install → SQLite migrate → build → test.
+> Exposing this gateway on the public internet with `agent` keys is dangerous: Grok CLI is an **agent** with tools, not a pure chat API. Prefer **`safe`** for third parties.
 
-## API
+---
+
+## Public API
 
 All protected routes require:
 
@@ -131,8 +189,8 @@ Authorization: Bearer gk_live_...
 
 | Method | Path | Auth |
 |--------|------|------|
-| GET | `/health` | no |
-| GET | `/ready` | no (DB required; Grok reported) |
+| GET | `/health` | No |
+| GET | `/ready` | No (DB required; reports Grok CLI) |
 
 ### OpenAI-compatible
 
@@ -140,9 +198,9 @@ Authorization: Bearer gk_live_...
 |--------|------|-------------|
 | GET | `/v1/models` | List models |
 | GET | `/v1/models/:model` | Get model |
-| POST | `/v1/chat/completions` | Chat (supports `stream` + thinking) |
+| POST | `/v1/chat/completions` | Chat (`stream`, thinking) |
 
-#### Chat request (extensions)
+#### Chat body (extensions)
 
 ```json
 {
@@ -156,40 +214,30 @@ Authorization: Bearer gk_live_...
 }
 ```
 
-#### Thinking / reasoning (DeepSeek-compatible + Grok)
+| Field | Notes |
+|-------|--------|
+| `include_reasoning` | Default `true`. Maps Grok `thought` → `reasoning_content` |
+| `cwd` | Only honored in **agent** mode and inside allowlist; **safe** forces sandbox |
+| `session_id` | Passed to `grok -s` for multi-turn CLI sessions |
+| `document_ids` | Inject decrypted document text as system context |
 
-Grok CLI `thought` events are mapped as follows:
+#### Thinking mapping
 
-| Grok event | Mainstream (DeepSeek) | Grok alias / meta |
-|------------|----------------------|-------------------|
-| `type: thought` | `message.reasoning_content` / `delta.reasoning_content` | `message.thought` / `delta.thought` |
-| `type: text` | `message.content` / `delta.content` | same |
-| `type: end` | `finish_reason` | top-level `grok.sessionId`, `grok.stopReason` |
+| Grok CLI event | Mainstream (DeepSeek) | Grok extras |
+|----------------|----------------------|-------------|
+| `type: thought` | `reasoning_content` / `delta.reasoning_content` | `thought` / `delta.thought` |
+| `type: text` | `content` / `delta.content` | same |
+| `type: end` | `finish_reason` | `grok.sessionId`, `grok.stopReason` |
 
-- `include_reasoning` defaults to **true**; set `false` to hide CoT from the client.
-- Multi-turn prompt building uses **`content` only** (prior `reasoning_content` is not required).
+Stream order: **reasoning deltas → content deltas → finish (+ `grok`) → `[DONE]`**.
 
-Non-stream response shape (abridged):
+#### curl examples
 
-```json
-{
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": "final answer",
-      "reasoning_content": "chain of thought...",
-      "thought": "chain of thought..."
-    }
-  }],
-  "grok": { "sessionId": "...", "stopReason": "EndTurn" }
-}
-```
-
-Stream: first `delta.reasoning_content` (+ `delta.thought`), then `delta.content`, then finish (+ `grok` on last chunk).
-
-#### Non-streaming example
+**Non-stream**
 
 ```bash
+export API_KEY=gk_live_...
+
 curl -s http://127.0.0.1:3000/v1/chat/completions \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
@@ -199,7 +247,7 @@ curl -s http://127.0.0.1:3000/v1/chat/completions \
   }'
 ```
 
-#### Streaming example
+**Stream**
 
 ```bash
 curl -sN http://127.0.0.1:3000/v1/chat/completions \
@@ -226,11 +274,10 @@ const client = new OpenAI({
 const res = await client.chat.completions.create({
   model: 'grok-4.5',
   messages: [{ role: 'user', content: 'Hello' }],
-  // @ts-expect-error extension field
+  // @ts-expect-error gateway extension
   include_reasoning: true,
 });
 
-// DeepSeek-style (may need casting depending on SDK types)
 const msg = res.choices[0].message as {
   content?: string | null;
   reasoning_content?: string | null;
@@ -238,11 +285,11 @@ const msg = res.choices[0].message as {
 console.log(msg.reasoning_content, msg.content);
 ```
 
-### Documents (encrypted storage + audit)
+### Documents
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/v1/documents` | multipart `file` upload |
+| POST | `/v1/documents` | multipart field `file` |
 | GET | `/v1/documents` | list |
 | GET | `/v1/documents/:id` | metadata |
 | DELETE | `/v1/documents/:id` | soft delete |
@@ -253,55 +300,77 @@ curl -s http://127.0.0.1:3000/v1/documents \
   -F "file=@./notes.txt"
 ```
 
-### API keys (admin)
+### API keys (admin role via `/v1` or Admin Panel)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/v1/api-keys` | create key (returns plaintext once) |
-| GET | `/v1/api-keys` | list (prefix only) |
-| DELETE | `/v1/api-keys/:id` | revoke |
+| POST | `/v1/api-keys` | Create (plaintext returned **once**) |
+| GET | `/v1/api-keys` | List (prefix only) |
+| DELETE | `/v1/api-keys/:id` | Revoke |
 
-## Security
+---
+
+## Environment variables
+
+See [`.env.example`](.env.example). Critical keys:
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | SQLite path relative to `prisma/` e.g. `file:../data/gateway.db` |
+| `ENCRYPTION_KEY` | 32-byte key, base64 or 64-char hex (`openssl rand -base64 32`) |
+| `GROK_BIN` | CLI binary (default `grok`) |
+| `GROK_DEFAULT_MODEL` | Default model id |
+| `GROK_DEFAULT_CWD` / `GROK_CWD_ALLOWLIST` | Working directory policy for **agent** mode |
+| `GROK_ALWAYS_APPROVE` | Agent mode only; safe mode always disables |
+| `GROK_SAFE_MODE` | Force all keys into safe mode |
+| `GROK_SAFE_MAX_TURNS` / `GROK_SAFE_TIMEOUT_MS` | Safe defaults |
+| `GROK_MAX_CONCURRENT` | Max parallel CLI processes |
+| `ADMIN_PANEL_ENABLED` | Master switch for `/admin` |
+| `CORS_ORIGINS` | Comma-separated origins |
+| `PORT` / `HOST` | Listen address (default `3000` / `0.0.0.0`) |
+
+**Back up `ENCRYPTION_KEY`.** Losing it makes historical ciphertext unreadable.
+
+---
+
+## Security summary
 
 | Control | Detail |
 |---------|--------|
-| Auth | Bearer API keys; only SHA-256 hash stored |
-| Encryption | AES-256-GCM for prompts, responses, file bodies |
-| Rate limit | Global + per-key chat limit |
-| Concurrency | `GROK_MAX_CONCURRENT` caps parallel Grok spawns |
-| Process | `execa` argv array (no shell); timeout; sanitized env |
-| Path | `GROK_CWD_ALLOWLIST` prevents arbitrary cwd |
-| Upload | size / extension / MIME allowlists |
-| HTTP | helmet, CORS allowlist, body size limit |
+| Auth | Bearer API keys; only SHA-256 **hash** stored |
+| Encryption | AES-256-GCM at rest for chat + documents |
+| Safe policy | Sandbox cwd, tool limits, no always-approve |
+| Rate limit | Global + per-key |
+| Concurrency | Caps Grok spawns |
+| Process | `execa` argv arrays only; env scrubbed |
+| Path | CWD allowlist (agent); forced sandbox (safe) |
+| Upload | Size / extension / MIME allowlists |
+| HTTP | Helmet, CORS, body size limit |
+| Audit | Encrypted chats + `audit_logs` for admin actions |
 
-**Back up `ENCRYPTION_KEY`.** Lost key = historical ciphertext unreadable.
+---
 
-## Audit trail
-
-- Every chat request writes encrypted prompt/response into `chat_requests`
-- Document upload/delete and API key lifecycle write `audit_logs`
-- Sensitive fields are never logged in plaintext by pino redaction
-
-## PM2
+## Scripts
 
 ```bash
-pm2 start ecosystem.config.cjs
-pm2 status
-pm2 restart grok-openai-gateway
-pm2 stop grok-openai-gateway
+npm run dev           # tsx watch
+npm run build         # tsc → dist/
+npm start             # node dist/server.js
+npm test              # Vitest (unit + integration)
+npm run typecheck
+npm run db:setup      # migrate deploy + seed
+npm run seed          # bootstrap admin key
+npm run smoke         # API_KEY=... bash scripts/smoke.sh
 ```
 
-Uses **fork mode, 1 instance** so concurrent Grok child processes stay predictable.
-
-## Environment
-
-See `.env.example` for the full list. Critical variables:
-
-- `DATABASE_URL`
-- `ENCRYPTION_KEY` (32-byte base64 or 64-char hex)
-- `GROK_BIN`, `GROK_DEFAULT_MODEL`, `GROK_DEFAULT_CWD`, `GROK_CWD_ALLOWLIST`
-- `GROK_TIMEOUT_MS`, `GROK_MAX_CONCURRENT`
+---
 
 ## License
 
-MIT
+MIT — see repository license terms.
+
+---
+
+## Disclaimer
+
+This project shells out to **Grok CLI**, which can run tools (filesystem, shell, web, etc.) depending on policy and flags. You are responsible for authentication, network exposure, and key mode (`safe` vs `agent`). The authors are not responsible for misuse or data loss.
