@@ -18,6 +18,12 @@ import {
   cmdKeyList,
   cmdKeyRevoke,
 } from './commands/key';
+import {
+  cmdAdminOff,
+  cmdAdminOn,
+  cmdAdminStatus,
+} from './commands/admin-panel';
+import { cmdLogsClear, cmdLogsShow } from './commands/logs';
 import { DEFAULT_PORT } from './lib/paths';
 
 function readPkgVersion(): string {
@@ -59,10 +65,17 @@ program
 
 program
   .command('start')
-  .description(`Start gateway (default port ${DEFAULT_PORT})`)
+  .description(
+    `Start gateway (default port ${DEFAULT_PORT}). Use --pm2 to run under PM2.`,
+  )
   .option('-f, --foreground', 'Run in foreground')
-  .action(async (opts: { foreground?: boolean }) => {
-    await cmdStart({ ...globalOpts(), foreground: opts.foreground });
+  .option('--pm2', 'Start under PM2 (process manager)')
+  .action(async (opts: { foreground?: boolean; pm2?: boolean }) => {
+    await cmdStart({
+      ...globalOpts(),
+      foreground: opts.foreground,
+      pm2: opts.pm2,
+    });
   });
 
 program
@@ -76,8 +89,13 @@ program
   .command('restart')
   .description('Restart gateway')
   .option('-f, --foreground', 'Run in foreground')
-  .action(async (opts: { foreground?: boolean }) => {
-    await cmdRestart({ ...globalOpts(), foreground: opts.foreground });
+  .option('--pm2', 'Restart under PM2')
+  .action(async (opts: { foreground?: boolean; pm2?: boolean }) => {
+    await cmdRestart({
+      ...globalOpts(),
+      foreground: opts.foreground,
+      pm2: opts.pm2,
+    });
   });
 
 program
@@ -156,9 +174,39 @@ keyCmd
     await cmdKeyCreate({ ...globalOpts(), role: 'admin', name: opts.name });
   });
 
+const adminCmd = program
+  .command('admin')
+  .description('Enable/disable Admin panel (CLI is the only way to turn it back on)')
+  .action(async () => {
+    await cmdAdminStatus(globalOpts());
+  });
+
+adminCmd
+  .command('status')
+  .description('Show Admin panel on/off status')
+  .action(async () => {
+    await cmdAdminStatus(globalOpts());
+  });
+
+adminCmd
+  .command('on')
+  .description('Enable Admin panel (settings DB)')
+  .action(async () => {
+    await cmdAdminOn(globalOpts());
+  });
+
+adminCmd
+  .command('off')
+  .description('Disable Admin panel (settings DB); re-enable with: gctoac admin on')
+  .action(async () => {
+    await cmdAdminOff(globalOpts());
+  });
+
 program
   .command('doctor')
-  .description('Check Node, Grok CLI, env, build, process')
+  .description(
+    'Check Node, Grok CLI, env (proxy/port), build, runner (gctoac/PM2), conflicts',
+  )
   .action(async () => {
     await cmdDoctor(globalOpts());
   });
@@ -169,6 +217,29 @@ program
   .option('--admin', 'Print admin URL only')
   .action(async (opts: { admin?: boolean }) => {
     await cmdOpen({ ...globalOpts(), admin: opts.admin });
+  });
+
+const logsCmd = program
+  .command('logs')
+  .description('Show or clear gateway log files (pm2 + gctoac)')
+  .option('-n, --lines <n>', 'Tail lines (default 40)', (v) => Number(v))
+  .action(async (opts: { lines?: number }) => {
+    await cmdLogsShow({ ...globalOpts(), lines: opts.lines });
+  });
+
+logsCmd
+  .command('clear')
+  .description('Truncate pm2-error/out and gctoac log files')
+  .action(async () => {
+    await cmdLogsClear(globalOpts());
+  });
+
+logsCmd
+  .command('show')
+  .description('Print tail of log files')
+  .option('-n, --lines <n>', 'Tail lines (default 40)', (v) => Number(v))
+  .action(async (opts: { lines?: number }) => {
+    await cmdLogsShow({ ...globalOpts(), lines: opts.lines });
   });
 
 program

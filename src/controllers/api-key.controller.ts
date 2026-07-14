@@ -6,6 +6,7 @@ import { apiKeyService } from '../services/api-key.service';
 import { auditService } from '../services/audit.service';
 import { asyncHandler } from '../utils/async-handler';
 import type { ApiKeyMode, ApiKeyRole } from '../interfaces/auth.interface';
+import { requestIp } from '../utils/client-ip';
 
 export class ApiKeyController {
   create = asyncHandler(async (req: Request, res: Response) => {
@@ -19,7 +20,7 @@ export class ApiKeyController {
       mode: dto.mode as ApiKeyMode,
       rateLimit: dto.rateLimit,
       actorApiKeyId: req.apiKey.id,
-      ip: req.ip,
+      ip: requestIp(req),
     });
     res.status(201).json({ object: 'api_key', data: created });
   });
@@ -33,7 +34,7 @@ export class ApiKeyController {
       apiKeyId: req.apiKey.id,
       action: AUDIT_ACTIONS.API_KEY_LIST,
       resource: 'api_key',
-      ip: req.ip,
+      ip: requestIp(req),
     });
     res.status(200).json({ object: 'list', data: items });
   });
@@ -42,7 +43,7 @@ export class ApiKeyController {
     if (!req.apiKey) {
       throw ExceptionFactory.unauthorized();
     }
-    await apiKeyService.revoke(String(req.params.id), req.apiKey.id, req.ip);
+    await apiKeyService.revoke(String(req.params.id), req.apiKey.id, requestIp(req));
     res.status(200).json({ object: 'api_key.deleted', id: req.params.id, deleted: true });
   });
 }

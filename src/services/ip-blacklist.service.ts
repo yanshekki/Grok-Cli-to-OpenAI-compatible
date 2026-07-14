@@ -3,6 +3,8 @@ import { ipMatchesExact, normalizeIp } from '../utils/ip-match';
 import { recordBlockedHit } from '../middlewares/connection-tracker';
 import { env } from '../config/env';
 import { createId } from '../utils/id';
+import { BAN_SOURCES } from '../config/constants';
+import { ddosPolicyService } from './ddos-policy.service';
 
 /** Memory set of currently banned IPs (exact). */
 const memoryBan = new Map<string, { expiresAt: number | null; reason?: string }>();
@@ -102,9 +104,22 @@ export class IpBlacklistService {
     return rows.filter((r) => !r.expiresAt || r.expiresAt > now);
   }
 
-  /** Auto temporary ban (auth abuse). */
-  async autoBan(ip: string, reason: string, source: string): Promise<void> {
-    const expiresAt = new Date(Date.now() + env.BLOCK_DURATION_MS);
+  /**
+   * Auto temporary ban.
+   * Duration: explicit ms, else current DDoS policy auth ban duration, else env.
+   */
+  async autoBan(
+    ip: string,
+    reason: string,
+    source: string = BAN_SOURCES.AUTO_AUTH,
+    durationMs?: number,
+  ): Promise<void> {
+    const policy = ddosPolicyService.getSync();
+    const ms =
+      durationMs ??
+      policy.authBanDurationMs ??
+      env.BLOCK_DURATION_MS;
+    const expiresAt = new Date(Date.now() + ms);
     await this.ban({
       ip,
       reason,

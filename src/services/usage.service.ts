@@ -107,14 +107,29 @@ export class UsageService {
         requests: m._count._all,
       })),
       perKey,
-      limits: {
-        globalWindowMs: env.RATE_LIMIT_WINDOW_MS,
-        globalMax: env.RATE_LIMIT_MAX,
-        ipMax: env.RATE_LIMIT_IP_MAX,
-        chatBurstMax: env.CHAT_BURST_MAX,
-        blockFailedAuthThreshold: env.BLOCK_FAILED_AUTH_THRESHOLD,
-        grokMaxConcurrent: env.GROK_MAX_CONCURRENT,
-      },
+      limits: await (async () => {
+        try {
+          const { ddosPolicyService } = await import('./ddos-policy.service');
+          const p = await ddosPolicyService.get();
+          return {
+            globalWindowMs: p.rateLimitWindowMs,
+            globalMax: p.rateLimitMax,
+            ipMax: p.rateLimitIpMax,
+            chatBurstMax: p.chatBurstMax,
+            blockFailedAuthThreshold: p.failedAuthThreshold,
+            grokMaxConcurrent: env.GROK_MAX_CONCURRENT,
+          };
+        } catch {
+          return {
+            globalWindowMs: env.RATE_LIMIT_WINDOW_MS,
+            globalMax: env.RATE_LIMIT_MAX,
+            ipMax: env.RATE_LIMIT_IP_MAX,
+            chatBurstMax: env.CHAT_BURST_MAX,
+            blockFailedAuthThreshold: env.BLOCK_FAILED_AUTH_THRESHOLD,
+            grokMaxConcurrent: env.GROK_MAX_CONCURRENT,
+          };
+        }
+      })(),
     };
   }
 }

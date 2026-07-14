@@ -107,7 +107,9 @@ export async function cmdUpdate(opts: {
     info(`npm:      ${infoVer.latestNpm ?? 'n/a'}`);
     info(`GitHub:   ${infoVer.latestGithub ?? 'n/a'}`);
     info(`Latest:   ${infoVer.latest ?? 'n/a'}`);
-    info(`Update?:  ${infoVer.updateAvailable ? 'yes' : 'no / unknown'}`);
+    info(
+      `Status:   ${infoVer.versionStatus}${infoVer.updateAvailable ? ' (update available)' : ''}`,
+    );
     info(`Data DB:  ${databaseUrl}`);
 
     if (opts.check) {

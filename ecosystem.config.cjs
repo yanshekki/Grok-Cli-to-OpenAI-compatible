@@ -27,37 +27,70 @@ function loadEnvFile(filePath) {
   return out;
 }
 
+function loadRuntimeConfig(root) {
+  const defaults = {
+    name: 'grok-openai-gateway',
+    script: 'dist/server.js',
+    instances: 1,
+    exec_mode: 'fork',
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '512M',
+    max_restarts: 10,
+    min_uptime: '5s',
+    restart_delay: 2000,
+    exp_backoff_restart_delay: 1000,
+    merge_logs: true,
+    time: true,
+    error_file: 'logs/pm2-error.log',
+    out_file: 'logs/pm2-out.log',
+    env_extra: {},
+  };
+  try {
+    const p = path.join(root, 'pm2.runtime.json');
+    if (fs.existsSync(p)) {
+      const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+      return { ...defaults, ...raw, env_extra: { ...defaults.env_extra, ...(raw.env_extra || {}) } };
+    }
+  } catch {
+    /* ignore */
+  }
+  return defaults;
+}
+
 const root = __dirname;
 const fileEnv = {
   ...loadEnvFile(path.join(root, '.env')),
   ...loadEnvFile(path.join(process.env.HOME || '', '.gctoac', '.env')),
 };
+const rt = loadRuntimeConfig(root);
 
 /** @type {import('pm2').StartOptions[]} */
 module.exports = {
   apps: [
     {
-      name: 'grok-openai-gateway',
-      script: 'dist/server.js',
-      cwd: root,
-      instances: 1,
-      exec_mode: 'fork',
-      autorestart: true,
-      // Prevent infinite EADDRINUSE crash loops
-      max_restarts: 10,
-      min_uptime: '5s',
-      restart_delay: 2000,
-      exp_backoff_restart_delay: 1000,
-      watch: false,
-      max_memory_restart: '512M',
+      name: rt.name || 'grok-openai-gateway',
+      script: rt.script || 'dist/server.js',
+      cwd: rt.cwd || root,
+      instances: rt.instances != null ? rt.instances : 1,
+      exec_mode: rt.exec_mode === 'cluster' ? 'cluster' : 'fork',
+      autorestart: rt.autorestart !== false,
+      max_restarts: rt.max_restarts != null ? rt.max_restarts : 10,
+      min_uptime: rt.min_uptime != null ? rt.min_uptime : '5s',
+      restart_delay: rt.restart_delay != null ? rt.restart_delay : 2000,
+      exp_backoff_restart_delay:
+        rt.exp_backoff_restart_delay != null ? rt.exp_backoff_restart_delay : 1000,
+      watch: Boolean(rt.watch),
+      max_memory_restart: rt.max_memory_restart || '512M',
       env: {
-        NODE_ENV: 'production',
+        NODE_ENV: fileEnv.NODE_ENV || 'production',
         ...fileEnv,
+        ...(rt.env_extra || {}),
       },
-      error_file: 'logs/pm2-error.log',
-      out_file: 'logs/pm2-out.log',
-      merge_logs: true,
-      time: true,
+      error_file: rt.error_file || 'logs/pm2-error.log',
+      out_file: rt.out_file || 'logs/pm2-out.log',
+      merge_logs: rt.merge_logs !== false,
+      time: rt.time !== false,
     },
   ],
 };

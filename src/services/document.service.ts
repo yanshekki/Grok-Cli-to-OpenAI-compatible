@@ -3,8 +3,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { prisma } from '../config/database';
 import {
-  ALLOWED_UPLOAD_EXTENSIONS,
-  ALLOWED_UPLOAD_MIME_TYPES,
   AUDIT_ACTIONS,
   STORAGE_TYPES,
   isImageMime,
@@ -13,7 +11,8 @@ import { env } from '../config/env';
 import type { DocumentPublicEntity } from '../entities/document.entity';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { createId } from '../utils/id';
-import { ensureRelativeStoragePath, sanitizeFilename } from '../utils/path-safe';
+import { assertSafeUpload } from '../utils/file-sniff';
+import { ensureRelativeStoragePath } from '../utils/path-safe';
 import { auditService } from './audit.service';
 import { encryptionService } from './encryption.service';
 
@@ -34,22 +33,15 @@ export class DocumentService {
     buffer: Buffer;
     ip?: string;
   }): Promise<DocumentPublicEntity> {
-    const originalName = sanitizeFilename(input.originalName);
-    const ext = path.extname(originalName).toLowerCase();
-    const mime = (input.mimeType || 'application/octet-stream').toLowerCase();
-
     if (input.buffer.length > env.UPLOAD_MAX_BYTES) {
       throw ExceptionFactory.documentTooLarge(env.UPLOAD_MAX_BYTES);
     }
 
-    if (
-      !ALLOWED_UPLOAD_EXTENSIONS.has(ext) &&
-      !ALLOWED_UPLOAD_MIME_TYPES.has(mime)
-    ) {
-      throw ExceptionFactory.documentTypeNotAllowed(
-        `Extension "${ext}" / MIME "${mime}" is not allowed`,
-      );
-    }
+    const { originalName, mimeType: mime } = assertSafeUpload({
+      originalName: input.originalName,
+      mimeType: input.mimeType,
+      buffer: input.buffer,
+    });
 
     const checksumSha256 = createHash('sha256').update(input.buffer).digest('hex');
     const encrypted = encryptionService.encrypt(input.buffer);

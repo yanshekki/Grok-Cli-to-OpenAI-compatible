@@ -161,11 +161,82 @@ export class ApiKeyService {
     return { ...mapPublic(created), key };
   }
 
-  async list(): Promise<ApiKeyPublicEntity[]> {
+  async list(query?: {
+    q?: string;
+    role?: string;
+    mode?: string;
+    isActive?: boolean;
+    limit?: number;
+    offset?: number;
+    all?: boolean;
+  }): Promise<{ data: ApiKeyPublicEntity[]; total: number; limit: number; offset: number }> {
+    const where: {
+      role?: string;
+      mode?: string;
+      isActive?: boolean;
+      OR?: Array<Record<string, unknown>>;
+    } = {};
+    if (query?.role) where.role = query.role;
+    if (query?.mode) where.mode = query.mode;
+    if (query?.isActive !== undefined) where.isActive = query.isActive;
+    const q = query?.q?.trim();
+    if (q) {
+      where.OR = [
+        { name: { contains: q } },
+        { keyPrefix: { contains: q } },
+      ];
+    }
+
+    const total = await prisma.apiKey.count({ where });
+    if (query?.all) {
+      const rows = await prisma.apiKey.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+      });
+      return {
+        data: rows.map(mapPublic),
+        total,
+        limit: total,
+        offset: 0,
+      };
+    }
+
+    const limit = Math.min(Math.max(query?.limit ?? 20, 1), 200);
+    const offset = Math.max(query?.offset ?? 0, 0);
     const rows = await prisma.apiKey.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
     });
-    return rows.map(mapPublic);
+    return {
+      data: rows.map(mapPublic),
+      total,
+      limit,
+      offset,
+    };
+  }
+
+  /** Load key identity for admin playground (no raw secret). */
+  async getByIdForAuth(id: string): Promise<AuthenticatedApiKey> {
+    const record = await prisma.apiKey.findUnique({ where: { id } });
+    if (!record || !record.isActive) {
+      throw ExceptionFactory.notFound('API key');
+    }
+    return {
+      id: record.id,
+      name: record.name,
+      keyPrefix: record.keyPrefix,
+      role: record.role as ApiKeyRole,
+      mode: (record.mode === KEY_MODES.AGENT
+        ? KEY_MODES.AGENT
+        : KEY_MODES.SAFE) as ApiKeyMode,
+      rateLimit: record.rateLimit,
+      isActive: record.isActive,
+      maxTurns: record.maxTurns,
+      timeoutMs: record.timeoutMs,
+      ipWhitelist: parseIpList(record.ipWhitelist),
+    };
   }
 
   async update(

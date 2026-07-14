@@ -7,7 +7,8 @@ import {
 } from './rate-limit.middleware';
 import { apiKeyService } from '../services/api-key.service';
 import { asyncHandler } from '../utils/async-handler';
-import { ipAllowed, normalizeIp } from '../utils/ip-match';
+import { ipAllowed } from '../utils/ip-match';
+import { requestIp } from '../utils/client-ip';
 
 function extractBearer(req: Request): string | null {
   const header = req.header('authorization');
@@ -19,7 +20,7 @@ function extractBearer(req: Request): string | null {
 }
 
 function clientIp(req: Request): string {
-  return normalizeIp(req.ip || req.socket.remoteAddress || 'unknown');
+  return requestIp(req);
 }
 
 function normalizeRole(role: string | undefined): string {

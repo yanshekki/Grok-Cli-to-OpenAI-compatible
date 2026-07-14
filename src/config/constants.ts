@@ -16,10 +16,14 @@ export const ALLOWED_UPLOAD_MIME_TYPES = new Set([
   'text/xml',
   'application/pdf',
   'application/javascript',
+  'text/javascript',
   'application/typescript',
+  'text/typescript',
   'text/x-python',
   'text/x-java-source',
-  'application/octet-stream',
+  'text/css',
+  'text/yaml',
+  'application/x-yaml',
   'image/png',
   'image/jpeg',
   'image/webp',
@@ -64,8 +68,69 @@ export const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   '.gif',
 ]);
 
+/** Extension → allowed MIME set (strict pairing). */
+export const EXT_MIME_MAP: Record<string, Set<string>> = {
+  '.txt': new Set(['text/plain']),
+  '.md': new Set(['text/plain', 'text/markdown']),
+  '.markdown': new Set(['text/plain', 'text/markdown']),
+  '.csv': new Set(['text/csv', 'text/plain']),
+  '.json': new Set(['application/json', 'text/plain']),
+  '.xml': new Set(['application/xml', 'text/xml', 'text/plain']),
+  '.html': new Set(['text/html']),
+  '.htm': new Set(['text/html']),
+  '.js': new Set(['application/javascript', 'text/javascript', 'text/plain']),
+  '.ts': new Set([
+    'application/typescript',
+    'text/typescript',
+    'text/plain',
+    'application/javascript',
+  ]),
+  '.tsx': new Set([
+    'application/typescript',
+    'text/typescript',
+    'text/plain',
+    'application/javascript',
+  ]),
+  '.jsx': new Set(['application/javascript', 'text/javascript', 'text/plain']),
+  '.py': new Set(['text/x-python', 'text/plain']),
+  '.java': new Set(['text/x-java-source', 'text/plain']),
+  '.go': new Set(['text/plain']),
+  '.rs': new Set(['text/plain']),
+  '.c': new Set(['text/plain']),
+  '.cpp': new Set(['text/plain']),
+  '.h': new Set(['text/plain']),
+  '.hpp': new Set(['text/plain']),
+  '.css': new Set(['text/css', 'text/plain']),
+  '.yml': new Set(['text/yaml', 'application/x-yaml', 'text/plain']),
+  '.yaml': new Set(['text/yaml', 'application/x-yaml', 'text/plain']),
+  '.toml': new Set(['text/plain']),
+  '.ini': new Set(['text/plain']),
+  '.env': new Set(['text/plain']),
+  '.sh': new Set(['text/plain']),
+  '.sql': new Set(['text/plain']),
+  '.log': new Set(['text/plain']),
+  '.pdf': new Set(['application/pdf']),
+  '.png': new Set(['image/png']),
+  '.jpg': new Set(['image/jpeg']),
+  '.jpeg': new Set(['image/jpeg']),
+  '.webp': new Set(['image/webp']),
+  '.gif': new Set(['image/gif']),
+};
+
 export function isImageMime(mime: string): boolean {
   return mime.toLowerCase().startsWith('image/');
+}
+
+export function isTextualMime(mime: string): boolean {
+  const m = mime.toLowerCase();
+  return (
+    m.startsWith('text/') ||
+    m === 'application/json' ||
+    m === 'application/xml' ||
+    m === 'application/javascript' ||
+    m === 'application/typescript' ||
+    m === 'application/x-yaml'
+  );
 }
 
 export const CHAT_STATUS = {
@@ -81,6 +146,7 @@ export const AUDIT_ACTIONS = {
   DOCUMENT_DELETE: 'document.delete',
   DOCUMENT_LIST: 'document.list',
   DOCUMENT_READ: 'document.read',
+  DOCUMENT_DOWNLOAD: 'document.download',
   API_KEY_CREATE: 'api_key.create',
   API_KEY_UPDATE: 'api_key.update',
   API_KEY_DELETE: 'api_key.delete',
@@ -91,10 +157,18 @@ export const AUDIT_ACTIONS = {
   SYSTEM_UPDATE_CHECK: 'system.update_check',
   IP_BAN: 'ip.ban',
   IP_UNBAN: 'ip.unban',
+  DDOS_POLICY_UPDATE: 'ddos.policy_update',
   PM2_START: 'pm2.start',
   PM2_STOP: 'pm2.stop',
   PM2_RESTART: 'pm2.restart',
   PM2_RELOAD: 'pm2.reload',
+  PM2_CONFIG: 'pm2.config',
+  PM2_SWITCH: 'pm2.switch',
+  PLAYGROUND_CHAT: 'playground.chat',
+  PLAYGROUND_UPLOAD: 'playground.upload',
+  CONVERSATION_CREATE: 'conversation.create',
+  CONVERSATION_UPDATE: 'conversation.update',
+  CONVERSATION_DELETE: 'conversation.delete',
 } as const;
 
 export const ROLES = {
@@ -139,7 +213,21 @@ export const SETTING_KEYS = {
   SAFE_TOOLS_MODE: 'safe_tools_mode', // none | readonly
   DEFAULT_MODEL: 'default_model',
   ADMIN_PANEL_ENABLED: 'admin_panel_enabled',
+  /** JSON blob: runtime DDoS / rate-limit / auto-ban policy */
+  DDOS_POLICY: 'ddos_policy',
 } as const;
+
+/** IpBlacklist.source values */
+export const BAN_SOURCES = {
+  MANUAL: 'manual',
+  AUTO_AUTH: 'auto-auth',
+  AUTO_RATE: 'auto-rate',
+  AUTO_CONN: 'auto-conn',
+  AUTO_VELOCITY: 'auto-velocity',
+  AUTO_ESCALATE: 'auto-escalate',
+} as const;
+
+export type BanSource = (typeof BAN_SOURCES)[keyof typeof BAN_SOURCES];
 
 export const SAFE_TOOLS_MODES = {
   NONE: 'none',

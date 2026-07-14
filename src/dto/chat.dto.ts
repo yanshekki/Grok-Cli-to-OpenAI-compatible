@@ -53,3 +53,10 @@ export const createChatCompletionSchema = z.object({
 });
 
 export type CreateChatCompletionDto = z.infer<typeof createChatCompletionSchema>;
+
+/** Admin chat playground: run as another API key by id (no raw secret needed). */
+export const adminPlaygroundChatSchema = createChatCompletionSchema.extend({
+  apiKeyId: z.string().uuid().optional(),
+});
+
+export type AdminPlaygroundChatDto = z.infer<typeof adminPlaygroundChatSchema>;

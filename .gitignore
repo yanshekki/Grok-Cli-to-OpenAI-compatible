@@ -17,6 +17,7 @@ data/*
 *.db-shm
 *.log
 gctoac.pid
+pm2.runtime.json
 .DS_Store
 coverage/
 .prisma/

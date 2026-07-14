@@ -15,15 +15,17 @@ Production OpenAI-compatible HTTP gateway for local **[Grok CLI](https://x.ai)**
 | **npm** | [`grok-cli-to-openai-compatible`](https://www.npmjs.com/package/grok-cli-to-openai-compatible) |
 | **CLI** | `gctoac` · alias `gcoa` |
 | **Default port** | **`3847`** |
+| **NODE_ENV default** | **`production`** (set `development` only for local coding) |
 
 **What you get**
 
 - OpenAI-compatible `POST /v1/chat/completions` (stream + non-stream)
 - Thinking / `reasoning_content` (DeepSeek-style + Grok `thought`)
-- Per-key **safe** / **agent** policy
+- Per-key **safe** / **agent** policy + global safety overrides
 - AES-256-GCM encryption + full chat audit
-- Admin Panel at `/admin` (decrypted prompt I/O, keys, one-click update)
-- Control CLI: `gctoac setup | start | stop | status | update`
+- **Admin Panel** — dashboard, chats, keys, documents, audit, usage, **DDoS center**, PM2, system update
+- **DDoS / abuse protection** — configurable rate limits, multi-rule auto-ban, reverse-proxy client IP (nginx / Cloudflare)
+- Control CLI: setup, start/stop/restart, status, doctor, logs, update, keys, admin on/off
 
 ```text
 Client (OpenAI SDK / curl / Open WebUI)
@@ -31,6 +33,7 @@ Client (OpenAI SDK / curl / Open WebUI)
         ▼
    Express Gateway :3847
    · Auth · rate limit · safe/agent
+   · Proxy-aware client IP · auto-ban
    · Encrypted audit · Admin /admin
    · gctoac start | stop | status | update
         │
@@ -58,10 +61,10 @@ grok --version
 ```bash
 npm install -g grok-cli-to-openai-compatible
 
-gctoac doctor   # check Node / Grok / env
-gctoac setup    # ~/.gctoac, .env, DB, admin API key
+gctoac doctor   # Node / Grok / env / runner / proxy checks
+gctoac setup    # data home, .env (NODE_ENV=production), DB, admin API key
 gctoac start    # http://127.0.0.1:3847
-gctoac status
+gctoac status   # runner, port, proxy, health
 ```
 
 Open Admin (paste an **admin API key**):
@@ -70,7 +73,7 @@ Open Admin (paste an **admin API key**):
 http://127.0.0.1:3847/admin/
 ```
 
-If you lost the setup key, create a new one anytime:
+If you lost the setup key:
 
 ```bash
 gctoac key create    # prints plaintext once
@@ -104,7 +107,7 @@ curl -s http://127.0.0.1:3847/v1/chat/completions \
 npm install -g grok-cli-to-openai-compatible
 ```
 
-Optional helper (same as above):
+Optional helper:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yanshekki/Grok-Cli-to-OpenAI-compatible/main/scripts/install.sh | bash
@@ -120,7 +123,7 @@ npx gctoac start --foreground
 
 ### Develop from source (contributors)
 
-`dist/` is **not** committed. Build locally after clone:
+`dist/` is **not** committed. Build after clone:
 
 ```bash
 git clone https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible.git
@@ -130,19 +133,19 @@ npm run build
 npm link          # optional: put gctoac on PATH
 ```
 
-> Do **not** use `npm install -g github:…` — it is unsupported.
+> Do **not** use `npm install -g github:…` — unsupported.
 
 ### Update
 
 ```bash
 npm install -g grok-cli-to-openai-compatible@latest
 # or
-gctoac update              # npm self-update + restart
+gctoac update              # self-update + schedule restart
 gctoac update --check      # check only
 gctoac update --no-restart
 ```
 
-Or in Admin → **System** → one-click update.
+Or Admin → **System** → one-click update.
 
 ---
 
@@ -154,39 +157,56 @@ Or in Admin → **System** → one-click update.
 | `http://127.0.0.1:3847/admin/` | Admin Panel |
 | `http://127.0.0.1:3847/health` | Health check |
 
-Override with `PORT=` in `.env`, or:
+Change the listen port (persists to `.env`, restarts runner when done from Admin):
 
 ```bash
-gctoac --port 3847 start
+# CLI — writes PORT to .env and starts
+gctoac --port 4000 start
+gctoac --port 4000 start --pm2
+
+# or edit .env
+PORT=4000
 ```
+
+**Admin → PM2 → Listen port** — default **3847**, save & restart. After change, open Admin on the **new** port (e.g. `http://127.0.0.1:4000/admin/`).
 
 ---
 
 ## CLI (`gctoac` / `gcoa`)
 
+Global options: `--home <path>`, `--port <n>` (default **3847**).
+
 | Command | Description |
 |---------|-------------|
-| `gctoac setup` | Create dirs, `.env`, migrate DB, seed admin key |
-| `gctoac start` | Start gateway (background) |
-| `gctoac start -f` | Start in foreground |
-| `gctoac stop` | Stop background process |
-| `gctoac restart` | Restart |
-| `gctoac status` | PID + health |
-| `gctoac migrate` | Run Prisma migrations |
-| `gctoac seed` | Seed admin API key (if missing) |
-| `gctoac key` / `gctoac key create` | **Create API key** (prints plaintext once) |
+| `gctoac setup` | Create dirs, `.env`, migrate DB, seed admin key, install pm2 if possible |
+| `gctoac start` | Start gateway (detached gctoac) |
+| `gctoac start -f` | Foreground |
+| `gctoac start --pm2` | Start under PM2 |
+| `gctoac stop` | Stop gctoac + PM2 app + free port orphans |
+| `gctoac restart` | Restart; respects **preferred runner** (PM2 if last used) |
+| `gctoac restart --pm2` | Force restart under PM2 |
+| `gctoac status` | Runner, NODE_ENV, port, trust proxy / IP source, health |
+| `gctoac doctor` | Full env check (proxy, dual-runner, port conflicts, logs size) |
+| `gctoac logs` / `logs show` | Tail pm2 + gctoac log files |
+| `gctoac logs clear` | Truncate log files (same set as Admin clear) |
+| `gctoac admin status` | Admin panel on/off |
+| `gctoac admin on` / `off` | Enable/disable Admin (DB; **only CLI can turn it back on**) |
+| `gctoac migrate` | Prisma migrate deploy |
+| `gctoac seed` | Seed admin API key if missing |
+| `gctoac key` / `key create` | Create API key (plaintext once) |
 | `gctoac key list` | List keys (prefix only) |
 | `gctoac key revoke <id>` | Revoke a key |
-| `gctoac doctor` | Environment checks |
-| `gctoac update` | Self-update then restart |
-| `gctoac update --check` | Check for updates only |
+| `gctoac update` | Self-update + restart |
+| `gctoac update --check` | Check only |
 | `gctoac update --no-restart` | Update without restart |
 | `gctoac open` | Print API / Admin URLs |
-| `gctoac version` | Show version |
+| `gctoac version` | Package version |
 
 ```bash
 gctoac --home ~/.gctoac-alt setup
 gctoac --port 3847 start
+gctoac status
+gctoac logs clear
 ```
 
 ---
@@ -197,12 +217,15 @@ gctoac --port 3847 start
 |---------|---------|
 | OpenAI API | `POST /v1/chat/completions` (stream + non-stream), `GET /v1/models` |
 | Thinking | `reasoning_content` + Grok `thought` + `grok.*` meta |
-| Documents | Encrypted upload; attach via `document_ids` |
+| Documents | Type-sniffed upload, encrypted storage (DB or filesystem), download |
 | Safe / Agent | Per-key policy; optional global force-safe |
 | Encryption | AES-256-GCM for prompts, responses, files |
-| Admin Panel | Dashboard, decrypted chat I/O, keys, docs, audit, settings, update |
-| CLI | Lifecycle + self-update |
-| Ops | SQLite, PM2, GitHub Actions CI |
+| Chat history | Multi-turn conversations, context modes (full / summary / recent) |
+| Admin Panel | Dashboard, chats, keys, docs, audit, usage, DDoS, PM2, system |
+| DDoS center | Live connections, blacklist, auto-ban rules, presets, runtime policy |
+| Reverse proxy | Trust hops + CF / nginx / X-Forwarded-For client IP |
+| CLI | Lifecycle, preferred runner, logs, self-update |
+| Ops | SQLite, PM2, log auto-trim (>5 MB), GitHub Actions CI |
 
 ---
 
@@ -285,6 +308,7 @@ console.log(res.choices[0].message.content);
 | POST | `/v1/documents` | Upload (`file` field) |
 | GET/DELETE | `/v1/documents`… | List / soft-delete |
 | POST/GET/DELETE | `/v1/api-keys`… | Admin key management |
+| * | `/admin/api/*` | Admin JSON API (`role=admin`) |
 
 ---
 
@@ -295,7 +319,7 @@ console.log(res.choices[0].message.content);
 | **`safe`** (default for clients) | External apps | Sandbox cwd, no always-approve, restricted tools, shorter timeout |
 | **`agent`** | Trusted / internal | Full CLI tools (optional always-approve); cwd still allowlisted |
 
-- Force all keys safe: `GROK_SAFE_MODE=true` or Admin → Safety  
+- Force all keys safe: `GROK_SAFE_MODE=true` or Admin → **Safety**  
 - Clients **cannot** escalate via request body  
 - Do **not** expose `agent` keys on the public internet  
 
@@ -309,25 +333,67 @@ http://127.0.0.1:3847/admin/
 
 | Page | Features |
 |------|----------|
-| Dashboard | Stats, recent chats, concurrency |
-| Chats | Full **decrypted** prompt / reasoning / response |
-| API Keys | Create, edit mode/role/rate limit, revoke |
-| Documents | List, decrypt preview, delete |
-| Audit Logs | Action history |
-| Safety | Global safe mode, tools, timeouts |
-| System | Health, versions, **one-click update & restart** |
+| **Dashboard** | 24h KPIs, success rate, protection snapshot, models, runtime (port / encryption) |
+| **Chat** | Multi-turn playground, history, context modes, attachments |
+| **Chat logs** | Search / filter / pager; full **decrypted** prompt / reasoning / response |
+| **API Keys** | Create / edit mode / role / rate limit / IP whitelist; revoke |
+| **Documents** | Search / filter / pager; preview, download, delete; storage DB vs filesystem |
+| **Audit Logs** | Search / filter / pager; human-readable actions |
+| **Usage & limits** | 24h stats, by-model / by-key tabs, gateway limit summary |
+| **DDoS center** | Live connections, blacklist, auto-ban events, **runtime protection policy** (presets: relaxed / balanced / strict / custom), reverse-proxy IP settings |
+| **Safety** | Global safe mode, tools, timeouts |
+| **PM2** | Runner switch (gctoac ↔ PM2), **listen port** (default 3847), config, **clear logs** + auto-trim |
+| **System** | Health, software checks, one-click update & restart |
 
 Admin API: `/admin/api/*` (requires `role=admin`).
+
+### DDoS / abuse (runtime)
+
+Policy is stored in the database (Admin → DDoS). Env values are **initial defaults** only; after first save, Admin is authoritative. Reset via **Reset to env defaults**.
+
+| Capability | Notes |
+|------------|--------|
+| Rate limits | Window, max per key, max per IP, chat burst |
+| Auto-ban rules | Failed auth, repeated 429, concurrent flood, request velocity, escalation |
+| Presets | Relaxed / Balanced / Strict / Custom (auto-detected) |
+| Whitelist | Never auto-banned (e.g. `127.0.0.1`) |
+| Manual ban | TTL or permanent |
+
+### Reverse proxy / CDN (client IP)
+
+Behind **nginx** or **Cloudflare**, configure so bans, rate limits, and audit use the **real client IP**:
+
+| Setting | Typical value |
+|---------|----------------|
+| Trust proxy hops | `1` = nginx or CF→app; `2` = CF→nginx→app; `0` = direct only |
+| IP source | `auto` (recommended), `cloudflare`, `nginx`, `x-forwarded-for`, `socket` |
+
+Set in **Admin → DDoS → Reverse proxy**, or env:
+
+```env
+TRUST_PROXY=1
+PROXY_IP_SOURCE=auto
+```
+
+Example nginx:
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
 
 ---
 
 ## Environment variables
 
-See [`.env.example`](./.env.example).
+See [`.env.example`](./.env.example). Fresh `gctoac setup` writes **`NODE_ENV=production`**.
 
 | Variable | Description |
 |----------|-------------|
-| `PORT` | Default **`3847`** |
+| `NODE_ENV` | Default **`production`**. Use `development` only for local coding (pretty logs) |
+| `PORT` | Default **`3847`** (also editable in Admin → PM2) |
 | `DATABASE_URL` | SQLite, e.g. `file:../data/gateway.db` (relative to `prisma/`) |
 | `ENCRYPTION_KEY` | 32-byte key: `openssl rand -base64 32` |
 | `GROK_BIN` | Default `grok` |
@@ -336,16 +402,35 @@ See [`.env.example`](./.env.example).
 | `GROK_ALWAYS_APPROVE` | Agent only; off in safe mode |
 | `GROK_SAFE_MODE` | Force all keys to safe |
 | `GROK_MAX_CONCURRENT` | Max parallel Grok processes |
-| `ADMIN_PANEL_ENABLED` | Toggle `/admin` |
-| `CORS_ORIGINS` | Comma-separated origins |
+| `ADMIN_PANEL_ENABLED` | Hard off for `/admin` (env; restart). Runtime: `gctoac admin on\|off` |
+| `PM2_ADMIN_ENABLED` | Allow Admin PM2 controls |
+| `CORS_ORIGINS` | Comma-separated origins (update when changing `PORT`) |
+| `RATE_LIMIT_*` / `CHAT_BURST_MAX` / `BLOCK_*` | Initial rate-limit / auto-auth defaults (overridden by DDoS policy after save) |
+| `TRUST_PROXY` | Proxy hops: `0` / `1` / `2`… (`true`→1, `false`→0) |
+| `PROXY_IP_SOURCE` | `auto` \| `cloudflare` \| `nginx` \| `x-forwarded-for` \| `socket` |
 | `GCTOAC_HOME` | CLI data home (default `~/.gctoac`) |
-| `STORAGE_DIR` | Encrypted files + sandboxes |
+| `STORAGE_DIR` | Encrypted large files + sandboxes |
+| `UPLOAD_MAX_BYTES` / `DOCUMENT_DB_MAX_BYTES` | Upload / DB vs filesystem threshold |
 
 **Back up `ENCRYPTION_KEY`.** If lost, historical data cannot be decrypted.
 
 ---
 
-## Production (PM2)
+## Production
+
+### Recommended: CLI
+
+```bash
+gctoac setup
+gctoac start              # detached gctoac
+# or
+gctoac start --pm2        # under PM2
+gctoac status
+```
+
+`gctoac restart` follows the last **preferred runner** (gctoac or PM2).
+
+### PM2 ecosystem
 
 ```bash
 npm run build
@@ -353,7 +438,21 @@ pm2 start ecosystem.config.cjs
 pm2 logs grok-openai-gateway
 ```
 
-Or simply: `gctoac start` (background; pid under data home).
+### Logs
+
+- Files under `logs/` (or data home): `pm2-error.log`, `pm2-out.log`, `gctoac.*.log`
+- **Admin → PM2 → Clear logs**, or `gctoac logs clear`
+- **Auto-trim:** each log read trims files **> 5 MB** down to the last ~512 KB
+
+### Avoid EADDRINUSE
+
+Only one runner should bind the port. If both gctoac and PM2 race:
+
+```bash
+gctoac stop
+gctoac start          # or: gctoac start --pm2
+gctoac doctor         # flags mixed runners
+```
 
 ---
 
@@ -364,7 +463,7 @@ src/           TypeScript (app, routes, services, cli)
 public/admin/  Admin SPA
 prisma/        Schema, migrations, seed
 dist/          Built JS (gitignored; created by npm run build / prepublishOnly)
-scripts/       prepare, install.sh (npm install -g)
+scripts/       prepare, install.sh
 tests/         Vitest
 ```
 
@@ -373,17 +472,17 @@ tests/         Vitest
 ## Scripts
 
 ```bash
-npm run dev          # development
-npm run build        # compile + prisma generate
+npm run dev          # development (tsx watch)
+npm run build        # prisma generate + tsc
 npm start            # node dist/server.js
 npm test             # unit + integration
 npm run db:setup     # migrate + seed
-gctoac setup|start|status|stop|doctor|update
+gctoac setup|start|status|stop|doctor|logs|update
 ```
 
 ### Publish (maintainers)
 
-`prepublishOnly` runs `npm run build` so the tarball always includes `dist/`.
+`prepublishOnly` runs `npm run build` so the tarball includes `dist/`.
 
 ```bash
 npm login
@@ -397,7 +496,9 @@ npm publish --access public --otp=<2FA_CODE>
 - API keys stored as **SHA-256 hashes** only  
 - Chat + documents encrypted at rest with **AES-256-GCM**  
 - Prefer **`safe`** keys for any external client  
+- Behind a reverse proxy, set **trust hops** / IP source so bans target real clients  
 - Never commit `.env` or share admin keys  
+- Admin can be fully disabled: `gctoac admin off` (re-enable only via `gctoac admin on`)  
 
 ---
 

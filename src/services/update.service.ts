@@ -27,12 +27,27 @@ export const NPM_PACKAGE = 'grok-cli-to-openai-compatible';
 
 export type InstallChannel = 'git' | 'npm-global' | 'npm-local' | 'unknown';
 
+/** How local package version compares to registry / channel */
+export type VersionStatus =
+  | 'update_available'
+  | 'up_to_date'
+  | 'ahead'
+  | 'unknown';
+
 export interface VersionInfo {
   current: string;
   latestNpm: string | null;
   latestGithub: string | null;
   latest: string | null;
+  /** True only when a published version is strictly newer than local */
   updateAvailable: boolean;
+  /**
+   * update_available — registry newer than local
+   * up_to_date — matches latest known release
+   * ahead — local newer than npm/GitHub (common on git/dev)
+   * unknown — could not fetch remote versions
+   */
+  versionStatus: VersionStatus;
   channel: InstallChannel;
   packageRoot: string;
   installSource: string;
@@ -281,16 +296,31 @@ export class UpdateService {
 
     // Prefer npm latest when available; else GitHub tag
     const latest = latestNpm || latestGithub;
-    const updateAvailable = latest
-      ? compareSemver(latest, pkg.version) > 0
-      : channel === 'git'; // git always can pull
+    let versionStatus: VersionStatus = 'unknown';
+    let updateAvailable = false;
+
+    if (latest) {
+      const cmp = compareSemver(latest, pkg.version);
+      if (cmp > 0) {
+        versionStatus = 'update_available';
+        updateAvailable = true;
+      } else if (cmp < 0) {
+        // Local ahead of registry (typical for git / unpublished bumps)
+        versionStatus = 'ahead';
+        updateAvailable = false;
+      } else {
+        versionStatus = 'up_to_date';
+        updateAvailable = false;
+      }
+    }
 
     return {
       current: pkg.version,
       latestNpm,
       latestGithub,
       latest,
-      updateAvailable: channel === 'git' ? true : updateAvailable,
+      updateAvailable,
+      versionStatus,
       channel,
       packageRoot,
       installSource,

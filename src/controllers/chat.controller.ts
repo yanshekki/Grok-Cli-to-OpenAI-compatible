@@ -3,6 +3,7 @@ import type { CreateChatCompletionDto } from '../dto/chat.dto';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { chatService } from '../services/chat.service';
 import { asyncHandler } from '../utils/async-handler';
+import { requestIp } from '../utils/client-ip';
 
 export class ChatController {
   createCompletion = asyncHandler(async (req: Request, res: Response) => {
@@ -18,7 +19,7 @@ export class ChatController {
       {
         apiKey: req.apiKey,
         requestId: req.requestId,
-        ip: req.ip,
+        ip: requestIp(req),
         userAgent: req.header('user-agent') ?? undefined,
       },
       stream ? res : undefined,

@@ -5,7 +5,8 @@ import path from 'node:path';
 loadDotenv();
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  // Default production for installable gateway; set development only for local coding
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('production'),
   PORT: z.coerce.number().int().positive().default(3847),
   HOST: z.string().default('0.0.0.0'),
   DATABASE_URL: z.string().min(1),
@@ -55,10 +56,30 @@ const envSchema = z.object({
   DOCUMENT_DB_MAX_BYTES: z.coerce.number().int().positive().default(1024 * 1024),
   STORAGE_DIR: z.string().default('./storage'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  /**
+   * Trust reverse proxy hops for client IP (nginx / Cloudflare / LB).
+   * - false / 0: use socket only (ignore X-Forwarded-For)
+   * - true / 1: trust 1 hop (typical nginx or CF → app)
+   * - 2+: e.g. Cloudflare → nginx → app
+   */
   TRUST_PROXY: z
     .string()
-    .default('true')
-    .transform((v) => v === 'true' || v === '1'),
+    .default('1')
+    .transform((v) => {
+      const s = String(v).trim().toLowerCase();
+      if (s === 'false' || s === '0' || s === 'no' || s === 'off') return 0;
+      if (s === 'true' || s === 'yes' || s === 'on') return 1;
+      const n = Number(s);
+      if (Number.isFinite(n) && n >= 0) return Math.min(10, Math.floor(n));
+      return 1;
+    }),
+  /**
+   * Client IP source when proxies are trusted:
+   * auto | cloudflare | nginx | x-forwarded-for | socket
+   */
+  PROXY_IP_SOURCE: z
+    .enum(['auto', 'cloudflare', 'nginx', 'x-forwarded-for', 'socket'])
+    .default('auto'),
 });
 
 function parseEncryptionKey(raw: string): Buffer {
@@ -109,6 +130,10 @@ export const env = {
   defaultCwd: path.resolve(data.GROK_DEFAULT_CWD),
   isProd: data.NODE_ENV === 'production',
   isDev: data.NODE_ENV === 'development',
+  /** Number of trusted reverse-proxy hops (0 = off). */
+  trustProxyHops: data.TRUST_PROXY,
+  /** @deprecated use trustProxyHops; kept as boolean for older call sites */
+  TRUST_PROXY: data.TRUST_PROXY > 0,
 };
 
 export type Env = typeof env;

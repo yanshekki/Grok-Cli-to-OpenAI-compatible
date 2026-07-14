@@ -3,6 +3,7 @@ import type { ListDocumentsDto } from '../dto/document.dto';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { documentService } from '../services/document.service';
 import { asyncHandler } from '../utils/async-handler';
+import { requestIp } from '../utils/client-ip';
 
 export class DocumentController {
   upload = asyncHandler(async (req: Request, res: Response) => {
@@ -18,7 +19,7 @@ export class DocumentController {
       originalName: req.file.originalname,
       mimeType: req.file.mimetype,
       buffer: req.file.buffer,
-      ip: req.ip,
+      ip: requestIp(req),
     });
 
     res.status(201).json({ object: 'document', data: doc });
@@ -53,7 +54,7 @@ export class DocumentController {
     if (!req.apiKey) {
       throw ExceptionFactory.unauthorized();
     }
-    await documentService.softDelete(req.apiKey.id, String(req.params.id), req.ip);
+    await documentService.softDelete(req.apiKey.id, String(req.params.id), requestIp(req));
     res.status(200).json({ object: 'document.deleted', id: req.params.id, deleted: true });
   });
 }

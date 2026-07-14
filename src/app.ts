@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
@@ -12,21 +13,80 @@ import {
   globalRateLimiter,
   ipBlockMiddleware,
 } from './middlewares/rate-limit.middleware';
+import {
+  applyExpressTrustProxy,
+  clientIpMiddleware,
+} from './middlewares/client-ip.middleware';
 import { connectionTrackerMiddleware } from './middlewares/connection-tracker';
 import { errorMiddleware, notFoundHandler } from './middlewares/error.middleware';
 import { logger } from './utils/logger';
 import { ipBlacklistService } from './services/ip-blacklist.service';
+import { settingsService } from './services/settings.service';
+import {
+  expressTrustProxySetting,
+  setProxyIpConfig,
+} from './utils/client-ip';
 import './interfaces/express.interface';
 
+/** Bust browser cache when any admin SPA asset changes */
+function adminAssetVersion(adminDir: string): string {
+  try {
+    const files = ['app.js', 'i18n.js', 'styles.css', 'index.html'];
+    let max = 0;
+    for (const f of files) {
+      try {
+        const st = fs.statSync(path.join(adminDir, f));
+        max = Math.max(max, st.mtimeMs);
+      } catch {
+        /* ignore */
+      }
+    }
+    return String(Math.floor(max) || Date.now());
+  } catch {
+    return String(Date.now());
+  }
+}
+
+function renderAdminIndex(adminDir: string): string {
+  const raw = fs.readFileSync(path.join(adminDir, 'index.html'), 'utf8');
+  const v = adminAssetVersion(adminDir);
+  // Only replace the explicit token — never regex-match app.js paths
+  // (that would corrupt template literals like `/admin/app.js?v=${V}`).
+  return raw.replaceAll('__ADMIN_ASSET_V__', v);
+}
+
+async function isAdminPanelOpen(): Promise<boolean> {
+  if (!env.ADMIN_PANEL_ENABLED) return false;
+  try {
+    const s = await settingsService.getAll();
+    return s.adminPanelEnabled;
+  } catch {
+    // DB down: fall back to env only
+    return env.ADMIN_PANEL_ENABLED;
+  }
+}
+
 export function createApp() {
-  // Fire-and-forget load of persistent IP bans
+  // Seed proxy IP config from env before first request; policy load may override
+  setProxyIpConfig({
+    trustHops: env.trustProxyHops,
+    source: env.PROXY_IP_SOURCE,
+  });
+
+  // Fire-and-forget load of persistent IP bans + DDoS policy (rebuilds rate limiters)
   void ipBlacklistService.ensureLoaded().catch(() => undefined);
 
   const app = express();
 
-  if (env.TRUST_PROXY) {
-    app.set('trust proxy', 1);
-  }
+  // Initial trust-proxy from env (policy rebuild updates hops at runtime)
+  app.set('trust proxy', expressTrustProxySetting(env.trustProxyHops));
+
+  void import('./services/ddos-policy.service')
+    .then(({ ddosPolicyService }) => {
+      ddosPolicyService.onRebuild(() => applyExpressTrustProxy(app));
+      return ddosPolicyService.load();
+    })
+    .catch(() => undefined);
 
   app.disable('x-powered-by');
 
@@ -37,6 +97,7 @@ export function createApp() {
   );
   app.use(cors(corsOptions));
   app.use(requestIdMiddleware);
+  app.use(clientIpMiddleware);
   app.use(connectionTrackerMiddleware);
   app.use(ipBlockMiddleware);
   app.use(
@@ -58,20 +119,101 @@ export function createApp() {
   app.use(express.urlencoded({ extended: false, limit: env.BODY_LIMIT }));
   app.use(globalRateLimiter);
 
-  // Admin JSON API
+  // Admin JSON API (self-gates with ensureAdminPanel)
   app.use('/admin/api', adminRoutes);
 
-  // Admin SPA static files
   const adminDir = path.join(process.cwd(), 'public', 'admin');
-  app.use('/admin', express.static(adminDir, { index: 'index.html' }));
-  app.get(['/admin', '/admin/*'], (req, res, next) => {
-    if (req.path.startsWith('/admin/api')) {
+  const disabledPage = path.join(adminDir, 'disabled.html');
+
+  // Gate SPA when panel is off — only serve disabled page (+ logo for branding)
+  app.use('/admin', async (req, res, next) => {
+    if (req.path.startsWith('/api')) {
       next();
       return;
     }
-    res.sendFile(path.join(adminDir, 'index.html'), (err) => {
-      if (err) next();
+    const open = await isAdminPanelOpen();
+    if (open) {
+      next();
+      return;
+    }
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    // Allow logo for disabled page
+    if (req.path === '/assets/logo.svg') {
+      res.sendFile(path.join(adminDir, 'assets', 'logo.svg'), (err) => {
+        if (err) next();
+      });
+      return;
+    }
+    res.status(503).sendFile(disabledPage, (err) => {
+      if (err) {
+        res
+          .status(503)
+          .type('html')
+          .send(
+            '<!doctype html><meta charset="utf-8"><title>Admin off</title><body style="font-family:system-ui;padding:2rem"><h1>Admin panel disabled</h1><p>Run: <code>gctoac admin on</code></p></body>',
+          );
+      }
     });
+  });
+
+  // Admin SPA static files (only reached when panel open)
+  // no-store for JS/CSS/HTML so i18n updates always reach the browser
+  app.use(
+    '/admin',
+    express.static(adminDir, {
+      index: false, // always use dynamic index below
+      etag: false,
+      lastModified: false,
+      maxAge: 0,
+      setHeaders(res, filePath) {
+        if (/\.(js|css|html|svg)$/i.test(filePath)) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+        }
+      },
+    }),
+  );
+  app.get(['/admin', '/admin/', '/admin/index.html'], async (_req, res, next) => {
+    try {
+      const open = await isAdminPanelOpen();
+      if (!open) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(503).sendFile(disabledPage, (err) => {
+          if (err) next();
+        });
+        return;
+      }
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.type('html').send(renderAdminIndex(adminDir));
+    } catch (e) {
+      next(e);
+    }
+  });
+  app.get(['/admin/*'], async (req, res, next) => {
+    if (req.path.startsWith('/admin/api') || req.path.startsWith('/api')) {
+      next();
+      return;
+    }
+    // SPA fallback only for non-file routes
+    if (path.extname(req.path)) {
+      next();
+      return;
+    }
+    try {
+      const open = await isAdminPanelOpen();
+      if (!open) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(503).sendFile(disabledPage, (err) => {
+          if (err) next();
+        });
+        return;
+      }
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.type('html').send(renderAdminIndex(adminDir));
+    } catch (e) {
+      next(e);
+    }
   });
 
   app.use(routes);

@@ -1,5 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
+import { getClientIp } from '../utils/client-ip';
+import { abuseGuardService } from '../services/abuse-guard.service';
+import { ExceptionFactory } from '../exceptions/exception.factory';
 
 export interface TrackedConnection {
   id: string;
@@ -24,7 +27,7 @@ let blockedHits = 0;
 let rateLimitedHits = 0;
 
 function clientIp(req: Request): string {
-  return req.ip || req.socket.remoteAddress || 'unknown';
+  return req.clientIp || getClientIp(req);
 }
 
 export function connectionTrackerMiddleware(
@@ -47,19 +50,37 @@ export function connectionTrackerMiddleware(
     return;
   }
 
+  const pathOnly = url.split('?')[0] || '/';
+  const ip = clientIp(req);
+
+  const { overConcurrent } = abuseGuardService.onRequestStart(ip, pathOnly);
+  if (overConcurrent) {
+    // End tracking immediately (do not pass 429 — that would double-count rate-abuse)
+    abuseGuardService.onRequestEnd(ip, pathOnly);
+    next(
+      ExceptionFactory.rateLimited(
+        'Too many concurrent connections from this IP',
+      ),
+    );
+    return;
+  }
+
   const id = randomUUID();
   const entry: TrackedConnection = {
     id,
-    ip: clientIp(req),
+    ip,
     method: req.method,
-    path: url.split('?')[0] || '/',
+    path: pathOnly,
     userAgent: String(req.headers['user-agent'] || '').slice(0, 200),
     startedAt: Date.now(),
     state: 'active',
   };
   active.set(id, entry);
 
+  let finished = false;
   const finish = () => {
+    if (finished) return;
+    finished = true;
     if (!active.has(id)) return;
     active.delete(id);
     entry.finishedAt = Date.now();
@@ -72,6 +93,7 @@ export function connectionTrackerMiddleware(
       entry.apiKeyName = req.apiKey.name;
     }
     if (res.statusCode === 429) rateLimitedHits += 1;
+    abuseGuardService.onRequestEnd(ip, pathOnly, res.statusCode);
     recent.unshift({ ...entry });
     if (recent.length > MAX_RECENT) recent.length = MAX_RECENT;
   };
@@ -82,7 +104,6 @@ export function connectionTrackerMiddleware(
 }
 
 export function getConnectionsSnapshot() {
-  // Enrich still-active with key if set mid-request
   const activeList = Array.from(active.values()).map((e) => ({ ...e }));
   return {
     active: activeList,

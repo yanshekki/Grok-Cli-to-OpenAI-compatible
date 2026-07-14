@@ -4,7 +4,11 @@ import {
   resolveRuntimePaths,
   DEFAULT_PORT,
 } from '../lib/paths';
-import { ensureEnvFile, loadEnvIntoProcess } from '../lib/env-file';
+import {
+  ensureEnvFile,
+  loadEnvIntoProcess,
+  setEnvPort,
+} from '../lib/env-file';
 import fs from 'node:fs';
 import {
   clearPid,
@@ -14,6 +18,7 @@ import {
   startDetached,
   stopGateway,
 } from '../lib/process-mgr';
+import { startGatewayWithPm2, stopPm2App } from '../lib/pm2-runner';
 import { baseUrls, fail, info, ok, warn } from '../lib/print';
 
 function tailLog(file: string, maxLines = 30): string {
@@ -30,6 +35,8 @@ export async function cmdStart(opts: {
   home?: string;
   port?: number;
   foreground?: boolean;
+  /** Start under PM2 instead of detached node */
+  pm2?: boolean;
   forceHome?: boolean;
 }): Promise<void> {
   const paths = resolveRuntimePaths({
@@ -38,13 +45,26 @@ export async function cmdStart(opts: {
   });
   ensureHomeDirs(paths);
 
-  const envFile = ensureEnvFile(paths, opts.port ?? DEFAULT_PORT);
-  if (opts.port) {
-    envFile.PORT = String(opts.port);
+  let envFile = ensureEnvFile(paths, opts.port ?? DEFAULT_PORT);
+  // Persist --port into .env so Admin / next restart / open use the same port
+  if (opts.port != null && Number.isFinite(opts.port) && opts.port > 0) {
+    envFile = setEnvPort(paths.envFile, opts.port);
   }
   loadEnvIntoProcess(paths.envFile);
 
   const port = Number(opts.port || envFile.PORT || DEFAULT_PORT);
+
+  if (opts.foreground && opts.pm2) {
+    fail('Cannot combine --foreground and --pm2');
+    process.exitCode = 1;
+    return;
+  }
+
+  // PM2 mode: stop any previous runner, start under PM2
+  if (opts.pm2) {
+    await startGatewayWithPm2({ paths, port, env: envFile });
+    return;
+  }
 
   const existing = readPid(paths.pidFile);
   if (existing && isProcessRunning(existing)) {
@@ -56,12 +76,13 @@ export async function cmdStart(opts: {
     clearPid(paths.pidFile);
   }
 
-  // Orphan: port busy but no valid pid file
+  // If PM2 holds the port, stop it first (switch to gctoac)
   const orphans = findPidsOnPort(port);
   if (orphans.length) {
     warn(
       `Port ${port} already in use (pid ${orphans.join(', ')}). Cleaning up…`,
     );
+    await stopPm2App(paths).catch(() => undefined);
     await stopGateway({ pidFile: paths.pidFile, port });
     await new Promise((r) => setTimeout(r, 400));
     const still = findPidsOnPort(port);
@@ -94,6 +115,19 @@ export async function cmdStart(opts: {
     return;
   }
 
+  // Remember preferred runner
+  try {
+    const p = path.join(paths.packageRoot, 'pm2.runtime.json');
+    let cur: Record<string, unknown> = {};
+    if (fs.existsSync(p)) {
+      cur = JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, unknown>;
+    }
+    cur.preferred_runner = 'gctoac';
+    fs.writeFileSync(p, `${JSON.stringify(cur, null, 2)}\n`, 'utf8');
+  } catch {
+    /* ignore */
+  }
+
   const pid = startDetached(paths, env);
   await new Promise((r) => setTimeout(r, 800));
   if (!isProcessRunning(pid)) {
@@ -107,7 +141,6 @@ export async function cmdStart(opts: {
       console.error(tail);
       info('----------------------');
     }
-    // If crash was EADDRINUSE, hint
     if (tail.includes('EADDRINUSE')) {
       warn(`Port still busy. Try: gctoac stop && gctoac start`);
     }
@@ -115,9 +148,10 @@ export async function cmdStart(opts: {
     return;
   }
 
-  ok(`Started pid ${pid}`);
+  ok(`Started pid ${pid} (gctoac detached)`);
   const urls = baseUrls(port);
   info(`  API:   ${urls.api}`);
   info(`  Admin: ${urls.admin}`);
   info(`  Logs:  ${path.join(paths.logsDir, 'gctoac.out.log')}`);
+  info(`  Tip:   gctoac start --pm2  to run under PM2 instead`);
 }
