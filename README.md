@@ -6,11 +6,15 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org/)
 [![Default port](https://img.shields.io/badge/port-3847-informational)](#default-port-3847)
 
+**Languages:** English | [中文](./README-ZH.md)
+
 Turn local **[Grok CLI](https://x.ai)** headless mode (`grok -p`) into a production-ready **OpenAI-compatible HTTP API**, with encryption, audit logging, per-key **safe/agent** security policy, a full **Admin Panel**, and a control CLI (`gctoac` / `gcoa`).
 
-**npm package:** [`grok-cli-to-openai-compatible`](https://www.npmjs.com/package/grok-cli-to-openai-compatible)  
-**CLI:** `gctoac` · short alias `gcoa`  
-**Default port:** **`3847`** (unique to this project; override with `PORT=`)
+| | |
+|--|--|
+| **npm package** | [`grok-cli-to-openai-compatible`](https://www.npmjs.com/package/grok-cli-to-openai-compatible) |
+| **CLI** | `gctoac` · short alias `gcoa` |
+| **Default port** | **`3847`** (project-specific; override with `PORT=`) |
 
 ```text
 Client (OpenAI SDK / curl)
@@ -22,7 +26,7 @@ Client (OpenAI SDK / curl)
 │  · Safe | Agent policy                │
 │  · Encrypt + audit every chat         │
 │  · Admin Panel @ /admin               │
-│  · CLI: gctoac start|stop|status…     │
+│  · CLI: gctoac start|stop|status|update│
 └───────────────────┬───────────────────┘
                     │ spawn
                     ▼
@@ -33,13 +37,13 @@ Client (OpenAI SDK / curl)
 
 ## Install (npm)
 
-### Global (recommended for daily use)
+### Global (recommended)
 
 ```bash
-# After publish to npm:
+# From npm (after publish):
 npm install -g grok-cli-to-openai-compatible
 
-# Or from GitHub without waiting for npm:
+# From GitHub (always available):
 npm install -g github:yanshekki/Grok-Cli-to-OpenAI-compatible
 
 gctoac doctor
@@ -49,7 +53,7 @@ gctoac status
 gcoa open             # same binary, short name
 ```
 
-Data directory for global installs: **`~/.gctoac/`** (override with `GCTOAC_HOME` or `gctoac --home /path`).
+Global data directory: **`~/.gctoac/`** (override with `GCTOAC_HOME` or `gctoac --home /path`).
 
 ### Local project
 
@@ -66,7 +70,7 @@ git clone https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible.git
 cd Grok-Cli-to-OpenAI-compatible
 npm install
 npm run build
-npx gctoac setup      # uses project ./data when run inside repo
+npx gctoac setup      # uses project ./data when run inside the repo
 npx gctoac start
 ```
 
@@ -86,7 +90,7 @@ npx gctoac start
 | `gctoac seed` | Bootstrap admin API key |
 | `gctoac doctor` | Check Node, Grok CLI, env, build |
 | `gctoac update` | **Self-update** (git / npm / GitHub) then restart |
-| `gctoac update --check` | Only check for newer version |
+| `gctoac update --check` | Only check for a newer version |
 | `gctoac update --no-restart` | Update without restarting |
 | `gctoac open` | Print API / Admin URLs |
 | `gctoac open --admin` | Admin URL only |
@@ -109,7 +113,7 @@ gctoac --port 3847 start
 | `http://127.0.0.1:3847/admin/` | Admin Panel |
 | `http://127.0.0.1:3847/health` | Liveness |
 
-Change with `PORT=` in `.env` or `gctoac --port … start`.
+Override with `PORT=` in `.env` or `gctoac --port … start`.
 
 ---
 
@@ -124,7 +128,7 @@ Change with `PORT=` in `.env` or `gctoac --port … start`.
 | **Encryption** | AES-256-GCM for prompts, responses, document bodies |
 | **Admin UI** | Dashboard, full chat in/out decrypt, keys, docs, audit, settings |
 | **CLI** | `gctoac` / `gcoa` lifecycle + **self-update** |
-| **One-click update** | Admin → 系統狀態 → 一鍵更新並重啟 |
+| **One-click update** | Admin → System → one-click update & restart |
 | **Ops** | SQLite, PM2, GitHub Actions CI, structured logging |
 
 ---
@@ -175,12 +179,12 @@ Or: `npm run build && gctoac setup && gctoac start`
 
 ### First admin login
 
-1. Copy the **admin API key** printed by `gctoac setup` / `npm run seed` (only shown once).  
+1. Copy the **admin API key** printed by `gctoac setup` / `npm run seed` (shown once only).  
 2. Open **http://127.0.0.1:3847/admin/**  
 3. Paste the key to sign in.  
 4. Create a **client** key (`mode=safe` for external apps, `mode=agent` for trusted internal use).
 
-> **Security:** Admin can decrypt all chat prompts/responses. Never commit `.env` or share admin keys.
+> **Security:** Admins can decrypt all chat prompts/responses. Never commit `.env` or share admin keys.
 
 ---
 
@@ -211,12 +215,13 @@ src/
   controllers/                # HTTP layer (+ admin)
   routes/v1/                  # public OpenAI-compatible API
   routes/admin.routes.ts      # /admin/api/*
+  cli/                        # gctoac / gcoa commands
   services/                   # business logic
     grok-cli.service.ts       # spawn + parse CLI
     policy.service.ts         # safe/agent resolution
     chat.service.ts           # completions + audit encrypt
     chat-admin.service.ts     # decrypt for admin
-    settings.service.ts       # runtime settings (DB)
+    update.service.ts         # self-update
     …
   utils/                      # logger, SSE, mappers, path-safe
 public/admin/                 # Admin SPA (static)
@@ -233,12 +238,12 @@ tests/                        # Vitest unit + integration
 | Page | Capabilities |
 |------|----------------|
 | **Dashboard** | Totals, 24h volume, concurrency, recent chats |
-| **Chat 記錄** | List + **full decrypted prompt / reasoning / content** |
+| **Chats** | List + **full decrypted prompt / reasoning / content** |
 | **API Keys** | Create / edit `role` + `mode` + rate limit / revoke |
-| **文件** | List, decrypt preview modal, soft-delete |
+| **Documents** | List, decrypt preview modal, soft-delete |
 | **Audit Logs** | Lifecycle events |
-| **安全設定** | Global safe mode, tools policy, timeouts, default model |
-| **系統狀態** | DB / Grok CLI / env summary (no secrets) |
+| **Safety settings** | Global safe mode, tools policy, timeouts, default model |
+| **System** | DB / Grok CLI / versions / **one-click update & restart** |
 
 **Admin JSON API** (Bearer admin key):
 
@@ -252,6 +257,8 @@ tests/                        # Vitest unit + integration
 | GET | `/admin/api/audit-logs` |
 | GET/PUT | `/admin/api/settings` |
 | GET | `/admin/api/system` |
+| GET | `/admin/api/system/update-check` |
+| POST | `/admin/api/system/update` |
 
 ---
 
@@ -260,9 +267,9 @@ tests/                        # Vitest unit + integration
 | Mode | Default for | Behavior |
 |------|-------------|----------|
 | **`safe`** | New client keys | Forced sandbox cwd under `storage/sandboxes/{keyId}`, **no** `--always-approve`, tool denylist (or readonly allowlist), shorter timeout / max-turns |
-| **`agent`** | Admin / trusted | Full CLI capability (optional always-approve), cwd still limited by `GROK_CWD_ALLOWLIST` |
+| **`agent`** | Admin / trusted | Full CLI capability (optional always-approve); cwd still limited by `GROK_CWD_ALLOWLIST` |
 
-- **Global force-safe:** `GROK_SAFE_MODE=true` **or** Admin → 安全設定 →「全域 Safe Mode」  
+- **Global force-safe:** `GROK_SAFE_MODE=true` **or** Admin → Safety settings → global safe mode  
 - Clients **cannot** escalate privileges via request body (safe mode ignores arbitrary `cwd`).
 
 > Exposing this gateway on the public internet with `agent` keys is dangerous: Grok CLI is an **agent** with tools, not a pure chat API. Prefer **`safe`** for third parties.
@@ -408,12 +415,12 @@ See [`.env.example`](.env.example). Critical keys:
 
 | Variable | Description |
 |----------|-------------|
-| `DATABASE_URL` | SQLite path relative to `prisma/` e.g. `file:../data/gateway.db` |
+| `DATABASE_URL` | SQLite path, e.g. absolute `file:/…/gateway.db` or `file:../data/gateway.db` (relative to `prisma/`) |
 | `ENCRYPTION_KEY` | 32-byte key, base64 or 64-char hex (`openssl rand -base64 32`) |
 | `GROK_BIN` | CLI binary (default `grok`) |
 | `GROK_DEFAULT_MODEL` | Default model id |
 | `GROK_DEFAULT_CWD` / `GROK_CWD_ALLOWLIST` | Working directory policy for **agent** mode |
-| `GROK_ALWAYS_APPROVE` | Agent mode only; safe mode always disables |
+| `GROK_ALWAYS_APPROVE` | Agent mode only; safe mode always disables this |
 | `GROK_SAFE_MODE` | Force all keys into safe mode |
 | `GROK_SAFE_MAX_TURNS` / `GROK_SAFE_TIMEOUT_MS` | Safe defaults |
 | `GROK_MAX_CONCURRENT` | Max parallel CLI processes |
@@ -454,15 +461,15 @@ npm run typecheck
 npm run db:setup      # migrate deploy + seed
 npm run seed          # bootstrap admin key
 npm run smoke         # API_KEY=... bash scripts/smoke.sh
-gctoac setup|start|status|stop|doctor
+gctoac setup|start|status|stop|doctor|update
 ```
 
 ### Publish (maintainers)
 
 ```bash
+npm login
 npm run build
 npm publish --access public
-# requires npm login + package name available
 ```
 
 Install from GitHub without npm publish:
@@ -475,7 +482,7 @@ npm install -g github:yanshekki/Grok-Cli-to-OpenAI-compatible
 
 ## License
 
-MIT — see repository license terms.
+MIT — see [LICENSE](./LICENSE).
 
 ---
 
