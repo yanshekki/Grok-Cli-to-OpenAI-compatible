@@ -1,12 +1,16 @@
-const API = '/admin/api';
-const KEY_STORAGE = 'gog_admin_key';
-
 import {
   t,
   getLocale,
   setLocale,
   langSwitchHtml,
 } from './i18n.js';
+
+const API = '/admin/api';
+const KEY_STORAGE = 'gog_admin_key';
+
+/** @type {ReturnType<typeof setInterval> | null} */
+let ddosTimer = null;
+let ddosPaused = false;
 
 const state = {
   key: sessionStorage.getItem(KEY_STORAGE) || '',
@@ -1104,9 +1108,6 @@ async function renderSystem() {
 }
 
 
-let ddosTimer = null;
-let ddosPaused = false;
-
 async function renderDdos() {
   if (ddosTimer) {
     clearInterval(ddosTimer);
@@ -1366,7 +1367,7 @@ async function renderPm2() {
   };
 }
 
-async function renderasync function render() {
+async function render() {
   const app = document.getElementById('app');
   try {
     if (!state.key) {

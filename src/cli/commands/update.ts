@@ -1,9 +1,10 @@
+import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { updateService } from '../../services/update.service';
 import { fail, info, ok, warn } from '../lib/print';
 import { ensureHomeDirs, resolveRuntimePaths } from '../lib/paths';
 import { ensureEnvFile, loadEnvIntoProcess } from '../lib/env-file';
 import { runPrisma } from '../lib/run-prisma';
-import { cmdRestart } from './restart';
 
 /**
  * Always hard-exit. undici fetch keep-alive + any leftover handles can leave
@@ -16,6 +17,7 @@ function exitCli(code = 0): never {
   } catch {
     /* ignore */
   }
+  // Force exit even if open handles remain (fetch, timers, child stdio)
   // eslint-disable-next-line no-process-exit
   process.exit(code);
 }
@@ -39,6 +41,29 @@ function applyMigrations(packageRoot: string, databaseUrl: string): void {
     env,
   });
   ok('Database migrations applied');
+}
+
+/**
+ * Restart in a fully detached child so this process can exit immediately
+ * (awaiting restart can keep the event loop open / appear hung).
+ */
+function spawnRestartDetached(opts: {
+  packageRoot: string;
+  home: string;
+  port?: number;
+}): void {
+  const cli = path.join(opts.packageRoot, 'dist', 'cli', 'index.js');
+  const args = [cli, 'restart', '--home', opts.home];
+  if (opts.port != null && Number.isFinite(opts.port)) {
+    args.push('--port', String(opts.port));
+  }
+  const child = spawn(process.execPath, args, {
+    detached: true,
+    stdio: 'ignore',
+    env: process.env,
+    cwd: opts.packageRoot,
+  });
+  child.unref();
 }
 
 export async function cmdUpdate(opts: {
@@ -82,7 +107,6 @@ export async function cmdUpdate(opts: {
       warn('No newer version detected; running update anyway…');
     }
 
-    // Package update (includes migrate inside service); CLI re-runs migrate with home DB
     const result = await updateService.performUpdate({
       channel: opts.channel || 'auto',
       databaseUrl,
@@ -94,7 +118,6 @@ export async function cmdUpdate(opts: {
     ok(result.message);
     info(`Version: ${result.fromVersion} → ${result.toVersion ?? '?'}`);
 
-    // Second pass: ensure user data home DB is migrated (authoritative)
     try {
       applyMigrations(paths.packageRoot, databaseUrl);
     } catch (e) {
@@ -106,16 +129,17 @@ export async function cmdUpdate(opts: {
     }
 
     if (opts.restart !== false && result.restartRequired) {
-      info('Restarting gateway…');
+      info('Restarting gateway in background…');
       try {
-        await cmdRestart({
+        spawnRestartDetached({
+          packageRoot: paths.packageRoot,
           home: paths.home,
-          forceHome: true,
           port: opts.port,
         });
+        ok('Restart scheduled (gctoac restart)');
       } catch (e) {
         warn(
-          `Restart failed: ${e instanceof Error ? e.message : String(e)}`,
+          `Restart spawn failed: ${e instanceof Error ? e.message : String(e)}`,
         );
         warn('Run: gctoac restart');
         code = code || 1;
@@ -129,7 +153,6 @@ export async function cmdUpdate(opts: {
     fail(e instanceof Error ? e.message : String(e));
     code = 1;
   } finally {
-    // Always leave the shell — never require Ctrl+C
     exitCli(code);
   }
 }
