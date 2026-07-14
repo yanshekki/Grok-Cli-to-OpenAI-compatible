@@ -7,8 +7,20 @@ exports.cmdStart = cmdStart;
 const node_path_1 = __importDefault(require("node:path"));
 const paths_1 = require("../lib/paths");
 const env_file_1 = require("../lib/env-file");
+const node_fs_1 = __importDefault(require("node:fs"));
 const process_mgr_1 = require("../lib/process-mgr");
 const print_1 = require("../lib/print");
+function tailLog(file, maxLines = 30) {
+    try {
+        if (!node_fs_1.default.existsSync(file))
+            return '';
+        const lines = node_fs_1.default.readFileSync(file, 'utf8').split('\n');
+        return lines.slice(-maxLines).join('\n').trim();
+    }
+    catch {
+        return '';
+    }
+}
 async function cmdStart(opts) {
     const paths = (0, paths_1.resolveRuntimePaths)({
         home: opts.home,
@@ -20,6 +32,9 @@ async function cmdStart(opts) {
         (0, print_1.fail)(`Already running (pid ${existing}). Use: gctoac stop`);
         process.exitCode = 1;
         return;
+    }
+    if (existing && !(0, process_mgr_1.isProcessRunning)(existing)) {
+        (0, process_mgr_1.clearPid)(paths.pidFile);
     }
     const envFile = (0, env_file_1.ensureEnvFile)(paths, opts.port ?? paths_1.DEFAULT_PORT);
     if (opts.port) {
@@ -47,11 +62,26 @@ async function cmdStart(opts) {
         return;
     }
     const pid = (0, process_mgr_1.startDetached)(paths, env);
+    // Brief wait: catch immediate crash (e.g. missing deps / bad env)
+    await new Promise((r) => setTimeout(r, 800));
+    if (!(0, process_mgr_1.isProcessRunning)(pid)) {
+        (0, process_mgr_1.clearPid)(paths.pidFile);
+        const errLog = node_path_1.default.join(paths.logsDir, 'gctoac.err.log');
+        (0, print_1.fail)(`Server exited immediately (pid ${pid}).`);
+        (0, print_1.info)(`  Logs: ${errLog}`);
+        const tail = tailLog(errLog);
+        if (tail) {
+            (0, print_1.info)('--- last error log ---');
+            console.error(tail);
+            (0, print_1.info)('----------------------');
+        }
+        process.exitCode = 1;
+        return;
+    }
     (0, print_1.ok)(`Started pid ${pid}`);
     const urls = (0, print_1.baseUrls)(port);
     (0, print_1.info)(`  API:   ${urls.api}`);
     (0, print_1.info)(`  Admin: ${urls.admin}`);
     (0, print_1.info)(`  Logs:  ${node_path_1.default.join(paths.logsDir, 'gctoac.out.log')}`);
-    (0, print_1.warn)('First run? Ensure ENCRYPTION_KEY is set and gctoac setup was completed.');
 }
 //# sourceMappingURL=start.js.map

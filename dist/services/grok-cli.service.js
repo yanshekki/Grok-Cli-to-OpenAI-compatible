@@ -1,8 +1,12 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.grokCliService = exports.GrokCliService = void 0;
 const node_readline_1 = require("node:readline");
-const execa_1 = require("execa");
+// execa@5 is CJS-compatible (v8+ is ESM-only and breaks CommonJS dist/)
+const execa_1 = __importDefault(require("execa"));
 const env_1 = require("../config/env");
 const exception_factory_1 = require("../exceptions/exception.factory");
 const logger_1 = require("../utils/logger");
@@ -68,7 +72,7 @@ class GrokCliService {
             toolsDenylist: options.toolsDenylist ? '[set]' : null,
         }, 'Spawning grok');
         try {
-            const result = await (0, execa_1.execa)(env_1.env.GROK_BIN, args, {
+            const result = await (0, execa_1.default)(env_1.env.GROK_BIN, args, {
                 timeout,
                 reject: false,
                 env: this.sanitizedEnv(),
@@ -100,7 +104,7 @@ class GrokCliService {
     async *stream(options) {
         const args = this.buildArgs({ ...options, stream: true });
         const timeout = options.timeoutMs ?? env_1.env.GROK_TIMEOUT_MS;
-        const proc = (0, execa_1.execa)(env_1.env.GROK_BIN, args, {
+        const proc = (0, execa_1.default)(env_1.env.GROK_BIN, args, {
             timeout,
             reject: false,
             env: this.sanitizedEnv(),
@@ -144,7 +148,7 @@ class GrokCliService {
     }
     async isAvailable() {
         try {
-            const result = await (0, execa_1.execa)(env_1.env.GROK_BIN, ['--version'], {
+            const result = await (0, execa_1.default)(env_1.env.GROK_BIN, ['--version'], {
                 timeout: 10_000,
                 reject: false,
             });
@@ -156,7 +160,7 @@ class GrokCliService {
     }
     async listModelsFromCli() {
         try {
-            const result = await (0, execa_1.execa)(env_1.env.GROK_BIN, ['models'], {
+            const result = await (0, execa_1.default)(env_1.env.GROK_BIN, ['models'], {
                 timeout: 30_000,
                 reject: false,
                 env: this.sanitizedEnv(),

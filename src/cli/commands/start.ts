@@ -5,12 +5,24 @@ import {
   DEFAULT_PORT,
 } from '../lib/paths';
 import { ensureEnvFile, loadEnvIntoProcess } from '../lib/env-file';
+import fs from 'node:fs';
 import {
+  clearPid,
   isProcessRunning,
   readPid,
   startDetached,
 } from '../lib/process-mgr';
-import { baseUrls, fail, info, ok, warn } from '../lib/print';
+import { baseUrls, fail, info, ok } from '../lib/print';
+
+function tailLog(file: string, maxLines = 30): string {
+  try {
+    if (!fs.existsSync(file)) return '';
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    return lines.slice(-maxLines).join('\n').trim();
+  } catch {
+    return '';
+  }
+}
 
 export async function cmdStart(opts: {
   home?: string;
@@ -29,6 +41,9 @@ export async function cmdStart(opts: {
     fail(`Already running (pid ${existing}). Use: gctoac stop`);
     process.exitCode = 1;
     return;
+  }
+  if (existing && !isProcessRunning(existing)) {
+    clearPid(paths.pidFile);
   }
 
   const envFile = ensureEnvFile(paths, opts.port ?? DEFAULT_PORT);
@@ -59,10 +74,26 @@ export async function cmdStart(opts: {
   }
 
   const pid = startDetached(paths, env);
+  // Brief wait: catch immediate crash (e.g. missing deps / bad env)
+  await new Promise((r) => setTimeout(r, 800));
+  if (!isProcessRunning(pid)) {
+    clearPid(paths.pidFile);
+    const errLog = path.join(paths.logsDir, 'gctoac.err.log');
+    fail(`Server exited immediately (pid ${pid}).`);
+    info(`  Logs: ${errLog}`);
+    const tail = tailLog(errLog);
+    if (tail) {
+      info('--- last error log ---');
+      console.error(tail);
+      info('----------------------');
+    }
+    process.exitCode = 1;
+    return;
+  }
+
   ok(`Started pid ${pid}`);
   const urls = baseUrls(port);
   info(`  API:   ${urls.api}`);
   info(`  Admin: ${urls.admin}`);
   info(`  Logs:  ${path.join(paths.logsDir, 'gctoac.out.log')}`);
-  warn('First run? Ensure ENCRYPTION_KEY is set and gctoac setup was completed.');
 }

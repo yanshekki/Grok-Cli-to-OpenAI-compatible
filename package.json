@@ -1,6 +1,6 @@
 {
   "name": "grok-cli-to-openai-compatible",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "OpenAI-compatible API gateway for Grok CLI — with Admin panel, safe mode, and gctoac CLI",
   "keywords": [
     "grok",
@@ -63,7 +63,7 @@
     "commander": "^13.1.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "execa": "^8.0.1",
+    "execa": "5.1.1",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",

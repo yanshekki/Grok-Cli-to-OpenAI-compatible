@@ -1,5 +1,6 @@
 import { createInterface } from 'node:readline';
-import { execa } from 'execa';
+// execa@5 is CJS-compatible (v8+ is ESM-only and breaks CommonJS dist/)
+import execa from 'execa';
 import { env } from '../config/env';
 import type {
   GrokJsonResult,
