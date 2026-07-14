@@ -6,6 +6,7 @@ const workspace = path.resolve(__dirname, '..');
 process.env.NODE_ENV = 'test';
 process.env.PORT = '3099';
 process.env.HOST = '127.0.0.1';
+// Absolute file URL so tests always hit project-root data/test.db
 process.env.DATABASE_URL =
   process.env.DATABASE_URL || `file:${path.join(workspace, 'data', 'test.db')}`;
 process.env.ENCRYPTION_KEY =

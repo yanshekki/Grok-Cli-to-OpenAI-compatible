@@ -11,7 +11,7 @@ jobs:
 
     env:
       NODE_ENV: test
-      DATABASE_URL: file:./data/gateway.db
+      DATABASE_URL: file:../data/gateway.db
       ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       GROK_DEFAULT_CWD: ${{ github.workspace }}
       GROK_CWD_ALLOWLIST: ${{ github.workspace }}

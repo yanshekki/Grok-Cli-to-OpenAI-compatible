@@ -55,11 +55,13 @@ npm run db:setup   # migrate + seed (prints admin API key once)
 # npm run seed
 ```
 
-`DATABASE_URL` default:
+`DATABASE_URL` default (path is relative to `prisma/schema.prisma`):
 
 ```bash
-DATABASE_URL="file:./data/gateway.db"
+DATABASE_URL="file:../data/gateway.db"
 ```
+
+DB file on disk: `data/gateway.db`
 
 ## Run
 
