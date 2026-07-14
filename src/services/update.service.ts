@@ -1,9 +1,26 @@
-import { execFileSync, execSync, spawn } from 'node:child_process';
+import {
+  execFileSync,
+  execSync,
+  spawn,
+  spawnSync,
+} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 
 const PRISMA_VERSION = '6.5.0';
+
+/** Optional progress hooks for CLI loading UI */
+export type UpdateProgress = {
+  /** Called at the start of each major step */
+  step?: (info: { index: number; total: number; title: string }) => void;
+  /** Called while a long command is about to run */
+  start?: (label: string) => void;
+  /** Called when a step succeeds */
+  succeed?: (label: string) => void;
+  /** Called when a step fails */
+  fail?: (label: string) => void;
+};
 
 export const GITHUB_REPO = 'yanshekki/Grok-Cli-to-OpenAI-compatible';
 export const NPM_PACKAGE = 'grok-cli-to-openai-compatible';
@@ -152,8 +169,29 @@ async function fetchLatestGithub(): Promise<string | null> {
   }
 }
 
-function run(cmd: string, cwd: string, log: string[], env?: NodeJS.ProcessEnv): void {
+function run(
+  cmd: string,
+  cwd: string,
+  log: string[],
+  env?: NodeJS.ProcessEnv,
+  live = false,
+): void {
   log.push(`$ ${cmd}`);
+  if (live && process.stdout.isTTY) {
+    // Stream child output so the user sees npm/git progress in real time
+    const result = spawnSync(cmd, {
+      cwd,
+      env: { ...process.env, ...env },
+      shell: true,
+      stdio: 'inherit',
+      encoding: 'utf8',
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    if (result.status !== 0 && result.status !== null) {
+      throw new Error(`Command failed (exit ${result.status}): ${cmd}`);
+    }
+    return;
+  }
   const out = execSync(cmd, {
     cwd,
     encoding: 'utf8',
@@ -172,11 +210,24 @@ function runPrisma(
   packageRoot: string,
   log: string[],
   env?: NodeJS.ProcessEnv,
+  live = false,
 ): void {
   const entry = path.join(packageRoot, 'node_modules', 'prisma', 'build', 'index.js');
   const runEnv = { ...process.env, ...env };
   if (fs.existsSync(entry)) {
     log.push(`$ node prisma ${args.join(' ')}`);
+    if (live && process.stdout.isTTY) {
+      const result = spawnSync(process.execPath, [entry, ...args], {
+        cwd: packageRoot,
+        env: runEnv,
+        stdio: 'inherit',
+        encoding: 'utf8',
+      });
+      if (result.status !== 0 && result.status !== null) {
+        throw new Error(`prisma ${args.join(' ')} failed (exit ${result.status})`);
+      }
+      return;
+    }
     const out = execFileSync(process.execPath, [entry, ...args], {
       cwd: packageRoot,
       encoding: 'utf8',
@@ -191,6 +242,7 @@ function runPrisma(
     packageRoot,
     log,
     runEnv,
+    live,
   );
 }
 
@@ -199,14 +251,15 @@ export function runPostUpdateMigrate(
   packageRoot: string,
   databaseUrl: string,
   log: string[],
+  live = false,
 ): void {
   const env = { DATABASE_URL: databaseUrl };
   try {
-    runPrisma(['generate'], packageRoot, log, env);
+    runPrisma(['generate'], packageRoot, log, env, live);
   } catch (e) {
     log.push(`prisma generate warn: ${e instanceof Error ? e.message : e}`);
   }
-  runPrisma(['migrate', 'deploy'], packageRoot, log, env);
+  runPrisma(['migrate', 'deploy'], packageRoot, log, env, live);
   log.push('Database migrations applied (migrate deploy)');
 }
 
@@ -249,6 +302,9 @@ export class UpdateService {
     skipMigrate?: boolean;
     /** Absolute SQLite/file DATABASE_URL for migrate deploy (user data home) */
     databaseUrl?: string;
+    /** Stream command output + progress hooks (CLI) */
+    live?: boolean;
+    progress?: UpdateProgress;
   }): Promise<UpdateResult> {
     if (this.updating) {
       throw ExceptionFactory.validation('Update already in progress');
@@ -262,32 +318,94 @@ export class UpdateService {
       options?.channel && options.channel !== 'auto'
         ? options.channel
         : detected.channel;
+    const live = Boolean(options?.live);
+    const progress = options?.progress;
+
+    const steps =
+      channel === 'git' || fs.existsSync(path.join(packageRoot, '.git'))
+        ? [
+            'git fetch',
+            'git pull',
+            'npm install',
+            'npm run build',
+            'prisma migrate',
+          ]
+        : channel === 'npm-local'
+          ? ['npm install (local)', 'prisma migrate']
+          : ['npm install -g (latest)', 'prisma migrate'];
+
+    let stepIndex = 0;
+    const total = steps.length;
+    const doStep = (title: string, fn: () => void): void => {
+      stepIndex += 1;
+      progress?.step?.({ index: stepIndex, total, title });
+      progress?.start?.(title);
+      log.push(`── step ${stepIndex}/${total}: ${title}`);
+      try {
+        fn();
+        progress?.succeed?.(title);
+      } catch (e) {
+        progress?.fail?.(title);
+        throw e;
+      }
+    };
 
     try {
       log.push(`channel=${channel} root=${packageRoot}`);
 
       if (channel === 'git') {
-        run('git fetch --all --tags', packageRoot, log);
-        run('git pull --ff-only', packageRoot, log);
-        run('npm install', packageRoot, log);
-        run('npm run build', packageRoot, log);
+        doStep('git fetch --all --tags', () => {
+          run('git fetch --all --tags', packageRoot, log, undefined, live);
+        });
+        doStep('git pull --ff-only', () => {
+          run('git pull --ff-only', packageRoot, log, undefined, live);
+        });
+        doStep('npm install (dependencies)', () => {
+          run('npm install', packageRoot, log, undefined, live);
+        });
+        doStep('npm run build (compile)', () => {
+          run('npm run build', packageRoot, log, undefined, live);
+        });
       } else if (channel === 'npm-global') {
-        run(`npm install -g ${NPM_PACKAGE}@latest`, packageRoot, log);
+        doStep(`npm install -g ${NPM_PACKAGE}@latest`, () => {
+          run(
+            `npm install -g ${NPM_PACKAGE}@latest`,
+            packageRoot,
+            log,
+            undefined,
+            live,
+          );
+        });
       } else if (channel === 'npm-local') {
-        run(
-          `npm install ${NPM_PACKAGE}@latest`,
-          path.resolve(packageRoot, '../..'),
-          log,
-        );
+        doStep(`npm install ${NPM_PACKAGE}@latest`, () => {
+          run(
+            `npm install ${NPM_PACKAGE}@latest`,
+            path.resolve(packageRoot, '../..'),
+            log,
+            undefined,
+            live,
+          );
+        });
+      } else if (fs.existsSync(path.join(packageRoot, '.git'))) {
+        doStep('git pull --ff-only', () => {
+          run('git pull --ff-only', packageRoot, log, undefined, live);
+        });
+        doStep('npm install (dependencies)', () => {
+          run('npm install', packageRoot, log, undefined, live);
+        });
+        doStep('npm run build (compile)', () => {
+          run('npm run build', packageRoot, log, undefined, live);
+        });
       } else {
-        // unknown: prefer git checkout rebuild, else npm global
-        if (fs.existsSync(path.join(packageRoot, '.git'))) {
-          run('git pull --ff-only', packageRoot, log);
-          run('npm install', packageRoot, log);
-          run('npm run build', packageRoot, log);
-        } else {
-          run(`npm install -g ${NPM_PACKAGE}@latest`, packageRoot, log);
-        }
+        doStep(`npm install -g ${NPM_PACKAGE}@latest`, () => {
+          run(
+            `npm install -g ${NPM_PACKAGE}@latest`,
+            packageRoot,
+            log,
+            undefined,
+            live,
+          );
+        });
       }
 
       // Auto migrate after package update (local prisma binary preferred)
@@ -297,31 +415,29 @@ export class UpdateService {
           process.env.DATABASE_URL ||
           `file:${path.join(packageRoot, 'data', 'gateway.db')}`;
         log.push(`migrate DATABASE_URL=${dbUrl}`);
-        try {
-          runPostUpdateMigrate(packageRoot, dbUrl, log);
-        } catch (e) {
-          log.push(`migrate warn: ${e instanceof Error ? e.message : e}`);
-          // Retry once with npx if local prisma missing after global install
+        doStep('prisma generate + migrate deploy', () => {
           try {
+            runPostUpdateMigrate(packageRoot, dbUrl, log, live);
+          } catch (e) {
+            log.push(`migrate warn: ${e instanceof Error ? e.message : e}`);
+            // Retry once with npx if local prisma missing after global install
             run(
               `npx --yes prisma@${PRISMA_VERSION} generate`,
               packageRoot,
               log,
               { DATABASE_URL: dbUrl },
+              live,
             );
             run(
               `npx --yes prisma@${PRISMA_VERSION} migrate deploy`,
               packageRoot,
               log,
               { DATABASE_URL: dbUrl },
+              live,
             );
             log.push('Database migrations applied (npx fallback)');
-          } catch (e2) {
-            log.push(
-              `migrate failed: ${e2 instanceof Error ? e2.message : e2}`,
-            );
           }
-        }
+        });
       }
 
       let toVersion: string | null = null;

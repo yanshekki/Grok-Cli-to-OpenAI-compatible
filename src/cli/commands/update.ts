@@ -5,6 +5,7 @@ import { fail, info, ok, warn } from '../lib/print';
 import { ensureHomeDirs, resolveRuntimePaths } from '../lib/paths';
 import { ensureEnvFile, loadEnvIntoProcess } from '../lib/env-file';
 import { runPrisma } from '../lib/run-prisma';
+import { Spinner, stepBanner } from '../lib/spinner';
 
 /**
  * Always hard-exit. undici fetch keep-alive + any leftover handles can leave
@@ -17,35 +18,40 @@ function exitCli(code = 0): never {
   } catch {
     /* ignore */
   }
-  // Force exit even if open handles remain (fetch, timers, child stdio)
   // eslint-disable-next-line no-process-exit
   process.exit(code);
 }
 
-function applyMigrations(packageRoot: string, databaseUrl: string): void {
-  info('Applying database migrations…');
+function applyMigrations(
+  packageRoot: string,
+  databaseUrl: string,
+  spinner: Spinner,
+): void {
   const env = {
     ...process.env,
     DATABASE_URL: databaseUrl,
   };
+  spinner.start('prisma generate…');
   try {
     runPrisma(['generate'], { cwd: packageRoot, packageRoot, env });
+    spinner.succeed('prisma generate');
   } catch (e) {
-    warn(
+    spinner.fail(
       `prisma generate: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
+  spinner.start('prisma migrate deploy…');
   runPrisma(['migrate', 'deploy'], {
     cwd: packageRoot,
     packageRoot,
     env,
   });
+  spinner.succeed('prisma migrate deploy');
   ok('Database migrations applied');
 }
 
 /**
- * Restart in a fully detached child so this process can exit immediately
- * (awaiting restart can keep the event loop open / appear hung).
+ * Restart in a fully detached child so this process can exit immediately.
  */
 function spawnRestartDetached(opts: {
   packageRoot: string;
@@ -75,6 +81,7 @@ export async function cmdUpdate(opts: {
   channel?: 'auto' | 'git' | 'npm-global' | 'npm-local';
 }): Promise<void> {
   let code = 0;
+  const spinner = new Spinner();
   try {
     const paths = resolveRuntimePaths({
       home: opts.home,
@@ -85,7 +92,16 @@ export async function cmdUpdate(opts: {
     loadEnvIntoProcess(paths.envFile);
     const databaseUrl = envFile.DATABASE_URL || paths.databaseUrl;
 
+    console.log('');
+    console.log('╔══════════════════════════════════════════╗');
+    console.log('║     gctoac update — Grok Gateway CLI     ║');
+    console.log('╚══════════════════════════════════════════╝');
+    console.log('');
+
+    spinner.start('Checking npm / GitHub for updates…');
     const infoVer = await updateService.getVersionInfo();
+    spinner.succeed('Version check complete');
+
     info(`Current:  ${infoVer.current}`);
     info(`Channel:  ${infoVer.channel} (${infoVer.installSource})`);
     info(`npm:      ${infoVer.latestNpm ?? 'n/a'}`);
@@ -107,20 +123,44 @@ export async function cmdUpdate(opts: {
       warn('No newer version detected; running update anyway…');
     }
 
+    info('');
+    info('Starting update (live progress below)…');
+
+    // Live mode: stream git/npm/prisma to the terminal so progress is visible.
+    // Spinner only for short waits (version check / final migrate / restart).
     const result = await updateService.performUpdate({
       channel: opts.channel || 'auto',
       databaseUrl,
       skipMigrate: false,
+      live: true,
+      progress: {
+        step: ({ index, total, title }) => {
+          spinner.stopSilent();
+          stepBanner(index, total, title);
+        },
+        start: (label) => {
+          spinner.stopSilent();
+          info(`→ ${label}`);
+          info('  (live output — please wait…)\n');
+        },
+        succeed: (label) => {
+          ok(`Step done: ${label}`);
+        },
+        fail: (label) => {
+          fail(`Step failed: ${label}`);
+        },
+      },
     });
-    for (const line of result.log) {
-      info(line);
-    }
+
     ok(result.message);
     info(`Version: ${result.fromVersion} → ${result.toVersion ?? '?'}`);
 
     try {
-      applyMigrations(paths.packageRoot, databaseUrl);
+      info('');
+      info('── Final DB migrate (data home) ──');
+      applyMigrations(paths.packageRoot, databaseUrl, spinner);
     } catch (e) {
+      spinner.stopSilent();
       warn(
         `Auto-migrate failed: ${e instanceof Error ? e.message : String(e)}`,
       );
@@ -129,16 +169,16 @@ export async function cmdUpdate(opts: {
     }
 
     if (opts.restart !== false && result.restartRequired) {
-      info('Restarting gateway in background…');
+      spinner.start('Scheduling gateway restart…');
       try {
         spawnRestartDetached({
           packageRoot: paths.packageRoot,
           home: paths.home,
           port: opts.port,
         });
-        ok('Restart scheduled (gctoac restart)');
+        spinner.succeed('Restart scheduled (gctoac restart)');
       } catch (e) {
-        warn(
+        spinner.fail(
           `Restart spawn failed: ${e instanceof Error ? e.message : String(e)}`,
         );
         warn('Run: gctoac restart');
@@ -148,11 +188,15 @@ export async function cmdUpdate(opts: {
       warn('Restart required: gctoac restart');
     }
 
-    info('Done.');
+    console.log('');
+    ok('Update complete. Done.');
+    console.log('');
   } catch (e) {
+    spinner.stopSilent();
     fail(e instanceof Error ? e.message : String(e));
     code = 1;
   } finally {
+    spinner.stopSilent();
     exitCli(code);
   }
 }
