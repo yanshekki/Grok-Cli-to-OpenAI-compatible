@@ -1,6 +1,6 @@
 import { config as loadDotenv } from 'dotenv';
 import { createHash } from 'node:crypto';
-import { PrismaClient } from '../generated/prisma';
+import { PrismaClient } from '@prisma/client';
 import { randomBytes, randomUUID } from 'node:crypto';
 
 loadDotenv();

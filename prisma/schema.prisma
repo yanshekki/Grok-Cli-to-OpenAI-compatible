@@ -1,8 +1,5 @@
 generator client {
-  provider      = "prisma-client-js"
-  // Committed so global github: installs work without prisma CLI postinstall
-  output        = "../generated/prisma"
-  binaryTargets = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x", "linux-musl-openssl-3.0.x", "darwin", "darwin-arm64", "windows"]
+  provider = "prisma-client-js"
 }
 
 datasource db {

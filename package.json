@@ -1,6 +1,6 @@
 {
   "name": "grok-cli-to-openai-compatible",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "OpenAI-compatible API gateway for Grok CLI — with Admin panel, safe mode, and gctoac CLI",
   "keywords": [
     "grok",
@@ -29,7 +29,6 @@
   },
   "files": [
     "dist",
-    "generated",
     "prisma",
     "public",
     "scripts",
@@ -40,16 +39,16 @@
   ],
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "prisma generate && tsc -p tsconfig.json && node -e \"require('fs').chmodSync('dist/cli/index.js',0o755)\"",
+    "build": "npx prisma@6.5.0 generate && tsc -p tsconfig.json && node -e \"require('fs').chmodSync('dist/cli/index.js',0o755)\"",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "mkdir -p data && prisma migrate dev",
-    "prisma:deploy": "mkdir -p data && prisma migrate deploy",
-    "db:setup": "mkdir -p data && prisma migrate deploy && tsx prisma/seed.ts",
+    "prisma:generate": "npx prisma@6.5.0 generate",
+    "prisma:migrate": "mkdir -p data && npx prisma@6.5.0 migrate dev",
+    "prisma:deploy": "mkdir -p data && npx prisma@6.5.0 migrate deploy",
+    "db:setup": "mkdir -p data && npx prisma@6.5.0 migrate deploy && tsx prisma/seed.ts",
     "seed": "tsx prisma/seed.ts",
     "smoke": "bash scripts/smoke.sh",
     "prepare": "node scripts/prepare.cjs",
