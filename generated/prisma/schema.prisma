@@ -1,0 +1,125 @@
+generator client {
+  provider      = "prisma-client-js"
+  // Committed so global github: installs work without prisma CLI postinstall
+  output        = "../generated/prisma"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x", "linux-musl-openssl-3.0.x", "darwin", "darwin-arm64", "windows"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  name       String
+  keyPrefix  String
+  keyHash    String    @unique
+  role       String    @default("client")
+  /// safe | agent
+  mode       String    @default("safe")
+  isActive   Boolean   @default(true)
+  rateLimit  Int       @default(60)
+  maxTurns   Int?
+  timeoutMs  Int?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  chatRequests ChatRequest[]
+  documents    Document[]
+  auditLogs    AuditLog[]
+
+  @@index([keyPrefix])
+  @@index([isActive])
+  @@index([mode])
+  @@map("api_keys")
+}
+
+model ChatRequest {
+  id                 String   @id @default(uuid())
+  requestId          String   @unique
+  apiKeyId           String
+  model              String
+  stream             Boolean  @default(false)
+  status             String
+  durationMs         Int?
+  grokSessionId      String?
+  promptCiphertext   Bytes
+  promptIv           Bytes
+  promptTag          Bytes
+  responseCiphertext Bytes?
+  responseIv         Bytes?
+  responseTag        Bytes?
+  errorMessage       String?
+  ip                 String?
+  userAgent          String?
+  /// resolved policy mode used for this request
+  policyMode         String?
+  createdAt          DateTime @default(now())
+
+  apiKey    ApiKey                @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  documents ChatRequestDocument[]
+
+  @@index([apiKeyId, createdAt])
+  @@index([status])
+  @@map("chat_requests")
+}
+
+model Document {
+  id                String    @id @default(uuid())
+  apiKeyId          String
+  originalName      String
+  mimeType          String
+  sizeBytes         Int
+  storageType       String
+  contentCiphertext Bytes?
+  contentIv         Bytes?
+  contentTag        Bytes?
+  storagePath       String?
+  checksumSha256    String
+  createdAt         DateTime  @default(now())
+  deletedAt         DateTime?
+
+  apiKey       ApiKey                @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  chatRequests ChatRequestDocument[]
+
+  @@index([apiKeyId, createdAt])
+  @@index([deletedAt])
+  @@map("documents")
+}
+
+model ChatRequestDocument {
+  chatRequestId String
+  documentId    String
+
+  chatRequest ChatRequest @relation(fields: [chatRequestId], references: [id], onDelete: Cascade)
+  document    Document    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([chatRequestId, documentId])
+  @@map("chat_request_documents")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  apiKeyId   String?
+  action     String
+  resource   String?
+  resourceId String?
+  metaJson   String?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  apiKey ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([apiKeyId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}

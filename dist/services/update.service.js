@@ -200,14 +200,14 @@ class UpdateService {
             }
             // Always regenerate prisma client + migrate when possible
             try {
-                run('npx prisma generate', packageRoot, log);
+                run('npx --yes prisma@6.5.0 generate', packageRoot, log);
             }
             catch (e) {
                 log.push(`prisma generate warn: ${e instanceof Error ? e.message : e}`);
             }
             if (!options?.skipMigrate) {
                 try {
-                    run('npx prisma migrate deploy', packageRoot, log);
+                    run('npx --yes prisma@6.5.0 migrate deploy', packageRoot, log);
                 }
                 catch (e) {
                     log.push(`migrate warn: ${e instanceof Error ? e.message : e}`);

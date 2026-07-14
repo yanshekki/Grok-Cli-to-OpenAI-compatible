@@ -20,9 +20,9 @@ export declare class DocumentService {
         mimeType: string;
         sizeBytes: number;
         storageType: string;
-        contentCiphertext: import("@prisma/client/runtime/library").Bytes | null;
-        contentIv: import("@prisma/client/runtime/library").Bytes | null;
-        contentTag: import("@prisma/client/runtime/library").Bytes | null;
+        contentCiphertext: Uint8Array | null;
+        contentIv: Uint8Array | null;
+        contentTag: Uint8Array | null;
         storagePath: string | null;
         checksumSha256: string;
         deletedAt: Date | null;

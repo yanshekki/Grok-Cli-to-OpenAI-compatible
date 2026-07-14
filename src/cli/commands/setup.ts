@@ -25,7 +25,7 @@ export async function cmdSetup(opts: {
   const env = ensureEnvFile(paths, port);
 
   info('Running prisma migrate deploy…');
-  execSync('npx prisma migrate deploy', {
+  execSync('npx --yes prisma@6.5.0 migrate deploy', {
     cwd: paths.packageRoot,
     stdio: 'inherit',
     env: {

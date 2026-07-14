@@ -1,6 +1,7 @@
 /**
- * Runs on: local npm install, git/github install, npm pack/publish.
- * Avoids shell (spawn sh) — uses node + execFile only.
+ * Lifecycle: local install, github/git install, pack.
+ * No shell spawn — only node + execFile (avoids "spawn sh ENOENT").
+ * Prefers committed dist/ + generated/prisma so install still works offline of generate.
  */
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -8,14 +9,15 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 const cliJs = path.join(root, 'dist', 'cli', 'index.js');
+const generatedClient = path.join(root, 'generated', 'prisma', 'index.js');
 const tscJs = path.join(root, 'node_modules', 'typescript', 'lib', 'tsc.js');
+const prismaCli = path.join(root, 'node_modules', 'prisma', 'build', 'index.js');
 
 function log(msg) {
-  console.log(`[gctoac prepare] ${msg}`);
+  console.log(`[gctoac] ${msg}`);
 }
-
 function warn(msg) {
-  console.warn(`[gctoac prepare] ${msg}`);
+  console.warn(`[gctoac] ${msg}`);
 }
 
 function runNode(scriptPath, args = []) {
@@ -26,12 +28,10 @@ function runNode(scriptPath, args = []) {
   });
 }
 
-// 1) Build TypeScript if CLI entry is missing
+// 1) Build if missing (typescript is a dependency for this)
 if (!fs.existsSync(cliJs)) {
-  if (!fs.existsSync(tscJs)) {
-    warn('typescript not found and dist/ missing — run: npm run build');
-  } else {
-    log('Building TypeScript (dist/ missing)…');
+  if (fs.existsSync(tscJs)) {
+    log('Building TypeScript…');
     try {
       runNode(tscJs, ['-p', 'tsconfig.json']);
       try {
@@ -39,13 +39,13 @@ if (!fs.existsSync(cliJs)) {
       } catch {
         /* ignore */
       }
-      log('Build complete');
     } catch (e) {
-      warn(`Build failed: ${e instanceof Error ? e.message : e}`);
+      warn(`build failed: ${e instanceof Error ? e.message : e}`);
     }
+  } else {
+    warn('dist/ missing and typescript not installed — CLI may not work');
   }
 } else {
-  log('dist/ already present');
   try {
     fs.chmodSync(cliJs, 0o755);
   } catch {
@@ -53,16 +53,18 @@ if (!fs.existsSync(cliJs)) {
   }
 }
 
-// 2) Prisma generate (no shell)
-const prismaCli = path.join(root, 'node_modules', 'prisma', 'build', 'index.js');
-if (fs.existsSync(prismaCli) && fs.existsSync(path.join(root, 'prisma', 'schema.prisma'))) {
-  log('Running prisma generate…');
-  try {
-    runNode(prismaCli, ['generate']);
-    log('Prisma client generated');
-  } catch (e) {
-    warn(`prisma generate skipped: ${e instanceof Error ? e.message : e}`);
+// 2) Prisma generate only if client not committed / missing
+if (!fs.existsSync(generatedClient)) {
+  if (fs.existsSync(prismaCli)) {
+    log('Generating Prisma client…');
+    try {
+      runNode(prismaCli, ['generate']);
+    } catch (e) {
+      warn(`prisma generate failed: ${e instanceof Error ? e.message : e}`);
+    }
+  } else {
+    warn('generated/prisma missing and prisma CLI not installed');
   }
 } else {
-  warn('prisma CLI or schema not found — skip generate');
+  log('Using committed Prisma client (generated/prisma)');
 }

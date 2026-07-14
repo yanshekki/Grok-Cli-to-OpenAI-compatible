@@ -12,7 +12,8 @@ async function cmdMigrate(opts) {
     });
     const env = (0, env_file_1.ensureEnvFile)(paths);
     (0, env_file_1.loadEnvIntoProcess)(paths.envFile);
-    (0, node_child_process_1.execSync)('npx prisma migrate deploy', {
+    // Use npx so prisma CLI need not be a runtime dependency (avoids broken global installs)
+    (0, node_child_process_1.execSync)('npx --yes prisma@6.5.0 migrate deploy', {
         cwd: paths.packageRoot,
         stdio: 'inherit',
         env: {
