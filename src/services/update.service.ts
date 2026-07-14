@@ -320,22 +320,24 @@ export class UpdateService {
         : detected.channel;
     const live = Boolean(options?.live);
     const progress = options?.progress;
+    const hasGit = fs.existsSync(path.join(packageRoot, '.git'));
+    const willMigrate = !options?.skipMigrate;
 
-    const steps =
-      channel === 'git' || fs.existsSync(path.join(packageRoot, '.git'))
-        ? [
-            'git fetch',
-            'git pull',
-            'npm install',
-            'npm run build',
-            'prisma migrate',
-          ]
-        : channel === 'npm-local'
-          ? ['npm install (local)', 'prisma migrate']
-          : ['npm install -g (latest)', 'prisma migrate'];
+    // Keep total in sync with every doStep() call below
+    let total: number;
+    if (channel === 'git') {
+      total = 4; // fetch, pull, npm install, build
+    } else if (channel === 'npm-global' || channel === 'npm-local') {
+      total = 1;
+    } else if (hasGit) {
+      total = 3; // pull, npm install, build
+    } else {
+      total = 1; // npm install -g package
+    }
+    total += 1; // always: npm install -g pm2
+    if (willMigrate) total += 1; // prisma generate + migrate
 
     let stepIndex = 0;
-    const total = steps.length;
     const doStep = (title: string, fn: () => void): void => {
       stepIndex += 1;
       progress?.step?.({ index: stepIndex, total, title });
@@ -351,7 +353,7 @@ export class UpdateService {
     };
 
     try {
-      log.push(`channel=${channel} root=${packageRoot}`);
+      log.push(`channel=${channel} root=${packageRoot} steps=${total}`);
 
       if (channel === 'git') {
         doStep('git fetch --all --tags', () => {
@@ -386,7 +388,7 @@ export class UpdateService {
             live,
           );
         });
-      } else if (fs.existsSync(path.join(packageRoot, '.git'))) {
+      } else if (hasGit) {
         doStep('git pull --ff-only', () => {
           run('git pull --ff-only', packageRoot, log, undefined, live);
         });
@@ -420,7 +422,7 @@ export class UpdateService {
       });
 
       // Auto migrate after package update (local prisma binary preferred)
-      if (!options?.skipMigrate) {
+      if (willMigrate) {
         const dbUrl =
           options?.databaseUrl ||
           process.env.DATABASE_URL ||
