@@ -20,10 +20,7 @@
   </head>
   <body>
     <div id="app"></div>
-    <script type="module">
-      // Dynamic import with server-injected version so i18n never sticks on stale cache
-      const V = '__ADMIN_ASSET_V__';
-      await import(`/admin/app.js?v=${V}`);
-    </script>
+    <!-- External module (no inline script — CSP script-src 'self') -->
+    <script type="module" src="/admin/boot.js?v=__ADMIN_ASSET_V__"></script>
   </body>
 </html>

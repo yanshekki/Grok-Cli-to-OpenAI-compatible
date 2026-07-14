@@ -31,7 +31,7 @@ import './interfaces/express.interface';
 /** Bust browser cache when any admin SPA asset changes */
 function adminAssetVersion(adminDir: string): string {
   try {
-    const files = ['app.js', 'i18n.js', 'styles.css', 'index.html'];
+    const files = ['app.js', 'i18n.js', 'styles.css', 'index.html', 'boot.js'];
     let max = 0;
     for (const f of files) {
       try {
@@ -94,15 +94,20 @@ export function createApp() {
 
   app.use(
     helmet({
-      // Allow Admin SPA (same-origin scripts/styles). Tighten object/base/frame.
+      // Admin SPA: same-origin JS + Google Fonts. No inline scripts (boot.js loads app.js).
       contentSecurityPolicy: {
         useDefaults: true,
         directives: {
           'default-src': ["'self'"],
           'script-src': ["'self'"],
-          'style-src': ["'self'", "'unsafe-inline'"],
+          'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+          'style-src-elem': [
+            "'self'",
+            "'unsafe-inline'",
+            'https://fonts.googleapis.com',
+          ],
+          'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com'],
           'img-src': ["'self'", 'data:', 'blob:'],
-          'font-src': ["'self'", 'data:'],
           'connect-src': ["'self'"],
           'object-src': ["'none'"],
           'base-uri': ["'self'"],
