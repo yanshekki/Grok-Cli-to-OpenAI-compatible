@@ -13,6 +13,11 @@ import { cmdDoctor } from './commands/doctor';
 import { cmdOpen } from './commands/open';
 import { cmdVersion } from './commands/version';
 import { cmdUpdate } from './commands/update';
+import {
+  cmdKeyCreate,
+  cmdKeyList,
+  cmdKeyRevoke,
+} from './commands/key';
 import { DEFAULT_PORT } from './lib/paths';
 
 function readPkgVersion(): string {
@@ -91,9 +96,64 @@ program
 
 program
   .command('seed')
-  .description('Seed bootstrap admin API key')
+  .description('Seed bootstrap admin API key (if missing)')
   .action(async () => {
     await cmdSeed(globalOpts());
+  });
+
+const keyCmd = program
+  .command('key')
+  .description('Manage API keys (create prints plaintext once)')
+  .action(async () => {
+    // Default: create a new admin key
+    await cmdKeyCreate({ ...globalOpts(), role: 'admin' });
+  });
+
+keyCmd
+  .command('create')
+  .description('Create API key and print plaintext once (default: admin)')
+  .option('-n, --name <name>', 'Key name')
+  .option('-r, --role <role>', 'admin | user', 'admin')
+  .option('-m, --mode <mode>', 'safe | agent (user keys; admin is always agent)', 'safe')
+  .option('--rate-limit <n>', 'Per-key rate limit', (v) => Number(v))
+  .action(
+    async (opts: {
+      name?: string;
+      role?: string;
+      mode?: string;
+      rateLimit?: number;
+    }) => {
+      await cmdKeyCreate({
+        ...globalOpts(),
+        name: opts.name,
+        role: opts.role,
+        mode: opts.mode,
+        rateLimit: opts.rateLimit,
+      });
+    },
+  );
+
+keyCmd
+  .command('list')
+  .description('List API keys (prefix only; plaintext not stored)')
+  .action(async () => {
+    await cmdKeyList(globalOpts());
+  });
+
+keyCmd
+  .command('revoke')
+  .description('Revoke (deactivate) an API key by id')
+  .argument('<id>', 'API key id')
+  .action(async (id: string) => {
+    await cmdKeyRevoke({ ...globalOpts(), id });
+  });
+
+keyCmd
+  .command('admin')
+  .description('Create a new admin API key (same as: gctoac key create)')
+  .option('-n, --name <name>', 'Key name')
+  .action(async (opts: { name?: string }) => {
+    await cmdKeyCreate({ ...globalOpts(), role: 'admin', name: opts.name });
   });
 
 program

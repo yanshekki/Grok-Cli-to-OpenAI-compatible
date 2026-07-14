@@ -18,6 +18,7 @@ const doctor_1 = require("./commands/doctor");
 const open_1 = require("./commands/open");
 const version_1 = require("./commands/version");
 const update_1 = require("./commands/update");
+const key_1 = require("./commands/key");
 const paths_1 = require("./lib/paths");
 function readPkgVersion() {
     try {
@@ -84,9 +85,52 @@ program
 });
 program
     .command('seed')
-    .description('Seed bootstrap admin API key')
+    .description('Seed bootstrap admin API key (if missing)')
     .action(async () => {
     await (0, seed_1.cmdSeed)(globalOpts());
+});
+const keyCmd = program
+    .command('key')
+    .description('Manage API keys (create prints plaintext once)')
+    .action(async () => {
+    // Default: create a new admin key
+    await (0, key_1.cmdKeyCreate)({ ...globalOpts(), role: 'admin' });
+});
+keyCmd
+    .command('create')
+    .description('Create API key and print plaintext once (default: admin)')
+    .option('-n, --name <name>', 'Key name')
+    .option('-r, --role <role>', 'admin | user', 'admin')
+    .option('-m, --mode <mode>', 'safe | agent (user keys; admin is always agent)', 'safe')
+    .option('--rate-limit <n>', 'Per-key rate limit', (v) => Number(v))
+    .action(async (opts) => {
+    await (0, key_1.cmdKeyCreate)({
+        ...globalOpts(),
+        name: opts.name,
+        role: opts.role,
+        mode: opts.mode,
+        rateLimit: opts.rateLimit,
+    });
+});
+keyCmd
+    .command('list')
+    .description('List API keys (prefix only; plaintext not stored)')
+    .action(async () => {
+    await (0, key_1.cmdKeyList)(globalOpts());
+});
+keyCmd
+    .command('revoke')
+    .description('Revoke (deactivate) an API key by id')
+    .argument('<id>', 'API key id')
+    .action(async (id) => {
+    await (0, key_1.cmdKeyRevoke)({ ...globalOpts(), id });
+});
+keyCmd
+    .command('admin')
+    .description('Create a new admin API key (same as: gctoac key create)')
+    .option('-n, --name <name>', 'Key name')
+    .action(async (opts) => {
+    await (0, key_1.cmdKeyCreate)({ ...globalOpts(), role: 'admin', name: opts.name });
 });
 program
     .command('doctor')

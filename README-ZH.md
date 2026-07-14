@@ -64,10 +64,17 @@ gctoac start    # http://127.0.0.1:3847
 gctoac status
 ```
 
-開啟 Admin（貼上 `setup` 印出的 **admin API key**，只顯示一次）：
+開啟 Admin（貼上 **admin API key**）：
 
 ```text
 http://127.0.0.1:3847/admin/
+```
+
+若遺失 setup 時的 key，可隨時建立新的：
+
+```bash
+gctoac key create    # 明文只顯示一次
+gctoac key list      # 只顯示 prefix（明文不會存庫）
 ```
 
 **資料目錄：** `~/.gctoac/`  
@@ -165,7 +172,10 @@ gctoac --port 3847 start
 | `gctoac restart` | 重啟 |
 | `gctoac status` | 顯示 PID + health |
 | `gctoac migrate` | 跑 Prisma migration |
-| `gctoac seed` | 產生 admin API key |
+| `gctoac seed` | 產生 admin API key（若未有） |
+| `gctoac key` / `gctoac key create` | **建立 API key**（明文只顯示一次） |
+| `gctoac key list` | 列出 keys（只有 prefix） |
+| `gctoac key revoke <id>` | 撤銷 key |
 | `gctoac doctor` | 檢查環境 |
 | `gctoac update` | 自我更新後重啟 |
 | `gctoac update --check` | 只檢查有無新版本 |

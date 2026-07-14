@@ -64,10 +64,17 @@ gctoac start    # http://127.0.0.1:3847
 gctoac status
 ```
 
-Open Admin (paste the **admin API key** printed by `setup` — shown once):
+Open Admin (paste an **admin API key**):
 
 ```text
 http://127.0.0.1:3847/admin/
+```
+
+If you lost the setup key, create a new one anytime:
+
+```bash
+gctoac key create    # prints plaintext once
+gctoac key list      # prefixes only (plaintext is never stored)
 ```
 
 **Data directory:** `~/.gctoac/`  
@@ -165,7 +172,10 @@ gctoac --port 3847 start
 | `gctoac restart` | Restart |
 | `gctoac status` | PID + health |
 | `gctoac migrate` | Run Prisma migrations |
-| `gctoac seed` | Seed admin API key |
+| `gctoac seed` | Seed admin API key (if missing) |
+| `gctoac key` / `gctoac key create` | **Create API key** (prints plaintext once) |
+| `gctoac key list` | List keys (prefix only) |
+| `gctoac key revoke <id>` | Revoke a key |
 | `gctoac doctor` | Environment checks |
 | `gctoac update` | Self-update then restart |
 | `gctoac update --check` | Check for updates only |

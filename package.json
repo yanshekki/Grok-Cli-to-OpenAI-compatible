@@ -1,6 +1,6 @@
 {
   "name": "grok-cli-to-openai-compatible",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "OpenAI-compatible API gateway for Grok CLI — with Admin panel, safe mode, and gctoac CLI",
   "keywords": [
     "grok",

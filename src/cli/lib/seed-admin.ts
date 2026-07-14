@@ -56,7 +56,8 @@ export async function seedAdmin(options?: {
       console.log(`  prefix: ${existingAdmin.keyPrefix}`);
       console.log('  mode:   agent (ensured)');
       console.log(`Admin panel: http://127.0.0.1:${port}/admin/`);
-      console.log('Plaintext key is not recoverable. Create a new admin key via API if needed.');
+      console.log('Plaintext key is not recoverable.');
+      console.log('Create a new admin key (printed once): gctoac key create');
       return {
         created: false,
         id: existingAdmin.id,
