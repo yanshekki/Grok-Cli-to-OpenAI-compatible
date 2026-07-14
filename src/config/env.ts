@@ -6,11 +6,12 @@ loadDotenv();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().int().positive().default(3000),
+  PORT: z.coerce.number().int().positive().default(3847),
   HOST: z.string().default('0.0.0.0'),
   DATABASE_URL: z.string().min(1),
   ENCRYPTION_KEY: z.string().min(1),
   ADMIN_BOOTSTRAP_KEY: z.string().optional(),
+  GCTOAC_HOME: z.string().optional(),
 
   GROK_BIN: z.string().default('grok'),
   GROK_DEFAULT_MODEL: z.string().default('grok-4.5'),
@@ -34,7 +35,7 @@ const envSchema = z.object({
     .default('true')
     .transform((v) => v === 'true' || v === '1'),
 
-  CORS_ORIGINS: z.string().default('http://localhost:3000'),
+  CORS_ORIGINS: z.string().default('http://localhost:3847,http://127.0.0.1:3847'),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
   BODY_LIMIT: z.string().default('1mb'),

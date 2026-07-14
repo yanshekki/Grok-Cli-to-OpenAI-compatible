@@ -1,28 +1,112 @@
 # Grok CLI → OpenAI-Compatible Gateway
 
 [![CI](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/actions/workflows/ci.yml/badge.svg)](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/grok-cli-to-openai-compatible.svg)](https://www.npmjs.com/package/grok-cli-to-openai-compatible)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org/)
+[![Default port](https://img.shields.io/badge/port-3847-informational)](#default-port-3847)
 
-Turn local **[Grok CLI](https://x.ai)** headless mode (`grok -p`) into a production-ready **OpenAI-compatible HTTP API**, with encryption, audit logging, per-key **safe/agent** security policy, and a full **Admin Panel**.
+Turn local **[Grok CLI](https://x.ai)** headless mode (`grok -p`) into a production-ready **OpenAI-compatible HTTP API**, with encryption, audit logging, per-key **safe/agent** security policy, a full **Admin Panel**, and a control CLI (`gctoac` / `gcoa`).
 
-Any OpenAI SDK / Open WebUI / Cursor-compatible client can point `baseURL` here and use Grok CLI as the backend.
+**npm package:** [`grok-cli-to-openai-compatible`](https://www.npmjs.com/package/grok-cli-to-openai-compatible)  
+**CLI:** `gctoac` · short alias `gcoa`  
+**Default port:** **`3847`** (unique to this project; override with `PORT=`)
 
 ```text
 Client (OpenAI SDK / curl)
         │  Authorization: Bearer gk_live_...
         ▼
 ┌───────────────────────────────────────┐
-│  Express Gateway (this project)       │
+│  Express Gateway :3847                │
 │  · Auth / rate limit / validation     │
 │  · Safe | Agent policy                │
 │  · Encrypt + audit every chat         │
 │  · Admin Panel @ /admin               │
+│  · CLI: gctoac start|stop|status…     │
 └───────────────────┬───────────────────┘
                     │ spawn
                     ▼
               grok -p …  (local CLI)
 ```
+
+---
+
+## Install (npm)
+
+### Global (recommended for daily use)
+
+```bash
+# After publish to npm:
+npm install -g grok-cli-to-openai-compatible
+
+# Or from GitHub without waiting for npm:
+npm install -g github:yanshekki/Grok-Cli-to-OpenAI-compatible
+
+gctoac doctor
+gctoac setup          # ~/.gctoac — .env, DB migrate, admin key
+gctoac start          # background on port 3847
+gctoac status
+gcoa open             # same binary, short name
+```
+
+Data directory for global installs: **`~/.gctoac/`** (override with `GCTOAC_HOME` or `gctoac --home /path`).
+
+### Local project
+
+```bash
+npm install grok-cli-to-openai-compatible
+npx gctoac setup
+npx gctoac start --foreground
+```
+
+### From source
+
+```bash
+git clone https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible.git
+cd Grok-Cli-to-OpenAI-compatible
+npm install
+npm run build
+npx gctoac setup      # uses project ./data when run inside repo
+npx gctoac start
+```
+
+---
+
+## CLI reference (`gctoac` / `gcoa`)
+
+| Command | Description |
+|---------|-------------|
+| `gctoac setup` | Create data dirs, `.env`, migrate, seed admin key |
+| `gctoac start` | Start gateway in background |
+| `gctoac start -f` | Start in foreground |
+| `gctoac stop` | Stop background process |
+| `gctoac restart` | Stop + start |
+| `gctoac status` | PID + `/health` check |
+| `gctoac migrate` | `prisma migrate deploy` |
+| `gctoac seed` | Bootstrap admin API key |
+| `gctoac doctor` | Check Node, Grok CLI, env, build |
+| `gctoac open` | Print API / Admin URLs |
+| `gctoac open --admin` | Admin URL only |
+| `gctoac version` | Package version |
+
+**Global flags:**
+
+```bash
+gctoac --home ~/.gctoac-alt setup
+gctoac --port 3847 start
+```
+
+---
+
+## Default port `3847`
+
+| URL | Purpose |
+|-----|---------|
+| `http://127.0.0.1:3847/v1` | OpenAI-compatible API base |
+| `http://127.0.0.1:3847/admin/` | Admin Panel |
+| `http://127.0.0.1:3847/health` | Liveness |
+
+Change with `PORT=` in `.env` or `gctoac --port … start`.
 
 ---
 
@@ -36,7 +120,8 @@ Client (OpenAI SDK / curl)
 | **Security modes** | Per-key `safe` / `agent`; optional global force-safe |
 | **Encryption** | AES-256-GCM for prompts, responses, document bodies |
 | **Admin UI** | Dashboard, full chat in/out decrypt, keys, docs, audit, settings |
-| **Ops** | SQLite (zero DB server), PM2, GitHub Actions CI, structured logging |
+| **CLI** | `gctoac` / `gcoa` lifecycle control |
+| **Ops** | SQLite, PM2, GitHub Actions CI, structured logging |
 
 ---
 
@@ -45,7 +130,8 @@ Client (OpenAI SDK / curl)
 - **Runtime:** Node.js 20+, TypeScript (strict)
 - **HTTP:** Express, Helmet, CORS, express-rate-limit, Zod
 - **Data:** Prisma + **SQLite**
-- **Process:** PM2 (fork, single instance)
+- **CLI:** Commander (`gctoac` / `gcoa`)
+- **Process:** PM2 (fork, single instance) or `gctoac start`
 - **Grok:** Local CLI via `execa` (argv only, no shell)
 
 ---
@@ -63,7 +149,7 @@ grok --version
 
 ---
 
-## Quick start
+## Quick start (source / dev)
 
 ```bash
 git clone https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible.git
@@ -77,14 +163,16 @@ npm install
 npm run db:setup    # migrate + seed (prints admin API key ONCE)
 
 npm run dev
-# → API:   http://127.0.0.1:3000
-# → Admin: http://127.0.0.1:3000/admin/
+# → API:   http://127.0.0.1:3847
+# → Admin: http://127.0.0.1:3847/admin/
 ```
+
+Or: `npm run build && gctoac setup && gctoac start`
 
 ### First admin login
 
-1. Copy the **admin API key** printed by `npm run seed` (only shown once).  
-2. Open **http://127.0.0.1:3000/admin/**  
+1. Copy the **admin API key** printed by `gctoac setup` / `npm run seed` (only shown once).  
+2. Open **http://127.0.0.1:3847/admin/**  
 3. Paste the key to sign in.  
 4. Create a **client** key (`mode=safe` for external apps, `mode=agent` for trusted internal use).
 
@@ -238,7 +326,7 @@ Stream order: **reasoning deltas → content deltas → finish (+ `grok`) → `[
 ```bash
 export API_KEY=gk_live_...
 
-curl -s http://127.0.0.1:3000/v1/chat/completions \
+curl -s http://127.0.0.1:3847/v1/chat/completions \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -250,7 +338,7 @@ curl -s http://127.0.0.1:3000/v1/chat/completions \
 **Stream**
 
 ```bash
-curl -sN http://127.0.0.1:3000/v1/chat/completions \
+curl -sN http://127.0.0.1:3847/v1/chat/completions \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -268,7 +356,7 @@ import OpenAI from 'openai';
 
 const client = new OpenAI({
   apiKey: process.env.API_KEY,
-  baseURL: 'http://127.0.0.1:3000/v1',
+  baseURL: 'http://127.0.0.1:3847/v1',
 });
 
 const res = await client.chat.completions.create({
@@ -295,7 +383,7 @@ console.log(msg.reasoning_content, msg.content);
 | DELETE | `/v1/documents/:id` | soft delete |
 
 ```bash
-curl -s http://127.0.0.1:3000/v1/documents \
+curl -s http://127.0.0.1:3847/v1/documents \
   -H "Authorization: Bearer $API_KEY" \
   -F "file=@./notes.txt"
 ```
@@ -327,7 +415,8 @@ See [`.env.example`](.env.example). Critical keys:
 | `GROK_MAX_CONCURRENT` | Max parallel CLI processes |
 | `ADMIN_PANEL_ENABLED` | Master switch for `/admin` |
 | `CORS_ORIGINS` | Comma-separated origins |
-| `PORT` / `HOST` | Listen address (default `3000` / `0.0.0.0`) |
+| `PORT` / `HOST` | Listen address (**default `3847`** / `0.0.0.0`) |
+| `GCTOAC_HOME` | CLI data home (default `~/.gctoac` for global install) |
 
 **Back up `ENCRYPTION_KEY`.** Losing it makes historical ciphertext unreadable.
 
@@ -354,13 +443,28 @@ See [`.env.example`](.env.example). Critical keys:
 
 ```bash
 npm run dev           # tsx watch
-npm run build         # tsc → dist/
+npm run build         # tsc → dist/ (+ chmod CLI)
 npm start             # node dist/server.js
 npm test              # Vitest (unit + integration)
 npm run typecheck
 npm run db:setup      # migrate deploy + seed
 npm run seed          # bootstrap admin key
 npm run smoke         # API_KEY=... bash scripts/smoke.sh
+gctoac setup|start|status|stop|doctor
+```
+
+### Publish (maintainers)
+
+```bash
+npm run build
+npm publish --access public
+# requires npm login + package name available
+```
+
+Install from GitHub without npm publish:
+
+```bash
+npm install -g github:yanshekki/Grok-Cli-to-OpenAI-compatible
 ```
 
 ---
