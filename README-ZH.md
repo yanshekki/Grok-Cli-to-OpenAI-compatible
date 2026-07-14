@@ -8,9 +8,7 @@
 
 **語言：** [English](./README.md) · 中文
 
-把本機 **[Grok CLI](https://x.ai)**（`grok -p` headless）包裝成可上線嘅 **OpenAI 相容 HTTP API**。
-
-功能包括：加密稽核日誌、每把 key 嘅 **safe / agent** 政策、完整 **Admin Panel**，以及控制用 CLI（`gctoac` / `gcoa`）。
+將本機 **[Grok CLI](https://x.ai)**（`grok -p` headless）包裝成可上線的 **OpenAI 相容 HTTP API**。
 
 | | |
 |--|--|
@@ -18,14 +16,23 @@
 | **CLI** | `gctoac` · 短名 `gcoa` |
 | **預設 port** | **`3847`** |
 
+**主要能力**
+
+- OpenAI 相容 `POST /v1/chat/completions`（stream / 非 stream）
+- Thinking / `reasoning_content`（DeepSeek 風格 + Grok `thought`）
+- 每把 key 的 **safe** / **agent** 政策
+- AES-256-GCM 加密 + 完整 chat 稽核
+- Admin Panel：`/admin`（解密 prompt 輸入輸出、金鑰、一鍵更新）
+- 控制 CLI：`gctoac setup | start | stop | status | update`
+
 ```text
 Client (OpenAI SDK / curl / Open WebUI)
         │  Authorization: Bearer gk_live_...
         ▼
    Express Gateway :3847
-   · 認證 · 限流 · safe/agent 政策
-   · chat 加密稽核 · Admin /admin
-   · CLI: gctoac start | stop | status | update
+   · 認證 · 限流 · safe/agent
+   · 加密稽核 · Admin /admin
+   · gctoac start | stop | status | update
         │
         ▼
    grok -p …  （本機 Grok CLI）
@@ -33,31 +40,64 @@ Client (OpenAI SDK / curl / Open WebUI)
 
 ---
 
-## 安裝
+## 快速開始
 
-### 全域安裝（建議）
+### 1. 前置要求
+
+- **Node.js** ≥ 20  
+- 已安裝並登入 **Grok CLI**：
+
+```bash
+curl -fsSL https://x.ai/cli/install.sh | bash
+grok login
+grok --version
+```
+
+### 2. 安裝並啟動
 
 ```bash
 npm install -g grok-cli-to-openai-compatible
 
-gctoac doctor
+gctoac doctor   # 檢查 Node / Grok / 環境
 gctoac setup    # 建立 ~/.gctoac、.env、資料庫、admin API key
-gctoac start    # 監聽 http://127.0.0.1:3847
+gctoac start    # http://127.0.0.1:3847
 gctoac status
 ```
 
-Setup 完後開 Admin：
+開啟 Admin（貼上 `setup` 印出的 **admin API key**，只顯示一次）：
 
 ```text
 http://127.0.0.1:3847/admin/
 ```
 
-貼上 `gctoac setup` 印出嘅 **admin API key**（只顯示一次）。
-
 **資料目錄：** `~/.gctoac/`  
 可用 `GCTOAC_HOME` 或 `gctoac --home /path` 覆蓋。
 
-### 專案依賴安裝
+### 3. 呼叫 API
+
+```bash
+export API_KEY=gk_live_...   # setup 或 Admin 取得
+
+curl -s http://127.0.0.1:3847/v1/chat/completions \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "grok-4.5",
+    "messages": [{"role":"user","content":"用一個字打招呼"}]
+  }'
+```
+
+---
+
+## 安裝方式
+
+### 全域安裝（建議）
+
+```bash
+npm install -g grok-cli-to-openai-compatible
+```
+
+### 專案依賴
 
 ```bash
 npm install grok-cli-to-openai-compatible
@@ -77,27 +117,24 @@ gctoac setup
 gctoac start
 ```
 
-或一鍵腳本（clone 到 `~/.gctoac/src` 再 `npm link`）：
+一鍵腳本（clone 到 `~/.gctoac/src` 再 `npm link`）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yanshekki/Grok-Cli-to-OpenAI-compatible/main/scripts/install.sh | bash
 ```
 
-> 唔建議用 `npm install -g github:yanshekki/...`（部分 npm 版本會裝失敗）。  
-> 請優先用 **`npm install -g grok-cli-to-openai-compatible`** 或上面嘅 install 腳本。
+> 請優先使用 **`npm install -g grok-cli-to-openai-compatible`**。  
+> 不建議 `npm install -g github:yanshekki/...`（部分 npm 版本會失敗）。
 
----
-
-## 前置要求
-
-1. **Node.js** ≥ 20  
-2. 已安裝並登入 **Grok CLI**：
+### 更新
 
 ```bash
-curl -fsSL https://x.ai/cli/install.sh | bash
-grok login
-grok --version
+gctoac update              # 更新套件並重啟
+gctoac update --check      # 只檢查是否有新版本
+gctoac update --no-restart # 更新但不重啟
 ```
+
+亦可在 Admin → **系統狀態** → 一鍵更新。
 
 ---
 
@@ -109,7 +146,11 @@ grok --version
 | `http://127.0.0.1:3847/admin/` | Admin 控制台 |
 | `http://127.0.0.1:3847/health` | 健康檢查 |
 
-覆蓋方式：`.env` 設 `PORT=`，或 `gctoac --port 3847 start`。
+覆蓋方式：`.env` 設 `PORT=`，或：
+
+```bash
+gctoac --port 3847 start
+```
 
 ---
 
@@ -128,11 +169,9 @@ grok --version
 | `gctoac doctor` | 檢查環境 |
 | `gctoac update` | 自我更新後重啟 |
 | `gctoac update --check` | 只檢查有無新版本 |
-| `gctoac update --no-restart` | 更新但唔重啟 |
+| `gctoac update --no-restart` | 更新但不重啟 |
 | `gctoac open` | 印出 API / Admin URL |
 | `gctoac version` | 顯示版本 |
-
-參數：
 
 ```bash
 gctoac --home ~/.gctoac-alt setup
@@ -146,36 +185,22 @@ gctoac --port 3847 start
 | 功能 | 說明 |
 |------|------|
 | OpenAI API | `POST /v1/chat/completions`（stream / 非 stream）、`GET /v1/models` |
-| Thinking | DeepSeek 式 `reasoning_content` + Grok `thought` + `grok.*` |
+| Thinking | `reasoning_content` + Grok `thought` + `grok.*` |
 | 文件 | 加密上傳；可用 `document_ids` 注入 chat |
 | Safe / Agent | 每 key 政策；可全域強制 safe |
 | 加密 | AES-256-GCM 加密 prompt、response、檔案 |
-| Admin Panel | 儀表板、完整解密 chat in/out、keys、文件、audit、設定、一鍵更新 |
+| Admin Panel | 儀表板、完整解密 chat、keys、文件、audit、設定、一鍵更新 |
 | CLI | 生命週期控制 + 自我更新 |
 | 運維 | SQLite、PM2、GitHub Actions CI |
 
 ---
 
-## API 快速範例
+## API
 
 受保護路由需要：
 
 ```http
 Authorization: Bearer gk_live_...
-```
-
-### Chat（非 stream）
-
-```bash
-export API_KEY=gk_live_...
-
-curl -s http://127.0.0.1:3847/v1/chat/completions \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "grok-4.5",
-    "messages": [{"role":"user","content":"用一個字打招呼"}]
-  }'
 ```
 
 ### Chat（stream）
@@ -226,8 +251,8 @@ console.log(res.choices[0].message.content);
 | 欄位 | 說明 |
 |------|------|
 | `include_reasoning` | 預設 `true`；Grok `thought` → `reasoning_content` |
-| `cwd` | 只喺 **agent**（allowlist 內）；**safe** 強制 sandbox |
-| `session_id` | 傳畀 `grok -s` |
+| `cwd` | 僅 **agent**（allowlist 內）；**safe** 強制 sandbox |
+| `session_id` | 傳給 `grok -s` |
 | `document_ids` | 注入已解密文件內容 |
 
 ### Thinking 對應
@@ -238,13 +263,14 @@ console.log(res.choices[0].message.content);
 | `text` | `content` / `delta.content` | — |
 | `end` | `finish_reason` | `grok.sessionId`、`grok.stopReason` |
 
-### 其他端點
+### 端點
 
 | Method | Path | 說明 |
 |--------|------|------|
 | GET | `/health` | 存活 |
 | GET | `/ready` | DB + Grok 檢查 |
 | GET | `/v1/models` | 模型列表 |
+| POST | `/v1/chat/completions` | 對話 |
 | POST | `/v1/documents` | 上傳（欄位 `file`） |
 | GET/DELETE | `/v1/documents`… | 列表 / 軟刪除 |
 | POST/GET/DELETE | `/v1/api-keys`… | Admin 管理 key |
@@ -255,13 +281,12 @@ console.log(res.choices[0].message.content);
 
 | Mode | 適用 | 行為 |
 |------|------|------|
-| **`safe`**（client 預設） | 對外應用 | Sandbox cwd、唔 always-approve、限制 tools、較短 timeout |
+| **`safe`**（client 預設） | 對外應用 | Sandbox cwd、不 always-approve、限制 tools、較短 timeout |
 | **`agent`** | 受信 / 內網 | 完整 CLI tools（可 always-approve）；cwd 仍受 allowlist 限制 |
 
 - 全域強制 safe：`GROK_SAFE_MODE=true` 或 Admin → 安全設定  
 - Client **無法** 靠 request body 提權  
-
-**唔好** 將 `agent` key 暴露喺公網。
+- **不要** 將 `agent` key 暴露於公網  
 
 ---
 
@@ -317,19 +342,19 @@ pm2 start ecosystem.config.cjs
 pm2 logs grok-openai-gateway
 ```
 
-或用：`gctoac start`（背景執行，pid 寫入資料目錄）。
+或直接：`gctoac start`（背景執行，pid 寫入資料目錄）。
 
 ---
 
 ## 專案結構
 
 ```text
-src/                 # TypeScript 原始碼（app、routes、services、cli）
-public/admin/        # Admin SPA
-prisma/              # Schema、migrations、seed
-dist/                # 編譯後 JS（隨 npm 發佈）
-scripts/             # prepare、install.sh
-tests/               # Vitest
+src/           TypeScript 原始碼（app、routes、services、cli）
+public/admin/  Admin SPA
+prisma/        Schema、migrations、seed
+dist/          編譯後 JS（隨 npm 發佈）
+scripts/       prepare、install.sh
+tests/         Vitest
 ```
 
 ---
@@ -358,9 +383,9 @@ npm publish --access public --otp=<2FA六位碼>
 ## 安全注意
 
 - API key 只存 **SHA-256 hash**  
-- Chat prompt/response 同文件用 **AES-256-GCM** 靜態加密  
+- Chat prompt/response 與文件以 **AES-256-GCM** 靜態加密  
 - 對外 client 請用 **`safe`** mode  
-- 唔好 commit `.env`，唔好外洩 admin key  
+- 不要 commit `.env`，不要外洩 admin key  
 
 ---
 
