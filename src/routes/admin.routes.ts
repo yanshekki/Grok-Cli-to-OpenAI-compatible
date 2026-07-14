@@ -3,6 +3,7 @@ import { adminController } from '../controllers/admin.controller';
 import {
   adminCreateKeySchema,
   adminIdParamSchema,
+  adminIpBanSchema,
   adminListQuerySchema,
   adminUpdateKeySchema,
   adminUpdateSettingsSchema,
@@ -84,5 +85,24 @@ router.put(
   validate(adminUpdateSettingsSchema, 'body'),
   adminController.updateSettings,
 );
+
+// DDoS control center
+router.get('/ddos/connections', adminController.ddosConnections);
+router.get('/ddos/blacklist', adminController.ddosBlacklist);
+router.get('/ddos/stats', adminController.ddosStats);
+router.post(
+  '/ddos/blacklist',
+  validate(adminIpBanSchema, 'body'),
+  adminController.ddosBan,
+);
+router.delete('/ddos/blacklist/:ip', adminController.ddosUnban);
+
+// PM2 control
+router.get('/pm2/status', adminController.pm2Status);
+router.post('/pm2/start', adminController.pm2Start);
+router.post('/pm2/stop', adminController.pm2Stop);
+router.post('/pm2/restart', adminController.pm2Restart);
+router.post('/pm2/reload', adminController.pm2Reload);
+router.get('/pm2/logs', adminController.pm2Logs);
 
 export default router;

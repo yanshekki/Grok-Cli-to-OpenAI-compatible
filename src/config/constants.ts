@@ -89,6 +89,12 @@ export const AUDIT_ACTIONS = {
   CHAT_ADMIN_VIEW: 'chat.admin_view',
   SYSTEM_UPDATE: 'system.update',
   SYSTEM_UPDATE_CHECK: 'system.update_check',
+  IP_BAN: 'ip.ban',
+  IP_UNBAN: 'ip.unban',
+  PM2_START: 'pm2.start',
+  PM2_STOP: 'pm2.stop',
+  PM2_RESTART: 'pm2.restart',
+  PM2_RELOAD: 'pm2.reload',
 } as const;
 
 export const ROLES = {

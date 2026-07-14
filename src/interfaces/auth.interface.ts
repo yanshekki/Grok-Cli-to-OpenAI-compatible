@@ -11,4 +11,5 @@ export interface AuthenticatedApiKey {
   isActive: boolean;
   maxTurns: number | null;
   timeoutMs: number | null;
+  ipWhitelist: string[];
 }

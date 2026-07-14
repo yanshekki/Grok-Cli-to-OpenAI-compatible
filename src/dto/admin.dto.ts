@@ -26,6 +26,15 @@ export const adminIdParamSchema = z.object({
   id: z.string().uuid(),
 });
 
+const ipEntrySchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(
+    /^(?:(?:\d{1,3}\.){3}\d{1,3}(?:\/(?:3[0-2]|[12]?\d))?|[0-9a-fA-F:.]+)$/,
+    'Invalid IP or CIDR',
+  );
+
 export const adminCreateKeySchema = z.object({
   name: z.string().min(1).max(128),
   role: z.enum([ROLES.CLIENT, ROLES.ADMIN]).optional().default(ROLES.CLIENT),
@@ -33,6 +42,7 @@ export const adminCreateKeySchema = z.object({
   rateLimit: z.number().int().min(1).max(10_000).optional().default(60),
   maxTurns: z.number().int().min(1).max(100).nullable().optional(),
   timeoutMs: z.number().int().min(1000).max(3_600_000).nullable().optional(),
+  ipWhitelist: z.array(ipEntrySchema).max(100).optional().default([]),
 });
 
 export const adminUpdateKeySchema = z.object({
@@ -43,6 +53,14 @@ export const adminUpdateKeySchema = z.object({
   isActive: z.boolean().optional(),
   maxTurns: z.number().int().min(1).max(100).nullable().optional(),
   timeoutMs: z.number().int().min(1000).max(3_600_000).nullable().optional(),
+  ipWhitelist: z.array(ipEntrySchema).max(100).nullable().optional(),
+});
+
+export const adminIpBanSchema = z.object({
+  ip: z.string().min(1).max(64),
+  reason: z.string().max(500).optional(),
+  /** seconds from now; omit/null = permanent */
+  ttlSeconds: z.number().int().min(0).max(365 * 24 * 3600).nullable().optional(),
 });
 
 export const adminUpdateSettingsSchema = z.object({

@@ -545,6 +545,8 @@ tr:hover td {
   padding: 9px 10px;
   font-weight: 500;
   color: var(--text-main);
+  width: 100%;
+  resize: vertical;
 }
 .form-grid input:focus,
 .form-grid select:focus,

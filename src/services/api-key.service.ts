@@ -12,6 +12,7 @@ import type {
 } from '../interfaces/auth.interface';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { apiKeyPrefix, createApiKeySecret, createId } from '../utils/id';
+import { parseIpList, serializeIpList } from '../utils/ip-match';
 import { auditService } from './audit.service';
 
 function hashApiKey(rawKey: string): string {
@@ -42,6 +43,7 @@ function mapPublic(r: {
   rateLimit: number;
   maxTurns: number | null;
   timeoutMs: number | null;
+  ipWhitelist?: string | null;
   createdAt: Date;
   lastUsedAt: Date | null;
 }): ApiKeyPublicEntity {
@@ -55,6 +57,7 @@ function mapPublic(r: {
     rateLimit: r.rateLimit,
     maxTurns: r.maxTurns,
     timeoutMs: r.timeoutMs,
+    ipWhitelist: parseIpList(r.ipWhitelist),
     createdAt: r.createdAt,
     lastUsedAt: r.lastUsedAt,
   };
@@ -90,6 +93,7 @@ export class ApiKeyService {
       isActive: record.isActive,
       maxTurns: record.maxTurns,
       timeoutMs: record.timeoutMs,
+      ipWhitelist: parseIpList(record.ipWhitelist),
     };
   }
 
@@ -100,6 +104,7 @@ export class ApiKeyService {
     rateLimit?: number;
     maxTurns?: number | null;
     timeoutMs?: number | null;
+    ipWhitelist?: string[];
     actorApiKeyId?: string;
     ip?: string;
     rawKey?: string;
@@ -121,6 +126,8 @@ export class ApiKeyService {
           ? KEY_MODES.AGENT
           : KEY_MODES.SAFE;
 
+    const wl = input.ipWhitelist ? parseIpList(input.ipWhitelist) : [];
+
     const created = await prisma.apiKey.create({
       data: {
         id,
@@ -132,6 +139,7 @@ export class ApiKeyService {
         rateLimit: input.rateLimit ?? 60,
         maxTurns: input.maxTurns ?? null,
         timeoutMs: input.timeoutMs ?? null,
+        ipWhitelist: serializeIpList(wl),
       },
     });
 
@@ -145,6 +153,7 @@ export class ApiKeyService {
         role: created.role,
         mode: created.mode,
         keyPrefix: prefix,
+        ipWhitelist: wl,
       },
       ip: input.ip,
     });
@@ -169,6 +178,7 @@ export class ApiKeyService {
       isActive?: boolean;
       maxTurns?: number | null;
       timeoutMs?: number | null;
+      ipWhitelist?: string[] | null;
     },
     actorApiKeyId: string,
     ip?: string,
@@ -178,17 +188,24 @@ export class ApiKeyService {
       throw ExceptionFactory.notFound('API key');
     }
 
+    const data: Record<string, unknown> = {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.role !== undefined ? { role: input.role } : {}),
+      ...(input.mode !== undefined ? { mode: input.mode } : {}),
+      ...(input.rateLimit !== undefined ? { rateLimit: input.rateLimit } : {}),
+      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
+      ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+    };
+    if (input.ipWhitelist !== undefined) {
+      data.ipWhitelist = serializeIpList(
+        input.ipWhitelist === null ? [] : parseIpList(input.ipWhitelist),
+      );
+    }
+
     const updated = await prisma.apiKey.update({
       where: { id },
-      data: {
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.role !== undefined ? { role: input.role } : {}),
-        ...(input.mode !== undefined ? { mode: input.mode } : {}),
-        ...(input.rateLimit !== undefined ? { rateLimit: input.rateLimit } : {}),
-        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
-        ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
-        ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
-      },
+      data,
     });
 
     await auditService.log({

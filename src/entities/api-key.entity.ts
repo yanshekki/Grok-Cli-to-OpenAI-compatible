@@ -25,6 +25,8 @@ export interface ApiKeyPublicEntity {
   rateLimit: number;
   maxTurns: number | null;
   timeoutMs: number | null;
+  /** Empty = allow all IPs */
+  ipWhitelist: string[];
   createdAt: Date;
   lastUsedAt: Date | null;
 }

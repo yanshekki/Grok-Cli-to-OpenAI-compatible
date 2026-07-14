@@ -19,6 +19,8 @@ model ApiKey {
   rateLimit  Int       @default(60)
   maxTurns   Int?
   timeoutMs  Int?
+  /// JSON string array of IPs/CIDRs; empty/null = allow all
+  ipWhitelist String?
   createdAt  DateTime  @default(now())
   lastUsedAt DateTime?
 
@@ -30,6 +32,20 @@ model ApiKey {
   @@index([isActive])
   @@index([mode])
   @@map("api_keys")
+}
+
+model IpBlacklist {
+  id        String    @id @default(uuid())
+  ip        String    @unique
+  reason    String?
+  /// manual | auto-auth | auto-rate
+  source    String    @default("manual")
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  createdBy String?
+
+  @@index([expiresAt])
+  @@map("ip_blacklist")
 }
 
 model ChatRequest {

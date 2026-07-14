@@ -67,6 +67,10 @@ function setPage(page) {
   state.modal = null;
   state.error = '';
   if (page === 'chats') state.chatFilter.offset = 0;
+  if (page !== 'ddos' && ddosTimer) {
+    clearInterval(ddosTimer);
+    ddosTimer = null;
+  }
   render();
 }
 
@@ -106,7 +110,17 @@ function showError(msg) {
 function badgeStatus(s) {
   const c =
     s === 'success' ? 'success' : s === 'error' || s === 'timeout' ? 'error' : 'pending';
-  return `<span class="badge ${c}">${escapeHtml(s || '-')}</span>`;
+  const label =
+    s === 'success'
+      ? t('status.success')
+      : s === 'error'
+        ? t('status.error')
+        : s === 'timeout'
+          ? t('status.timeout')
+          : s === 'pending'
+            ? t('status.pending')
+            : s || '-';
+  return `<span class="badge ${c}">${escapeHtml(label)}</span>`;
 }
 
 function badgeMode(m) {
@@ -147,6 +161,8 @@ function shell(content) {
         ${nav('audit', t('nav.audit'))}
         ${nav('settings', t('nav.settings'))}
         ${nav('usage', t('nav.usage'))}
+        ${nav('ddos', t('nav.ddos'))}
+        ${nav('pm2', t('nav.pm2'))}
         ${nav('system', t('nav.system'))}
         <div class="sidebar-foot">
           <div>${escapeHtml(state.me?.name || '')}</div>
@@ -302,7 +318,7 @@ function attachChips(docs) {
   return docs
     .map((d) => {
       const img = isImageMime(d.mimeType);
-      return `<span class="chip ${img ? 'img' : ''}" title="${escapeHtml(d.mimeType)}">${escapeHtml(d.originalName || 'file')}</span>`;
+      return `<span class="chip ${img ? 'img' : ''}" title="${escapeHtml(d.mimeType)}">${escapeHtml(d.originalName || t('chats.file'))}</span>`;
     })
     .join(' ');
 }
@@ -511,7 +527,7 @@ async function openChat(id) {
             preview = `<img class="preview" src="${full.data.imageDataUrl}" alt="${escapeHtml(d.originalName)}" />`;
           }
         } catch {
-          preview = `<span class="muted">preview failed</span>`;
+          preview = `<span class="muted">${escapeHtml(t('chats.previewFailed'))}</span>`;
         }
       }
       parts.push(`
@@ -611,12 +627,15 @@ async function renderKeys() {
       const u = usageMap[k.id];
       const reqs = u?.requests ?? '—';
       const util = u ? Math.round((u.utilization || 0) * 100) : 0;
+      const wl = k.ipWhitelist || [];
+      const wlLabel = wl.length ? `${wl.length} IP` : t('keys.ipAll');
       return `
     <tr>
       <td>${escapeHtml(k.name)}<div class="muted">${escapeHtml(k.keyPrefix)}…</div></td>
       <td>${escapeHtml(k.role)}</td>
       <td>${badgeMode(k.mode)}</td>
       <td>${k.rateLimit}/min</td>
+      <td title="${escapeHtml(wl.join(', '))}">${escapeHtml(wlLabel)}</td>
       <td>
         <div>${reqs} <span class="muted">(${escapeHtml(t('keys.usage24'))})</span></div>
         <div class="usage-bar ${util > 80 ? 'warn' : ''}"><span style="width:${util}%"></span></div>
@@ -641,10 +660,11 @@ async function renderKeys() {
         <thead><tr>
           <th>${escapeHtml(t('keys.name'))}</th><th>${escapeHtml(t('keys.role'))}</th>
           <th>${escapeHtml(t('keys.mode'))}</th><th>${escapeHtml(t('keys.rate'))}</th>
+          <th>${escapeHtml(t('keys.ipWhitelistCol'))}</th>
           <th>${escapeHtml(t('keys.usage24'))}</th><th>${escapeHtml(t('keys.status'))}</th>
           <th>${escapeHtml(t('keys.created'))}</th><th></th>
         </tr></thead>
-        <tbody>${rows || `<tr><td colspan="8" class="empty">${escapeHtml(t('keys.empty'))}</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="9" class="empty">${escapeHtml(t('keys.empty'))}</td></tr>`}</tbody>
       </table>
     </div>
   `);
@@ -665,6 +685,7 @@ async function renderKeys() {
 
 function showKeyForm(existing) {
   const isEdit = Boolean(existing);
+  const wlText = (existing?.ipWhitelist || []).join('\n');
   state.modal = `
     <div class="modal-back" id="modal-back">
       <div class="modal" style="max-width:560px">
@@ -676,18 +697,28 @@ function showKeyForm(existing) {
           <div class="form-grid">
             <label class="full">${escapeHtml(t('keys.name'))}<input id="k-name" value="${escapeHtml(existing?.name || '')}" /></label>
             <label>${escapeHtml(t('keys.role'))}
-              <select id="k-role"><option value="client">client</option><option value="admin">admin</option></select>
+              <select id="k-role">
+                <option value="client">${escapeHtml(t('keys.roleClient'))}</option>
+                <option value="admin">${escapeHtml(t('keys.roleAdmin'))}</option>
+              </select>
             </label>
             <label>${escapeHtml(t('keys.mode'))}
-              <select id="k-mode"><option value="safe">safe</option><option value="agent">agent</option></select>
+              <select id="k-mode">
+                <option value="safe">${escapeHtml(t('keys.modeSafe'))}</option>
+                <option value="agent">${escapeHtml(t('keys.modeAgent'))}</option>
+              </select>
             </label>
             <label>${escapeHtml(t('keys.rate'))}<input id="k-rate" type="number" value="${existing?.rateLimit ?? 60}" /></label>
-            <label>Max turns<input id="k-turns" type="number" value="${existing?.maxTurns ?? ''}" /></label>
-            <label>Timeout ms<input id="k-timeout" type="number" value="${existing?.timeoutMs ?? ''}" /></label>
+            <label>${escapeHtml(t('keys.maxTurns'))}<input id="k-turns" type="number" value="${existing?.maxTurns ?? ''}" /></label>
+            <label>${escapeHtml(t('keys.timeoutMs'))}<input id="k-timeout" type="number" value="${existing?.timeoutMs ?? ''}" /></label>
+            <label class="full">${escapeHtml(t('keys.ipWhitelist'))}
+              <textarea id="k-ip" rows="4" placeholder="127.0.0.1&#10;203.0.113.0/24">${escapeHtml(wlText)}</textarea>
+              <span class="muted" style="font-weight:500;text-transform:none">${escapeHtml(t('keys.ipWhitelistHint'))}</span>
+            </label>
             ${
               isEdit
                 ? `<label class="full">${escapeHtml(t('keys.status'))}
-              <select id="k-active"><option value="true">active</option><option value="false">revoked</option></select>
+              <select id="k-active"><option value="true">${escapeHtml(t('common.active'))}</option><option value="false">${escapeHtml(t('common.revoked'))}</option></select>
             </label>`
                 : ''
             }
@@ -704,6 +735,11 @@ function showKeyForm(existing) {
   if (isEdit) document.getElementById('k-active').value = String(existing.isActive);
   document.getElementById('modal-close').onclick = () => document.getElementById('modal-back')?.remove();
   document.getElementById('k-save').onclick = async () => {
+    const ipWhitelist = document
+      .getElementById('k-ip')
+      .value.split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
     const body = {
       name: document.getElementById('k-name').value.trim(),
       role: document.getElementById('k-role').value,
@@ -715,6 +751,7 @@ function showKeyForm(existing) {
       timeoutMs: document.getElementById('k-timeout').value
         ? Number(document.getElementById('k-timeout').value)
         : null,
+      ipWhitelist,
     };
     if (isEdit) {
       body.isActive = document.getElementById('k-active').value === 'true';
@@ -725,7 +762,7 @@ function showKeyForm(existing) {
       const res = await api('/keys', { method: 'POST', body: JSON.stringify(body) });
       const box = document.getElementById('k-created');
       box.style.display = 'block';
-      box.textContent = res.data?.key || JSON.stringify(res.data);
+      box.textContent = `${t('keys.keyOnce')}\n${res.data?.key || JSON.stringify(res.data)}`;
     }
   };
 }
@@ -737,7 +774,7 @@ async function renderDocuments() {
       (d) => `
     <tr>
       <td><button class="linkish" data-doc="${d.id}">${escapeHtml(d.originalName)}</button>
-        ${isImageMime(d.mimeType) ? '<span class="chip img">img</span>' : ''}</td>
+        ${isImageMime(d.mimeType) ? `<span class="chip img">${escapeHtml(t('chats.img'))}</span>` : ''}</td>
       <td>${escapeHtml(d.apiKey?.name || '')}</td>
       <td>${escapeHtml(d.mimeType)}</td>
       <td>${fmtBytes(d.sizeBytes)}</td>
@@ -862,8 +899,8 @@ async function renderSettings() {
         <div class="form-grid">
           <label>${escapeHtml(t('settings.tools'))}
             <select id="s-tools">
-              <option value="none">none</option>
-              <option value="readonly">readonly</option>
+              <option value="none">${escapeHtml(t('settings.toolsNone'))}</option>
+              <option value="readonly">${escapeHtml(t('settings.toolsReadonly'))}</option>
             </select>
           </label>
           <label>${escapeHtml(t('settings.maxTurns'))}<input id="s-turns" type="number" value="${data.safeMaxTurns}" /></label>
@@ -1044,7 +1081,7 @@ async function renderSystem() {
     }
   };
   document.getElementById('btn-one-click-update').onclick = async () => {
-    if (!confirm('Update & restart gateway?')) return;
+    if (!confirm(t('system.confirmUpdate'))) return;
     const logEl = document.getElementById('update-log');
     try {
       const btn = document.getElementById('btn-one-click-update');
@@ -1059,14 +1096,277 @@ async function renderSystem() {
           (res.data && (res.data.message || JSON.stringify(res.data, null, 2))) ||
           'Update scheduled';
       }
-      alert((res.data && res.data.message) || 'Scheduled');
+      alert((res.data && res.data.message) || t('system.scheduled'));
     } catch (e) {
       onErr(e);
     }
   };
 }
 
-async function render() {
+
+let ddosTimer = null;
+let ddosPaused = false;
+
+async function renderDdos() {
+  if (ddosTimer) {
+    clearInterval(ddosTimer);
+    ddosTimer = null;
+  }
+  const [conn, bl, st] = await Promise.all([
+    api('/ddos/connections'),
+    api('/ddos/blacklist'),
+    api('/ddos/stats'),
+  ]);
+  const active = conn.data?.active || [];
+  const recent = conn.data?.recent || [];
+  const bans = bl.data || [];
+  const stats = st.data || {};
+
+  const liveRows = active
+    .map(
+      (c) => `
+    <tr>
+      <td>${escapeHtml(c.ip)}</td>
+      <td>${escapeHtml(c.method)}</td>
+      <td class="muted" style="max-width:220px;word-break:break-all">${escapeHtml(c.path)}</td>
+      <td>${escapeHtml(c.apiKeyName || c.apiKeyPrefix || '—')}</td>
+      <td><span class="badge pending">${escapeHtml(t('status.active'))}</span></td>
+      <td>${Date.now() - c.startedAt} ms</td>
+      <td><button class="btn danger sm" data-ban="${escapeHtml(c.ip)}">${escapeHtml(t('ddos.ban'))}</button></td>
+    </tr>`,
+    )
+    .join('');
+
+  const recentRows = recent
+    .slice(0, 40)
+    .map(
+      (c) => `
+    <tr>
+      <td>${escapeHtml(c.ip)}</td>
+      <td>${escapeHtml(c.method)} ${escapeHtml(c.path)}</td>
+      <td>${c.statusCode ?? '—'}</td>
+      <td>${c.durationMs ?? '—'} ms</td>
+      <td><button class="btn danger sm" data-ban="${escapeHtml(c.ip)}">${escapeHtml(t('ddos.ban'))}</button></td>
+    </tr>`,
+    )
+    .join('');
+
+  const banRows = bans
+    .map(
+      (b) => `
+    <tr>
+      <td>${escapeHtml(b.ip)}</td>
+      <td>${escapeHtml(b.reason || '—')}</td>
+      <td>${escapeHtml(b.source || '')}</td>
+      <td>${b.expiresAt ? fmtTime(b.expiresAt) : escapeHtml(t('ddos.permanent'))}</td>
+      <td><button class="btn secondary sm" data-unban="${escapeHtml(b.ip)}">${escapeHtml(t('ddos.unban'))}</button></td>
+    </tr>`,
+    )
+    .join('');
+
+  const topIps = (stats.topIps || [])
+    .map((x) => `<tr><td>${escapeHtml(x.ip)}</td><td>${x.requests}</td>
+      <td><button class="btn danger sm" data-ban="${escapeHtml(x.ip)}">${escapeHtml(t('ddos.ban'))}</button></td></tr>`)
+    .join('');
+
+  document.getElementById('app').innerHTML = shell(`
+    <div class="topbar">
+      <h2>${escapeHtml(t('ddos.title'))}</h2>
+      <div class="toolbar">
+        <button class="btn secondary sm" id="ddos-refresh">${escapeHtml(t('ddos.refresh'))}</button>
+        <button class="btn secondary sm" id="ddos-pause">${escapeHtml(ddosPaused ? t('ddos.resume') : t('ddos.pause'))}</button>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="label">${escapeHtml(t('ddos.activeConn'))}</div><div class="value">${stats.activeConnections ?? active.length}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('ddos.rateHits'))}</div><div class="value">${stats.rateLimitedHits ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('ddos.blockedHits'))}</div><div class="value">${stats.blockedHits ?? 0}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('ddos.blacklist'))}</div><div class="value">${bans.length}</div></div>
+    </div>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="panel-h"><strong>${escapeHtml(t('ddos.live'))}</strong></div>
+      <table>
+        <thead><tr>
+          <th>${escapeHtml(t('ddos.ip'))}</th><th>${escapeHtml(t('ddos.method'))}</th>
+          <th>${escapeHtml(t('ddos.path'))}</th><th>${escapeHtml(t('ddos.key'))}</th>
+          <th>${escapeHtml(t('ddos.state'))}</th><th>${escapeHtml(t('ddos.duration'))}</th>
+          <th>${escapeHtml(t('common.actions'))}</th>
+        </tr></thead>
+        <tbody>${liveRows || `<tr><td colspan="7" class="empty">${escapeHtml(t('ddos.emptyLive'))}</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="panel-h"><strong>${escapeHtml(t('ddos.recent'))}</strong></div>
+      <table>
+        <thead><tr>
+          <th>${escapeHtml(t('ddos.ip'))}</th><th>${escapeHtml(t('ddos.path'))}</th>
+          <th>HTTP</th><th>${escapeHtml(t('ddos.duration'))}</th><th></th>
+        </tr></thead>
+        <tbody>${recentRows || `<tr><td colspan="5" class="empty">${escapeHtml(t('common.empty'))}</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="panel-h"><strong>${escapeHtml(t('ddos.blacklist'))}</strong></div>
+      <div class="filter-bar">
+        <label>${escapeHtml(t('ddos.ip'))}<input id="ban-ip" placeholder="1.2.3.4" /></label>
+        <label>${escapeHtml(t('ddos.reason'))}<input id="ban-reason" placeholder="${escapeHtml(t('ddos.reasonPh'))}" class="wide" /></label>
+        <label>${escapeHtml(t('ddos.ttl'))}
+          <select id="ban-ttl">
+            <option value="">${escapeHtml(t('ddos.ttlPerm'))}</option>
+            <option value="3600">${escapeHtml(t('ddos.ttl1h'))}</option>
+            <option value="86400">${escapeHtml(t('ddos.ttl24h'))}</option>
+            <option value="604800">${escapeHtml(t('ddos.ttl7d'))}</option>
+          </select>
+        </label>
+        <button class="btn sm" id="ban-add">${escapeHtml(t('ddos.addBan'))}</button>
+      </div>
+      <table>
+        <thead><tr>
+          <th>${escapeHtml(t('ddos.ip'))}</th><th>${escapeHtml(t('ddos.reason'))}</th>
+          <th>${escapeHtml(t('ddos.source'))}</th><th>${escapeHtml(t('ddos.expires'))}</th><th></th>
+        </tr></thead>
+        <tbody>${banRows || `<tr><td colspan="5" class="empty">${escapeHtml(t('ddos.emptyBan'))}</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="panel-h"><strong>${escapeHtml(t('ddos.topIps'))}</strong></div>
+      <table>
+        <thead><tr><th>${escapeHtml(t('ddos.ip'))}</th><th>${escapeHtml(t('usage.requests'))}</th><th></th></tr></thead>
+        <tbody>${topIps || `<tr><td colspan="3" class="empty">${escapeHtml(t('common.empty'))}</td></tr>`}</tbody>
+      </table>
+    </div>
+  `);
+  bindShell();
+
+  const banIp = async (ip) => {
+    if (!ip || !confirm(t('ddos.banConfirm'))) return;
+    await api('/ddos/blacklist', {
+      method: 'POST',
+      body: JSON.stringify({ ip, reason: 'manual from admin', ttlSeconds: null }),
+    });
+    renderDdos().catch(onErr);
+  };
+
+  document.querySelectorAll('[data-ban]').forEach((b) => {
+    b.onclick = () => banIp(b.dataset.ban);
+  });
+  document.querySelectorAll('[data-unban]').forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm(t('ddos.unbanConfirm'))) return;
+      await api(`/ddos/blacklist/${encodeURIComponent(b.dataset.unban)}`, {
+        method: 'DELETE',
+      });
+      renderDdos().catch(onErr);
+    };
+  });
+  document.getElementById('ban-add').onclick = async () => {
+    const ip = document.getElementById('ban-ip').value.trim();
+    if (!ip) return;
+    const ttl = document.getElementById('ban-ttl').value;
+    await api('/ddos/blacklist', {
+      method: 'POST',
+      body: JSON.stringify({
+        ip,
+        reason: document.getElementById('ban-reason').value.trim() || undefined,
+        ttlSeconds: ttl ? Number(ttl) : null,
+      }),
+    });
+    renderDdos().catch(onErr);
+  };
+  document.getElementById('ddos-refresh').onclick = () => renderDdos().catch(onErr);
+  document.getElementById('ddos-pause').onclick = () => {
+    ddosPaused = !ddosPaused;
+    renderDdos().catch(onErr);
+  };
+
+  if (!ddosPaused && state.page === 'ddos') {
+    ddosTimer = setInterval(() => {
+      if (state.page === 'ddos' && !ddosPaused) renderDdos().catch(() => undefined);
+    }, 2000);
+  }
+}
+
+async function renderPm2() {
+  const st = await api('/pm2/status');
+  const d = st.data || {};
+  const app = d.app;
+  let logsText = '';
+  try {
+    const lg = await api('/pm2/logs?lines=80');
+    logsText = (lg.data?.stdout || '') + (lg.data?.stderr ? '\n' + lg.data.stderr : '');
+  } catch (e) {
+    logsText = e.message || '';
+  }
+
+  const statusLabel = app
+    ? escapeHtml(app.status || '—')
+    : escapeHtml(d.message || t('pm2.empty'));
+
+  document.getElementById('app').innerHTML = shell(`
+    <div class="topbar">
+      <h2>${escapeHtml(t('pm2.title'))}</h2>
+      <div class="toolbar">
+        <button class="btn secondary sm" id="pm2-refresh">${escapeHtml(t('pm2.refresh'))}</button>
+        <button class="btn sm" id="pm2-start" ${!d.available ? 'disabled' : ''}>${escapeHtml(t('pm2.start'))}</button>
+        <button class="btn secondary sm" id="pm2-stop" ${!app ? 'disabled' : ''}>${escapeHtml(t('pm2.stop'))}</button>
+        <button class="btn sm" id="pm2-restart" ${!app ? 'disabled' : ''}>${escapeHtml(t('pm2.restart'))}</button>
+        <button class="btn secondary sm" id="pm2-reload" ${!app ? 'disabled' : ''}>${escapeHtml(t('pm2.reload'))}</button>
+      </div>
+    </div>
+    <p class="muted">${escapeHtml(t('pm2.hint'))}</p>
+    ${!d.available ? `<div class="error-box">${escapeHtml(d.message || t('pm2.unavailable'))}</div>` : ''}
+    <div class="grid">
+      <div class="card"><div class="label">${escapeHtml(t('pm2.app'))}</div><div class="value" style="font-size:1rem">${escapeHtml(d.appName || 'grok-openai-gateway')}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('pm2.status'))}</div><div class="value" style="font-size:1rem">${statusLabel}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('pm2.pid'))}</div><div class="value" style="font-size:1rem">${app?.pid ?? '—'}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('pm2.restarts'))}</div><div class="value" style="font-size:1rem">${app?.restarts ?? '—'}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('pm2.cpu'))}</div><div class="value" style="font-size:1rem">${app?.cpu != null ? app.cpu + '%' : '—'}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('pm2.memory'))}</div><div class="value" style="font-size:1rem">${app?.memory != null ? Math.round(app.memory / 1024 / 1024) + ' MB' : '—'}</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-h"><strong>${escapeHtml(t('pm2.logs'))}</strong></div>
+      <div class="modal-b"><pre class="pre" style="max-height:420px">${escapeHtml(logsText || t('common.empty'))}</pre></div>
+    </div>
+  `);
+  bindShell();
+  document.getElementById('pm2-refresh').onclick = () => renderPm2().catch(onErr);
+  document.getElementById('pm2-start').onclick = async () => {
+    try {
+      await api('/pm2/start', { method: 'POST', body: '{}' });
+      renderPm2().catch(onErr);
+    } catch (e) {
+      onErr(e);
+    }
+  };
+  document.getElementById('pm2-stop').onclick = async () => {
+    if (!confirm(t('pm2.confirmStop'))) return;
+    try {
+      await api('/pm2/stop', { method: 'POST', body: '{}' });
+      renderPm2().catch(onErr);
+    } catch (e) {
+      onErr(e);
+    }
+  };
+  document.getElementById('pm2-restart').onclick = async () => {
+    if (!confirm(t('pm2.confirmRestart'))) return;
+    try {
+      await api('/pm2/restart', { method: 'POST', body: '{}' });
+      renderPm2().catch(onErr);
+    } catch (e) {
+      onErr(e);
+    }
+  };
+  document.getElementById('pm2-reload').onclick = async () => {
+    try {
+      await api('/pm2/reload', { method: 'POST', body: '{}' });
+      renderPm2().catch(onErr);
+    } catch (e) {
+      onErr(e);
+    }
+  };
+}
+
+async function renderasync function render() {
   const app = document.getElementById('app');
   try {
     if (!state.key) {
@@ -1081,6 +1381,8 @@ async function render() {
     else if (state.page === 'audit') await renderAudit();
     else if (state.page === 'settings') await renderSettings();
     else if (state.page === 'usage') await renderUsage();
+    else if (state.page === 'ddos') await renderDdos();
+    else if (state.page === 'pm2') await renderPm2();
     else if (state.page === 'system') await renderSystem();
     else await renderDashboard();
   } catch (e) {

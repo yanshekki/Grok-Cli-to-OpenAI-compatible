@@ -22,12 +22,21 @@ import { statsService } from '../services/stats.service';
 import { updateService } from '../services/update.service';
 import { usageService } from '../services/usage.service';
 import { modelsService } from '../services/models.service';
+import { ipBlacklistService } from '../services/ip-blacklist.service';
+import { pm2Service } from '../services/pm2.service';
+import {
+  getAbuseCounters,
+  getConnectionsSnapshot,
+} from '../middlewares/connection-tracker';
 import { isImageMime } from '../config/constants';
 import type { ApiKeyMode, ApiKeyRole } from '../interfaces/auth.interface';
+import { adminIpBanSchema } from '../dto/admin.dto';
+import { normalizeIp } from '../utils/ip-match';
 
 type CreateKeyBody = z.infer<typeof adminCreateKeySchema>;
 type UpdateKeyBody = z.infer<typeof adminUpdateKeySchema>;
 type UpdateSettingsBody = z.infer<typeof adminUpdateSettingsSchema>;
+type IpBanBody = z.infer<typeof adminIpBanSchema>;
 
 export class AdminController {
   me = asyncHandler(async (req: Request, res: Response) => {
@@ -107,6 +116,7 @@ export class AdminController {
       rateLimit: body.rateLimit,
       maxTurns: body.maxTurns,
       timeoutMs: body.timeoutMs,
+      ipWhitelist: body.ipWhitelist,
       actorApiKeyId: req.apiKey.id,
       ip: req.ip,
     });
@@ -126,6 +136,7 @@ export class AdminController {
         isActive: body.isActive,
         maxTurns: body.maxTurns,
         timeoutMs: body.timeoutMs,
+        ipWhitelist: body.ipWhitelist,
       },
       req.apiKey.id,
       req.ip,
@@ -379,6 +390,141 @@ export class AdminController {
       channel: body.channel || 'auto',
     });
     res.json({ object: 'admin.update', data: result });
+  });
+
+  // ——— DDoS control ———
+  ddosConnections = asyncHandler(async (_req: Request, res: Response) => {
+    res.json({
+      object: 'admin.ddos.connections',
+      data: getConnectionsSnapshot(),
+    });
+  });
+
+  ddosBlacklist = asyncHandler(async (_req: Request, res: Response) => {
+    const items = await ipBlacklistService.list();
+    res.json({ object: 'list', data: items });
+  });
+
+  ddosBan = asyncHandler(async (req: Request, res: Response) => {
+    if (!req.apiKey) throw ExceptionFactory.unauthorized();
+    const body = req.body as IpBanBody;
+    const ip = normalizeIp(body.ip);
+    let expiresAt: Date | null = null;
+    if (body.ttlSeconds != null && body.ttlSeconds > 0) {
+      expiresAt = new Date(Date.now() + body.ttlSeconds * 1000);
+    }
+    const row = await ipBlacklistService.ban({
+      ip,
+      reason: body.reason,
+      source: 'manual',
+      expiresAt,
+      createdBy: req.apiKey.id,
+    });
+    await auditService.log({
+      apiKeyId: req.apiKey.id,
+      action: AUDIT_ACTIONS.IP_BAN,
+      resource: 'ip_blacklist',
+      resourceId: row.id,
+      meta: { ip, reason: body.reason, expiresAt },
+      ip: req.ip,
+    });
+    res.status(201).json({ object: 'admin.ddos.ban', data: row });
+  });
+
+  ddosUnban = asyncHandler(async (req: Request, res: Response) => {
+    if (!req.apiKey) throw ExceptionFactory.unauthorized();
+    const ip = normalizeIp(decodeURIComponent(String(req.params.ip || '')));
+    await ipBlacklistService.unban(ip);
+    await auditService.log({
+      apiKeyId: req.apiKey.id,
+      action: AUDIT_ACTIONS.IP_UNBAN,
+      resource: 'ip_blacklist',
+      meta: { ip },
+      ip: req.ip,
+    });
+    res.json({ object: 'admin.ddos.unban', ip, deleted: true });
+  });
+
+  ddosStats = asyncHandler(async (_req: Request, res: Response) => {
+    const counters = getAbuseCounters();
+    const snap = getConnectionsSnapshot();
+    // top IPs from recent
+    const counts = new Map<string, number>();
+    for (const c of snap.recent) {
+      counts.set(c.ip, (counts.get(c.ip) || 0) + 1);
+    }
+    const topIps = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([ip, n]) => ({ ip, requests: n }));
+    res.json({
+      object: 'admin.ddos.stats',
+      data: {
+        ...counters,
+        activeConnections: snap.counts.active,
+        topIps,
+      },
+    });
+  });
+
+  // ——— PM2 ———
+  pm2Status = asyncHandler(async (_req: Request, res: Response) => {
+    const data = await pm2Service.status();
+    res.json({ object: 'admin.pm2.status', data });
+  });
+
+  pm2Start = asyncHandler(async (req: Request, res: Response) => {
+    if (!req.apiKey) throw ExceptionFactory.unauthorized();
+    const out = await pm2Service.start();
+    await auditService.log({
+      apiKeyId: req.apiKey.id,
+      action: AUDIT_ACTIONS.PM2_START,
+      resource: 'pm2',
+      ip: req.ip,
+    });
+    res.json({ object: 'admin.pm2.start', data: out });
+  });
+
+  pm2Stop = asyncHandler(async (req: Request, res: Response) => {
+    if (!req.apiKey) throw ExceptionFactory.unauthorized();
+    const out = await pm2Service.stop();
+    await auditService.log({
+      apiKeyId: req.apiKey.id,
+      action: AUDIT_ACTIONS.PM2_STOP,
+      resource: 'pm2',
+      ip: req.ip,
+    });
+    res.json({ object: 'admin.pm2.stop', data: out });
+  });
+
+  pm2Restart = asyncHandler(async (req: Request, res: Response) => {
+    if (!req.apiKey) throw ExceptionFactory.unauthorized();
+    const out = await pm2Service.restart();
+    await auditService.log({
+      apiKeyId: req.apiKey.id,
+      action: AUDIT_ACTIONS.PM2_RESTART,
+      resource: 'pm2',
+      ip: req.ip,
+    });
+    res.json({ object: 'admin.pm2.restart', data: out });
+  });
+
+  pm2Reload = asyncHandler(async (req: Request, res: Response) => {
+    if (!req.apiKey) throw ExceptionFactory.unauthorized();
+    const out = await pm2Service.reload();
+    await auditService.log({
+      apiKeyId: req.apiKey.id,
+      action: AUDIT_ACTIONS.PM2_RELOAD,
+      resource: 'pm2',
+      ip: req.ip,
+    });
+    res.json({ object: 'admin.pm2.reload', data: out });
+  });
+
+  pm2Logs = asyncHandler(async (req: Request, res: Response) => {
+    const lines = Number(req.query.lines) || 100;
+    const out = await pm2Service.logs(lines);
+    res.json({ object: 'admin.pm2.logs', data: out });
   });
 }
 

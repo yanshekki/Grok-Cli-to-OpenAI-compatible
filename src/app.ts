@@ -12,11 +12,16 @@ import {
   globalRateLimiter,
   ipBlockMiddleware,
 } from './middlewares/rate-limit.middleware';
+import { connectionTrackerMiddleware } from './middlewares/connection-tracker';
 import { errorMiddleware, notFoundHandler } from './middlewares/error.middleware';
 import { logger } from './utils/logger';
+import { ipBlacklistService } from './services/ip-blacklist.service';
 import './interfaces/express.interface';
 
 export function createApp() {
+  // Fire-and-forget load of persistent IP bans
+  void ipBlacklistService.ensureLoaded().catch(() => undefined);
+
   const app = express();
 
   if (env.TRUST_PROXY) {
@@ -32,6 +37,7 @@ export function createApp() {
   );
   app.use(cors(corsOptions));
   app.use(requestIdMiddleware);
+  app.use(connectionTrackerMiddleware);
   app.use(ipBlockMiddleware);
   app.use(
     pinoHttp({

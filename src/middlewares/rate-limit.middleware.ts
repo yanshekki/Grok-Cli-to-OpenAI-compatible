@@ -2,13 +2,14 @@ import rateLimit from 'express-rate-limit';
 import type { NextFunction, Request, Response } from 'express';
 import { env } from '../config/env';
 import { ExceptionFactory } from '../exceptions/exception.factory';
+import { ipBlacklistService } from '../services/ip-blacklist.service';
+import { normalizeIp } from '../utils/ip-match';
 
-/** In-memory failed auth / abuse tracker (single-process). */
+/** In-memory failed auth tracker (persisted ban goes to IpBlacklist). */
 const failedAuth = new Map<string, { count: number; resetAt: number }>();
-const blockedIps = new Map<string, number>();
 
 function clientIp(req: Request): string {
-  return req.ip || req.socket.remoteAddress || 'unknown';
+  return normalizeIp(req.ip || req.socket.remoteAddress || 'unknown');
 }
 
 export function recordFailedAuth(req: Request): void {
@@ -24,8 +25,10 @@ export function recordFailedAuth(req: Request): void {
   }
   cur.count += 1;
   if (cur.count >= env.BLOCK_FAILED_AUTH_THRESHOLD) {
-    blockedIps.set(ip, now + env.BLOCK_DURATION_MS);
     failedAuth.delete(ip);
+    void ipBlacklistService
+      .autoBan(ip, 'Repeated failed authentication', 'auto-auth')
+      .catch(() => undefined);
   }
 }
 
@@ -38,26 +41,23 @@ export function ipBlockMiddleware(
   _res: Response,
   next: NextFunction,
 ): void {
-  const ip = clientIp(req);
-  const until = blockedIps.get(ip);
-  if (until && Date.now() < until) {
-    next(
-      ExceptionFactory.rateLimited(
-        'IP temporarily blocked due to repeated abuse. Try again later.',
-      ),
-    );
-    return;
-  }
-  if (until && Date.now() >= until) {
-    blockedIps.delete(ip);
-  }
-  next();
+  void ipBlacklistService.ensureLoaded().then(() => {
+    const ip = clientIp(req);
+    if (ipBlacklistService.checkAndRecord(ip)) {
+      next(
+        ExceptionFactory.forbidden(
+          'IP is blacklisted. Contact the administrator if this is a mistake.',
+        ),
+      );
+      return;
+    }
+    next();
+  }).catch(next);
 }
 
 export const globalRateLimiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
   max: (req: Request) => {
-    // Unauthenticated traffic: stricter IP cap
     if (!req.apiKey) return env.RATE_LIMIT_IP_MAX;
     return env.RATE_LIMIT_MAX;
   },
@@ -88,7 +88,6 @@ export const chatRateLimiter = rateLimit({
   validate: { xForwardedForHeader: false },
 });
 
-/** Short burst window to blunt floods even when per-minute budget remains */
 export const chatBurstLimiter = rateLimit({
   windowMs: 10_000,
   max: env.CHAT_BURST_MAX,

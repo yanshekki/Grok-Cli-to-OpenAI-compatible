@@ -7,6 +7,7 @@ import {
 } from './rate-limit.middleware';
 import { apiKeyService } from '../services/api-key.service';
 import { asyncHandler } from '../utils/async-handler';
+import { ipAllowed, normalizeIp } from '../utils/ip-match';
 
 function extractBearer(req: Request): string | null {
   const header = req.header('authorization');
@@ -15,6 +16,10 @@ function extractBearer(req: Request): string | null {
   if (!scheme || !token) return null;
   if (scheme.toLowerCase() !== 'bearer') return null;
   return token.trim();
+}
+
+function clientIp(req: Request): string {
+  return normalizeIp(req.ip || req.socket.remoteAddress || 'unknown');
 }
 
 export const requireApiKey = asyncHandler(async (req, _res, next) => {
@@ -30,6 +35,18 @@ export const requireApiKey = asyncHandler(async (req, _res, next) => {
     recordFailedAuth(req);
     throw err;
   }
+
+  // Per-key IP whitelist (empty = allow all)
+  const wl = req.apiKey.ipWhitelist;
+  if (wl && wl.length > 0) {
+    const ip = clientIp(req);
+    if (!ipAllowed(ip, wl)) {
+      throw ExceptionFactory.forbidden(
+        `API key not allowed from IP ${ip} (whitelist enforced)`,
+      );
+    }
+  }
+
   next();
 });
 

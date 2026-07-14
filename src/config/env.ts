@@ -34,6 +34,10 @@ const envSchema = z.object({
     .string()
     .default('true')
     .transform((v) => v === 'true' || v === '1'),
+  PM2_ADMIN_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v === 'true' || v === '1'),
 
   CORS_ORIGINS: z.string().default('http://localhost:3847,http://127.0.0.1:3847'),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
