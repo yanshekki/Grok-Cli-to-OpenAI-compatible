@@ -12,6 +12,7 @@ import { cmdSeed } from './commands/seed';
 import { cmdDoctor } from './commands/doctor';
 import { cmdOpen } from './commands/open';
 import { cmdVersion } from './commands/version';
+import { cmdUpdate } from './commands/update';
 import { DEFAULT_PORT } from './lib/paths';
 
 function readPkgVersion(): string {
@@ -116,6 +117,31 @@ program
   .action(() => {
     cmdVersion();
   });
+
+program
+  .command('update')
+  .description('Self-update this package (npm / git / GitHub)')
+  .option('--check', 'Only check for updates')
+  .option('--no-restart', 'Do not restart gateway after update')
+  .option(
+    '--channel <name>',
+    'Force channel: auto | git | npm-global | npm-local',
+    'auto',
+  )
+  .action(
+    async (opts: {
+      check?: boolean;
+      restart?: boolean;
+      channel?: 'auto' | 'git' | 'npm-global' | 'npm-local';
+    }) => {
+      await cmdUpdate({
+        ...globalOpts(),
+        check: opts.check,
+        restart: opts.restart,
+        channel: opts.channel,
+      });
+    },
+  );
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : err);

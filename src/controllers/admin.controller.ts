@@ -19,6 +19,7 @@ import { encryptionService } from '../services/encryption.service';
 import { grokCliService } from '../services/grok-cli.service';
 import { settingsService } from '../services/settings.service';
 import { statsService } from '../services/stats.service';
+import { updateService } from '../services/update.service';
 import type { ApiKeyMode, ApiKeyRole } from '../interfaces/auth.interface';
 
 type CreateKeyBody = z.infer<typeof adminCreateKeySchema>;
@@ -253,6 +254,14 @@ export class AdminController {
       dbOk = false;
     }
     const grokOk = await grokCliService.isAvailable();
+    let version = null as Awaited<
+      ReturnType<typeof updateService.getVersionInfo>
+    > | null;
+    try {
+      version = await updateService.getVersionInfo();
+    } catch {
+      version = null;
+    }
     res.json({
       object: 'admin.system',
       data: {
@@ -262,18 +271,75 @@ export class AdminController {
           active: grokCliService.activeCount,
           max: grokCliService.maxConcurrent,
         },
+        version,
+        updating: updateService.isUpdating(),
         env: {
           nodeEnv: env.NODE_ENV,
           grokSafeModeEnv: env.GROK_SAFE_MODE,
           grokDefaultModel: env.GROK_DEFAULT_MODEL,
           storageDir: env.storageDir,
           adminPanelEnabled: env.ADMIN_PANEL_ENABLED,
+          port: env.PORT,
         },
         encryption: {
           ready: Boolean(encryptionService),
         },
       },
     });
+  });
+
+  checkUpdate = asyncHandler(async (req: Request, res: Response) => {
+    if (!req.apiKey) throw ExceptionFactory.unauthorized();
+    const data = await updateService.getVersionInfo();
+    await auditService.log({
+      apiKeyId: req.apiKey.id,
+      action: AUDIT_ACTIONS.SYSTEM_UPDATE_CHECK,
+      resource: 'system',
+      meta: {
+        current: data.current,
+        latest: data.latest,
+        updateAvailable: data.updateAvailable,
+      },
+      ip: req.ip,
+    });
+    res.json({ object: 'admin.update_check', data });
+  });
+
+  runUpdate = asyncHandler(async (req: Request, res: Response) => {
+    if (!req.apiKey) throw ExceptionFactory.unauthorized();
+    const body = (req.body || {}) as {
+      restart?: boolean;
+      channel?: 'auto' | 'git' | 'npm-global' | 'npm-local';
+    };
+    const restart = body.restart !== false;
+
+    await auditService.log({
+      apiKeyId: req.apiKey.id,
+      action: AUDIT_ACTIONS.SYSTEM_UPDATE,
+      resource: 'system',
+      meta: { restart, channel: body.channel || 'auto' },
+      ip: req.ip,
+    });
+
+    if (restart) {
+      const scheduled = updateService.scheduleUpdateAndRestart({
+        home: process.env.GCTOAC_HOME,
+        port: env.PORT,
+      });
+      res.json({
+        object: 'admin.update',
+        data: {
+          ...scheduled,
+          mode: 'scheduled_restart',
+        },
+      });
+      return;
+    }
+
+    const result = await updateService.performUpdate({
+      channel: body.channel || 'auto',
+    });
+    res.json({ object: 'admin.update', data: result });
   });
 }
 

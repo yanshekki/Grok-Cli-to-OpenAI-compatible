@@ -74,6 +74,8 @@ export const AUDIT_ACTIONS = {
   API_KEY_LIST: 'api_key.list',
   SETTINGS_UPDATE: 'settings.update',
   CHAT_ADMIN_VIEW: 'chat.admin_view',
+  SYSTEM_UPDATE: 'system.update',
+  SYSTEM_UPDATE_CHECK: 'system.update_check',
 } as const;
 
 export const ROLES = {

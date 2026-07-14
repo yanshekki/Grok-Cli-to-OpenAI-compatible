@@ -619,16 +619,82 @@ async function renderSettings() {
 
 async function renderSystem() {
   const { data } = await api('/system');
+  const v = data.version || {};
+  const updateBadge = v.updateAvailable
+    ? '<span class="badge warn">有更新</span>'
+    : '<span class="badge success">最新 / 未知</span>';
   document.getElementById('app').innerHTML = shell(`
-    <div class="topbar"><h2>系統狀態</h2></div>
+    <div class="topbar">
+      <h2>系統狀態</h2>
+      <div class="toolbar">
+        <button class="btn secondary sm" id="btn-check-update">檢查更新</button>
+        <button class="btn sm" id="btn-one-click-update">一鍵更新並重啟</button>
+      </div>
+    </div>
     <div class="grid">
       <div class="card"><div class="label">Database</div><div class="value" style="font-size:1.2rem">${escapeHtml(data.database)}</div></div>
       <div class="card"><div class="label">Grok CLI</div><div class="value" style="font-size:1.2rem">${escapeHtml(data.grokCli)}</div></div>
       <div class="card"><div class="label">Concurrency</div><div class="value" style="font-size:1.2rem">${data.concurrency.active}/${data.concurrency.max}</div></div>
+      <div class="card"><div class="label">版本</div><div class="value" style="font-size:1.1rem">${escapeHtml(v.current || '?')} ${updateBadge}</div></div>
     </div>
-    <div class="panel"><div class="modal-b"><pre class="pre">${escapeHtml(JSON.stringify(data.env, null, 2))}</pre></div></div>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="panel-h"><strong>自我更新</strong><span class="muted">等同 CLI：gctoac update</span></div>
+      <div class="modal-b">
+        <p class="muted">會按安裝方式自動選擇：git pull、npm global、或 GitHub 安裝。更新後會重啟 gateway（約 10–30 秒），之後請重新整理本頁。</p>
+        <div class="grid">
+          <div class="card"><div class="label">目前版本</div><div class="value" style="font-size:1rem">${escapeHtml(v.current || '-')}</div></div>
+          <div class="card"><div class="label">npm latest</div><div class="value" style="font-size:1rem">${escapeHtml(v.latestNpm || 'n/a')}</div></div>
+          <div class="card"><div class="label">GitHub latest</div><div class="value" style="font-size:1rem">${escapeHtml(v.latestGithub || 'n/a')}</div></div>
+          <div class="card"><div class="label">安裝方式</div><div class="value" style="font-size:.9rem">${escapeHtml(v.channel || '-')} · ${escapeHtml(v.installSource || '')}</div></div>
+        </div>
+        <pre id="update-log" class="pre" style="display:none;margin-top:12px"></pre>
+      </div>
+    </div>
+    <div class="panel"><div class="modal-b"><pre class="pre">${escapeHtml(JSON.stringify({ env: data.env, version: v }, null, 2))}</pre></div></div>
   `);
   bindShell();
+  document.getElementById('btn-check-update').onclick = async () => {
+    try {
+      const res = await api('/system/update-check');
+      const d = res.data || {};
+      alert(
+        `目前: ${d.current}\nnpm: ${d.latestNpm || 'n/a'}\nGitHub: ${d.latestGithub || 'n/a'}\n可更新: ${d.updateAvailable ? '是' : '否'}`,
+      );
+      renderSystem().catch(onErr);
+    } catch (e) {
+      onErr(e);
+    }
+  };
+  document.getElementById('btn-one-click-update').onclick = async () => {
+    if (
+      !confirm(
+        '確定要一鍵更新並重啟 gateway？\n過程約 10–30 秒，期間 API 會短暫中斷。',
+      )
+    ) {
+      return;
+    }
+    const logEl = document.getElementById('update-log');
+    try {
+      const btn = document.getElementById('btn-one-click-update');
+      if (btn) btn.disabled = true;
+      const res = await api('/system/update', {
+        method: 'POST',
+        body: JSON.stringify({ restart: true }),
+      });
+      if (logEl) {
+        logEl.style.display = 'block';
+        logEl.textContent =
+          (res.data && (res.data.message || JSON.stringify(res.data, null, 2))) ||
+          'Update scheduled';
+      }
+      alert(
+        (res.data && res.data.message) ||
+          '已排程更新，請約 30 秒後重新整理頁面。',
+      );
+    } catch (e) {
+      onErr(e);
+    }
+  };
 }
 
 function bindShell() {

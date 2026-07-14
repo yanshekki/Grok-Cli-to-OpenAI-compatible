@@ -189,6 +189,7 @@ tr:hover td { background: rgba(91,140,255,.05); }
 .badge.pending { background: rgba(251,191,36,.15); color: var(--warn); }
 .badge.safe { background: rgba(52,211,153,.15); color: var(--safe); }
 .badge.agent { background: rgba(167,139,250,.18); color: var(--agent); }
+.badge.warn { background: rgba(251,191,36,.18); color: var(--warn); }
 
 .modal-back {
   position: fixed;

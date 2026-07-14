@@ -34,6 +34,8 @@ router.use(requireAdmin);
 router.get('/me', adminController.me);
 router.get('/stats', adminController.stats);
 router.get('/system', adminController.system);
+router.get('/system/update-check', adminController.checkUpdate);
+router.post('/system/update', adminController.runUpdate);
 
 router.get('/chats', validate(adminListQuerySchema, 'query'), adminController.listChats);
 router.get('/chats/:id', validate(adminIdParamSchema, 'params'), adminController.getChat);

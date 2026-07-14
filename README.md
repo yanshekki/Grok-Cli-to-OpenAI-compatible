@@ -85,6 +85,9 @@ npx gctoac start
 | `gctoac migrate` | `prisma migrate deploy` |
 | `gctoac seed` | Bootstrap admin API key |
 | `gctoac doctor` | Check Node, Grok CLI, env, build |
+| `gctoac update` | **Self-update** (git / npm / GitHub) then restart |
+| `gctoac update --check` | Only check for newer version |
+| `gctoac update --no-restart` | Update without restarting |
 | `gctoac open` | Print API / Admin URLs |
 | `gctoac open --admin` | Admin URL only |
 | `gctoac version` | Package version |
@@ -120,7 +123,8 @@ Change with `PORT=` in `.env` or `gctoac --port … start`.
 | **Security modes** | Per-key `safe` / `agent`; optional global force-safe |
 | **Encryption** | AES-256-GCM for prompts, responses, document bodies |
 | **Admin UI** | Dashboard, full chat in/out decrypt, keys, docs, audit, settings |
-| **CLI** | `gctoac` / `gcoa` lifecycle control |
+| **CLI** | `gctoac` / `gcoa` lifecycle + **self-update** |
+| **One-click update** | Admin → 系統狀態 → 一鍵更新並重啟 |
 | **Ops** | SQLite, PM2, GitHub Actions CI, structured logging |
 
 ---
