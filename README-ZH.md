@@ -40,11 +40,18 @@ Client (OpenAI SDK / curl)
 ### 全域（建議日常使用）
 
 ```bash
+# 建議先清走半殘安裝：
+npm uninstall -g grok-cli-to-openai-compatible 2>/dev/null || true
+
 # 已 publish 到 npm 後：
 npm install -g grok-cli-to-openai-compatible
 
 # 或直接由 GitHub 安裝（隨時可用）：
 npm install -g github:yanshekki/Grok-Cli-to-OpenAI-compatible
+
+# 若見到大量 tar TAR_ENTRY_ERROR，可清 cache 再裝一次：
+npm cache clean --force
+npm install -g github:yanshekki/Grok-Cli-to-OpenAI-compatible --prefer-online
 
 gctoac doctor
 gctoac setup          # ~/.gctoac — .env、migrate、admin key
@@ -54,6 +61,9 @@ gcoa open             # 同一支 binary 嘅短名
 ```
 
 全域資料目錄：**`~/.gctoac/`**（可用 `GCTOAC_HOME` 或 `gctoac --home /path` 覆蓋）。
+
+> **說明：** `TAR_ENTRY_ERROR … effect/` 多數係 npm + Prisma 解壓 race 嘅無害警告。  
+> 重點係裝完後 `which gctoac` 同 `gctoac doctor` 要成功。
 
 ### 專案內安裝
 

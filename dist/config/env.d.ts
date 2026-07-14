@@ -1,0 +1,38 @@
+export declare const env: {
+    encryptionKey: Buffer<ArrayBufferLike>;
+    corsOrigins: string[];
+    cwdAllowlist: string[];
+    storageDir: string;
+    defaultCwd: string;
+    isProd: boolean;
+    isDev: boolean;
+    NODE_ENV: "development" | "test" | "production";
+    PORT: number;
+    HOST: string;
+    DATABASE_URL: string;
+    ENCRYPTION_KEY: string;
+    GROK_BIN: string;
+    GROK_DEFAULT_MODEL: string;
+    GROK_DEFAULT_CWD: string;
+    GROK_CWD_ALLOWLIST: string;
+    GROK_TIMEOUT_MS: number;
+    GROK_MAX_CONCURRENT: number;
+    GROK_ALWAYS_APPROVE: boolean;
+    GROK_SAFE_MODE: boolean;
+    GROK_SAFE_MAX_TURNS: number;
+    GROK_SAFE_TIMEOUT_MS: number;
+    ADMIN_PANEL_ENABLED: boolean;
+    CORS_ORIGINS: string;
+    RATE_LIMIT_WINDOW_MS: number;
+    RATE_LIMIT_MAX: number;
+    BODY_LIMIT: string;
+    UPLOAD_MAX_BYTES: number;
+    DOCUMENT_DB_MAX_BYTES: number;
+    STORAGE_DIR: string;
+    LOG_LEVEL: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
+    TRUST_PROXY: boolean;
+    ADMIN_BOOTSTRAP_KEY?: string | undefined;
+    GCTOAC_HOME?: string | undefined;
+};
+export type Env = typeof env;
+//# sourceMappingURL=env.d.ts.map

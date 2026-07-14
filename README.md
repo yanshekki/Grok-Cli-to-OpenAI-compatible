@@ -40,11 +40,18 @@ Client (OpenAI SDK / curl)
 ### Global (recommended)
 
 ```bash
+# Prefer a clean install (avoids leftover partial installs):
+npm uninstall -g grok-cli-to-openai-compatible 2>/dev/null || true
+
 # From npm (after publish):
 npm install -g grok-cli-to-openai-compatible
 
 # From GitHub (always available):
 npm install -g github:yanshekki/Grok-Cli-to-OpenAI-compatible
+
+# If you still see many tar TAR_ENTRY_ERROR warnings, retry once:
+npm cache clean --force
+npm install -g github:yanshekki/Grok-Cli-to-OpenAI-compatible --prefer-online
 
 gctoac doctor
 gctoac setup          # ~/.gctoac — .env, DB migrate, admin key
@@ -54,6 +61,9 @@ gcoa open             # same binary, short name
 ```
 
 Global data directory: **`~/.gctoac/`** (override with `GCTOAC_HOME` or `gctoac --home /path`).
+
+> **Note:** Harmless `TAR_ENTRY_ERROR … effect/` warnings can come from npm + Prisma unpack races.  
+> What matters: `which gctoac` and `gctoac doctor` succeed after install. The repo ships a prebuilt `dist/` so GitHub installs work even if the compile step is skipped.
 
 ### Local project
 

@@ -1,5 +1,6 @@
 node_modules/
-dist/
+# Keep dist/ committed so `npm install -g github:…` works without a local build.
+# Rebuild with `npm run build` before release commits.
 .env
 .env.local
 storage/*
@@ -18,3 +19,5 @@ coverage/
 .prisma/
 *.tsbuildinfo
 .vitest/
+*.tgz
+

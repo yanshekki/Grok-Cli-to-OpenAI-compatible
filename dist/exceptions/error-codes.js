@@ -1,0 +1,20 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ErrorCodes = void 0;
+exports.ErrorCodes = {
+    UNAUTHORIZED: 'unauthorized',
+    FORBIDDEN: 'forbidden',
+    NOT_FOUND: 'not_found',
+    VALIDATION_ERROR: 'validation_error',
+    RATE_LIMITED: 'rate_limit_exceeded',
+    CONCURRENCY_LIMIT: 'concurrency_limit_exceeded',
+    INTERNAL_ERROR: 'internal_error',
+    GROK_ERROR: 'grok_error',
+    GROK_TIMEOUT: 'grok_timeout',
+    GROK_NOT_AVAILABLE: 'grok_not_available',
+    DOCUMENT_TOO_LARGE: 'document_too_large',
+    DOCUMENT_TYPE_NOT_ALLOWED: 'document_type_not_allowed',
+    INVALID_CWD: 'invalid_cwd',
+    SERVICE_UNAVAILABLE: 'service_unavailable',
+};
+//# sourceMappingURL=error-codes.js.map
