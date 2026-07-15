@@ -3,9 +3,13 @@ const _assetV = new URL(import.meta.url).searchParams.get('v') || '1';
 const { t, tf, getLocale, setLocale, langSwitchHtml } = await import(
   `./i18n.js?v=${_assetV}`
 );
+const { CHAT_ALLOWED_EXTENSIONS, CHAT_FILE_ACCEPT } = await import(
+  `./allowed-extensions.js?v=${_assetV}`
+);
 
 const API = '/admin/api';
-const KEY_STORAGE = 'gog_admin_key';
+/** Admin SPA session token (OTP login) — never store long-lived API keys here */
+const KEY_STORAGE = 'gog_admin_session';
 
 /** @type {ReturnType<typeof setInterval> | null} */
 let ddosTimer = null;
@@ -101,6 +105,13 @@ async function api(path, options = {}) {
 }
 
 function logout(clear = true) {
+  const token = state.key;
+  if (clear && token && String(token).startsWith('gog_sess_')) {
+    fetch('/admin/api/auth/logout', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+  }
   if (clear) sessionStorage.removeItem(KEY_STORAGE);
   state.key = '';
   state.me = null;
@@ -536,6 +547,7 @@ function pageTitle() {
     settings: t('nav.settings'),
     usage: t('nav.usage'),
     ddos: t('nav.ddos'),
+    queue: t('nav.queue'),
     pm2: t('nav.pm2'),
     system: t('nav.system'),
   };
@@ -579,6 +591,7 @@ function shell(content) {
         ${nav('settings', t('nav.settings'))}
         ${nav('usage', t('nav.usage'))}
         ${nav('ddos', t('nav.ddos'))}
+        ${nav('queue', t('nav.queue'))}
         ${nav('pm2', t('nav.pm2'))}
         ${nav('system', t('nav.system'))}
         <div class="sidebar-foot">
@@ -784,7 +797,7 @@ function openAppModal({ title, subtitle, bodyHtml, footerHtml, size = 'md' }) {
 }
 
 async function renderLogin() {
-  const cmd = 'gctoac key create';
+  const cmd = 'gctoac admin otp';
   document.getElementById('app').innerHTML = `
     <div class="login-wrap">
       <div class="login-stage">
@@ -795,16 +808,16 @@ async function renderLogin() {
           </div>
           ${langSwitchHtml()}
           <div id="flash-error" class="error-box" ${state.error ? '' : 'hidden'}>${escapeHtml(state.error)}</div>
-          <label for="login-key">${escapeHtml(t('loginLabel'))}</label>
-          <input id="login-key" type="password" placeholder="gk_live_…" autocomplete="off" autofocus />
+          <label for="login-key">${escapeHtml(t('loginOtpLabel'))}</label>
+          <input id="login-key" type="text" inputmode="text" autocomplete="one-time-code" placeholder="ABCD-EFGH" autofocus spellcheck="false" />
           <button class="btn" id="btn-login">${escapeHtml(t('loginBtn'))}</button>
         </div>
-        <p class="login-cmd-hint">${escapeHtml(t('loginCmdHint'))}</p>
+        <p class="login-cmd-hint">${escapeHtml(t('loginOtpHint'))}</p>
         <div class="login-cmd">
           <code id="login-cmd-text">${escapeHtml(cmd)}</code>
           <button type="button" class="btn-copy" id="btn-copy-cmd">${escapeHtml(t('loginCopy'))}</button>
         </div>
-        <p class="login-cmd-hint">${escapeHtml(t('loginLostKey'))}</p>
+        <p class="login-cmd-hint">${escapeHtml(t('loginOtpExpiry'))}</p>
       </div>
       ${poweredByFooter()}
     </div>
@@ -828,18 +841,32 @@ async function renderLogin() {
     }
   };
   document.getElementById('btn-login').onclick = async () => {
-    const key = document.getElementById('login-key').value.trim();
-    if (!key) return showError(t('needKey'));
-    state.key = key;
+    const code = document.getElementById('login-key').value.trim();
+    if (!code) return showError(t('needOtp'));
     try {
+      const res = await fetch('/admin/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          data?.error?.message || data?.message || t('loginOtpFail'),
+        );
+      }
+      const token = data?.data?.token;
+      if (!token) throw new Error(t('loginOtpFail'));
+      state.key = token;
+      sessionStorage.setItem(KEY_STORAGE, token);
       await ensureMe();
-      sessionStorage.setItem(KEY_STORAGE, key);
       state.page = 'dashboard';
       state.error = '';
       render().catch(onErr);
     } catch (e) {
       state.key = '';
-      showError(e.message);
+      sessionStorage.removeItem(KEY_STORAGE);
+      showError(e.message || t('loginOtpFail'));
     }
   };
   document.getElementById('login-key').onkeydown = (e) => {
@@ -883,10 +910,33 @@ async function renderDashboard() {
   const prot = d.protection || {};
   const rt = d.runtime || {};
   const conc = d.concurrency || {};
+  const q = d.queue || null;
   const models = d.models24h || [];
   const rate24 = tot.successRate24h ?? 0;
   const rateAll = tot.successRate ?? 0;
   const genAt = d.generatedAt ? fmtTime(d.generatedAt) : '—';
+
+  let queueKpiValue = '—';
+  let queueKpiSub = t('dash.kpiQueueSub');
+  let queueTone = '';
+  if (q) {
+    if (!q.enabled) {
+      queueKpiValue = t('dash.kpiQueueOff');
+      queueTone = 'warn';
+    } else if (q.paused) {
+      queueKpiValue = t('dash.kpiQueuePaused');
+      queueTone = 'warn';
+    } else if (q.drainMode) {
+      queueKpiValue = t('dash.kpiQueueDrain');
+      queueTone = 'warn';
+    } else {
+      queueKpiValue = `${q.depth ?? 0}`;
+    }
+    queueKpiSub = `${q.running ?? 0}/${q.globalConcurrency ?? '—'} run · ${q.dead ?? 0} dead${
+      q.oldestQueuedAgeMs ? ` · wait ${Math.round(q.oldestQueuedAgeMs / 1000)}s` : ''
+    }`;
+    if ((q.dead || 0) > 0 || (q.depth || 0) > 20) queueTone = queueTone || 'warn';
+  }
 
   const bodyHtml = (d.recentChats || [])
     .map(
@@ -989,6 +1039,13 @@ async function renderDashboard() {
         sub: t('dash.kpiConcurrentSub'),
         tone: (conc.active || 0) >= (conc.max || 1) ? 'warn' : '',
       })}
+      ${dashKpiCard({
+        label: t('dash.kpiQueue'),
+        value: queueKpiValue,
+        sub: queueKpiSub,
+        tone: queueTone,
+        href: 'queue',
+      })}
     </div>
 
     <div class="dash-layout">
@@ -1062,6 +1119,7 @@ async function renderDashboard() {
               )}
             </div>
             <div class="dash-quick">
+              <button type="button" class="btn secondary sm" data-nav="queue">${escapeHtml(t('dash.openQueue'))}</button>
               <button type="button" class="btn secondary sm" data-nav="usage">${escapeHtml(t('nav.usage'))}</button>
               <button type="button" class="btn secondary sm" data-nav="pm2">${escapeHtml(t('nav.pm2'))}</button>
               <button type="button" class="btn secondary sm" data-nav="system">${escapeHtml(t('nav.system'))}</button>
@@ -4293,6 +4351,25 @@ let chatHistorySearchTimer = null;
 
 const CHAT_MAX_DOCS = 10;
 
+/** UUID v1–v8 (loose) — match backend z.string().uuid() */
+const DOC_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function chatFileExt(name) {
+  const base = String(name || '').split(/[/\\]/).pop() || '';
+  const i = base.lastIndexOf('.');
+  if (i < 0) return '';
+  return base.slice(i).toLowerCase();
+}
+
+function isChatAllowedFilename(name) {
+  return CHAT_ALLOWED_EXTENSIONS.has(chatFileExt(name));
+}
+
+function chatFormatsShort() {
+  return t('chat.formatsHint');
+}
+
 function resetChatContext() {
   chatContext.mode = 'full';
   chatContext.recentN = 6;
@@ -5486,8 +5563,13 @@ function uploadChatFile(file, onProgress) {
         return;
       }
       const doc = data?.data || data;
+      const id = doc?.id;
+      if (!id || typeof id !== 'string') {
+        reject(new Error(t('chat.uploadFail')));
+        return;
+      }
       resolve({
-        id: doc.id,
+        id,
         name: doc.originalName || doc.filename || file.name,
         mime: doc.mimeType || file.type || '',
         size: doc.sizeBytes ?? doc.size ?? file.size ?? 0,
@@ -5539,13 +5621,218 @@ function setChatUploadProgress(opts) {
   }
 }
 
-async function addChatFiles(fileList) {
-  const files = [...(fileList || [])];
-  if (!files.length) return;
+/**
+ * Add already-uploaded documents to the pending chips (no re-upload).
+ * @param {Array<{ id: string, name?: string, originalName?: string, mime?: string, mimeType?: string, size?: number, sizeBytes?: number }>} docs
+ */
+function addChatExistingDocs(docs) {
+  const list = Array.isArray(docs) ? docs : [];
+  if (!list.length) return { added: 0, skipped: 0 };
+  let added = 0;
+  let skipped = 0;
+  const pendingIds = new Set(chatPendingDocs.map((d) => d.id));
+  for (const raw of list) {
+    if (chatPendingDocs.length >= CHAT_MAX_DOCS) {
+      skipped += list.length - added - skipped;
+      break;
+    }
+    const id = raw?.id;
+    const name = raw?.name || raw?.originalName || '';
+    if (!id || !DOC_ID_RE.test(String(id))) {
+      skipped += 1;
+      continue;
+    }
+    if (!isChatAllowedFilename(name)) {
+      skipped += 1;
+      continue;
+    }
+    if (pendingIds.has(id)) {
+      skipped += 1;
+      continue;
+    }
+    chatPendingDocs.push({
+      id,
+      name: name || id,
+      mime: raw.mime || raw.mimeType || '',
+      size: raw.size ?? raw.sizeBytes ?? 0,
+    });
+    pendingIds.add(id);
+    added += 1;
+  }
+  renderChatPending();
+  return { added, skipped };
+}
+
+async function openChatLibraryPicker() {
   if (!playgroundAuthKey()) {
     showError(t('chat.needKey'));
     return;
   }
+  const asKeyId = playgroundKeyId();
+  const room = Math.max(0, CHAT_MAX_DOCS - chatPendingDocs.length);
+  if (room <= 0) {
+    showError(t('chat.tooManyFiles'));
+    return;
+  }
+
+  /** @type {Map<string, any>} */
+  const selected = new Map();
+  let loadSeq = 0;
+
+  openAppModal({
+    title: t('chat.libraryTitle'),
+    subtitle: escapeHtml(t('chat.librarySubtitle')),
+    size: 'md',
+    bodyHtml: `
+      <div class="chat-lib">
+        <div class="chat-lib-toolbar">
+          <input type="search" id="chat-lib-q" class="chat-lib-search" placeholder="${escapeHtml(t('chat.librarySearch'))}" autocomplete="off" />
+          <span class="muted chat-lib-count" id="chat-lib-count">${escapeHtml(tf('chat.librarySelected', { n: 0 }))}</span>
+        </div>
+        <div class="muted chat-lib-formats">${escapeHtml(t('chat.formatsLabel'))}: ${escapeHtml(chatFormatsShort())}</div>
+        <div id="chat-lib-list" class="chat-lib-list" role="listbox" aria-multiselectable="true">
+          <div class="muted chat-lib-status">${escapeHtml(t('common.loading') || '…')}</div>
+        </div>
+      </div>`,
+    footerHtml: `
+      <button type="button" class="btn secondary sm" id="chat-lib-cancel">${escapeHtml(t('common.cancel'))}</button>
+      <button type="button" class="btn sm" id="chat-lib-add" disabled>${escapeHtml(t('chat.libraryAdd'))}</button>`,
+  });
+
+  const listEl = document.getElementById('chat-lib-list');
+  const qEl = document.getElementById('chat-lib-q');
+  const countEl = document.getElementById('chat-lib-count');
+  const addBtn = document.getElementById('chat-lib-add');
+  document.getElementById('chat-lib-cancel')?.addEventListener('click', () => closeAppModal());
+
+  const paintCount = () => {
+    if (countEl) countEl.textContent = tf('chat.librarySelected', { n: selected.size });
+    if (addBtn) {
+      addBtn.disabled = selected.size === 0;
+      addBtn.textContent =
+        selected.size > 0
+          ? `${t('chat.libraryAdd')} (${selected.size})`
+          : t('chat.libraryAdd');
+    }
+  };
+
+  const renderRows = (items) => {
+    if (!listEl) return;
+    const pendingIds = new Set(chatPendingDocs.map((d) => d.id));
+    const allowed = (items || []).filter((d) => isChatAllowedFilename(d.originalName));
+    if (!allowed.length) {
+      listEl.innerHTML = `<div class="data-empty chat-lib-empty"><strong>${escapeHtml(t('chat.libraryEmpty'))}</strong></div>`;
+      return;
+    }
+    listEl.innerHTML = allowed
+      .map((d) => {
+        const already = pendingIds.has(d.id);
+        const checked = selected.has(d.id);
+        const disabled = already && !checked;
+        return `
+          <label class="chat-lib-row ${already ? 'is-already' : ''} ${checked ? 'is-selected' : ''}" data-id="${escapeHtml(d.id)}">
+            <input type="checkbox" data-lib-id="${escapeHtml(d.id)}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} />
+            <span class="chat-lib-meta">
+              <span class="chat-lib-name" title="${escapeHtml(d.originalName)}">${escapeHtml(d.originalName)}</span>
+              <span class="muted">${escapeHtml(d.mimeType || '')} · ${fmtBytes(d.sizeBytes || 0)}${
+                already ? ` · ${escapeHtml(t('chat.libraryAlready'))}` : ''
+              }</span>
+            </span>
+          </label>`;
+      })
+      .join('');
+
+    listEl.querySelectorAll('input[data-lib-id]').forEach((inp) => {
+      inp.addEventListener('change', () => {
+        const id = inp.getAttribute('data-lib-id');
+        const row = allowed.find((x) => x.id === id);
+        if (!row) return;
+        if (inp.checked) {
+          if (selected.size >= room && !selected.has(id)) {
+            inp.checked = false;
+            showError(t('chat.tooManyFiles'));
+            return;
+          }
+          selected.set(id, row);
+        } else {
+          selected.delete(id);
+        }
+        const lab = inp.closest('.chat-lib-row');
+        if (lab) lab.classList.toggle('is-selected', inp.checked);
+        paintCount();
+      });
+    });
+  };
+
+  const load = async () => {
+    const seq = ++loadSeq;
+    if (listEl) {
+      listEl.innerHTML = `<div class="muted chat-lib-status">${escapeHtml(t('common.loading') || '…')}</div>`;
+    }
+    try {
+      const params = new URLSearchParams({
+        limit: '50',
+        offset: '0',
+      });
+      if (asKeyId) params.set('apiKeyId', asKeyId);
+      const q = (qEl?.value || '').trim();
+      if (q) params.set('q', q);
+      const res = await api(`/documents?${params}`);
+      if (seq !== loadSeq) return;
+      renderRows(res.data || []);
+    } catch (e) {
+      if (seq !== loadSeq) return;
+      if (listEl) {
+        listEl.innerHTML = `<div class="error-box">${escapeHtml(e.message || t('chat.libraryLoadFail'))}</div>`;
+      }
+    }
+  };
+
+  let searchTimer = null;
+  qEl?.addEventListener('input', () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => load(), 280);
+  });
+
+  addBtn?.addEventListener('click', () => {
+    const docs = [...selected.values()];
+    const { added } = addChatExistingDocs(
+      docs.map((d) => ({
+        id: d.id,
+        name: d.originalName,
+        mime: d.mimeType,
+        size: d.sizeBytes,
+      })),
+    );
+    closeAppModal();
+    if (added > 0) showError('');
+  });
+
+  paintCount();
+  await load();
+  qEl?.focus();
+}
+
+async function addChatFiles(fileList) {
+  const rawFiles = [...(fileList || [])];
+  if (!rawFiles.length) return;
+  if (!playgroundAuthKey()) {
+    showError(t('chat.needKey'));
+    return;
+  }
+
+  const rejected = rawFiles.filter((f) => !isChatAllowedFilename(f.name));
+  const files = rawFiles.filter((f) => isChatAllowedFilename(f.name));
+  if (rejected.length) {
+    showError(
+      tf('chat.formatsReject', {
+        name: rejected.map((f) => f.name).join(', '),
+        formats: chatFormatsShort(),
+      }),
+    );
+    if (!files.length) return;
+  }
+
   if (chatPendingDocs.length + files.length > CHAT_MAX_DOCS) {
     showError(t('chat.tooManyFiles'));
     return;
@@ -5591,10 +5878,13 @@ async function addChatFiles(fileList) {
         percent: 100,
         indeterminate: false,
       });
-      chatPendingDocs.push(doc);
+      // avoid duplicate id if same file re-uploaded in session chips
+      if (!chatPendingDocs.some((d) => d.id === doc.id)) {
+        chatPendingDocs.push(doc);
+      }
       renderChatPending();
     }
-    showError('');
+    if (!rejected.length) showError('');
   } catch (e) {
     showError(e.message || t('chat.uploadFail'));
   } finally {
@@ -5702,8 +5992,13 @@ async function renderChatPlayground() {
             <textarea id="chat-input" rows="2" placeholder="${escapeHtml(t('chat.placeholder'))}"></textarea>
             <div class="chat-composer-actions">
               <div class="chat-composer-left">
-                <input type="file" id="chat-file" class="chat-file-input" multiple />
-                <button type="button" class="btn secondary sm" id="chat-attach">${escapeHtml(t('chat.attach'))}</button>
+                <input type="file" id="chat-file" class="chat-file-input" multiple accept="${escapeHtml(CHAT_FILE_ACCEPT)}" />
+                <button type="button" class="btn secondary sm" id="chat-attach" title="${escapeHtml(t('chat.attachHint'))}">${escapeHtml(t('chat.attach'))}</button>
+                <button type="button" class="btn secondary sm" id="chat-attach-lib" title="${escapeHtml(t('chat.libraryTitle'))}">${escapeHtml(t('chat.attachLibrary'))}</button>
+                <span class="chat-formats-hint" title="${escapeHtml(chatFormatsShort())}">
+                  <span class="chat-formats-label">${escapeHtml(t('chat.formatsLabel'))}</span>
+                  <span class="muted">${escapeHtml(chatFormatsShort())}</span>
+                </span>
               </div>
               <div class="chat-composer-right">
                 <button type="button" class="btn secondary sm" id="chat-stop" disabled>${escapeHtml(t('chat.stop'))}</button>
@@ -5786,6 +6081,9 @@ async function renderChatPlayground() {
   document.getElementById('chat-attach').onclick = () => {
     document.getElementById('chat-file')?.click();
   };
+  document.getElementById('chat-attach-lib')?.addEventListener('click', () => {
+    openChatLibraryPicker().catch((e) => showError(e.message || t('chat.libraryLoadFail')));
+  });
   document.getElementById('chat-file').onchange = (e) => {
     const input = e.target;
     addChatFiles(input.files).finally(() => {
@@ -5841,6 +6139,29 @@ async function renderChatPlayground() {
   };
 }
 
+/**
+ * Collect document IDs for Grok: current pending chips + every prior message
+ * that still carries `docs` so multi-turn keeps attachments in context.
+ * @returns {string[]}
+ */
+function collectDocumentIdsForSend(pending) {
+  const seen = new Set();
+  const ids = [];
+  const push = (id) => {
+    if (!id || typeof id !== 'string') return;
+    const t = id.trim();
+    if (!DOC_ID_RE.test(t) || seen.has(t)) return;
+    seen.add(t);
+    ids.push(t);
+  };
+  for (const d of pending || []) push(d?.id);
+  for (const m of chatMessages) {
+    if (!m?.docs?.length) continue;
+    for (const d of m.docs) push(d?.id);
+  }
+  return ids;
+}
+
 async function sendChatMessage() {
   captureChatUi();
   const input = document.getElementById('chat-input');
@@ -5860,14 +6181,22 @@ async function sendChatMessage() {
     text = t('chat.fileOnlyPrompt');
   }
 
+  // Reject pending chips that never got a server id (broken upload response)
+  const badPending = pending.filter((d) => !d?.id || !DOC_ID_RE.test(String(d.id)));
+  if (badPending.length) {
+    showError(t('chat.uploadFail'));
+    return;
+  }
+
   const model =
     document.getElementById('chat-model')?.value || chatUi.model || 'grok-4.5';
   const includeReasoning =
     document.getElementById('chat-reasoning')?.checked !== false;
   const asKeyId = playgroundKeyId();
 
-  const docIds = pending.map((d) => d.id);
+  // Pending for this user bubble only; API gets pending + history docs
   const docMeta = pending.map((d) => ({ id: d.id, name: d.name }));
+  const docIds = collectDocumentIdsForSend(pending);
 
   chatMessages.push({
     role: 'user',
@@ -5896,8 +6225,10 @@ async function sendChatMessage() {
   const sendBtn = document.getElementById('chat-send');
   const stopBtn = document.getElementById('chat-stop');
   const attachBtn = document.getElementById('chat-attach');
+  const libBtn = document.getElementById('chat-attach-lib');
   if (sendBtn) sendBtn.disabled = true;
   if (attachBtn) attachBtn.disabled = true;
+  if (libBtn) libBtn.disabled = true;
   if (stopBtn) stopBtn.disabled = false;
 
   chatAbort = new AbortController();
@@ -5908,6 +6239,7 @@ async function sendChatMessage() {
       include_reasoning: includeReasoning,
       messages: apiMessages,
     };
+    // Always pass document_ids when any attachment is in the thread
     if (docIds.length) body.document_ids = docIds;
     if (asKeyId) body.apiKeyId = asKeyId;
 
@@ -6020,6 +6352,7 @@ async function sendChatMessage() {
     updateChatCompressButton();
     if (sendBtn) sendBtn.disabled = false;
     if (attachBtn) attachBtn.disabled = false;
+    if (libBtn) libBtn.disabled = false;
     if (stopBtn) stopBtn.disabled = true;
     // Persist thread (non-blocking on failure)
     saveConversation().catch(() => {});
@@ -6043,6 +6376,7 @@ async function render() {
     else if (state.page === 'settings') await renderSettings();
     else if (state.page === 'usage') await renderUsage();
     else if (state.page === 'ddos') await renderDdos();
+    else if (state.page === 'queue') await renderQueue();
     else if (state.page === 'pm2') await renderPm2();
     else if (state.page === 'system') await renderSystem();
     else await renderDashboard();
@@ -6052,4 +6386,269 @@ async function render() {
   }
 }
 
-render();
+/** @type {ReturnType<typeof setInterval> | null} */
+let queueTimer = null;
+/** @type {string} */
+let queueStatusFilter = '';
+
+async function renderQueue() {
+  if (queueTimer) {
+    clearInterval(queueTimer);
+    queueTimer = null;
+  }
+  const statusQ = queueStatusFilter
+    ? `&status=${encodeURIComponent(queueStatusFilter)}`
+    : '';
+  const [statsRes, jobsRes, policyRes] = await Promise.all([
+    api('/queue/stats'),
+    api(`/queue/jobs?limit=40&offset=0${statusQ}`),
+    api('/queue/policy'),
+  ]);
+  const s = statsRes.data || {};
+  const pol = policyRes.data || s.policy || {};
+  const jobs = jobsRes.data || [];
+  const by = s.byStatus || {};
+  const deadCount = s.dead ?? by.dead ?? 0;
+
+  const jobRows = jobs.length
+    ? jobs
+        .map(
+          (j) => `
+      <tr>
+        <td><code class="cell-primary">${escapeHtml(j.id.slice(0, 8))}…</code>
+          <div class="cell-sub">${escapeHtml(j.requestId || '')}</div>
+          ${
+            j.errorMessage
+              ? `<div class="cell-sub" style="color:var(--danger,#c44)">${escapeHtml(String(j.errorMessage).slice(0, 120))}</div>`
+              : ''
+          }
+        </td>
+        <td>${escapeHtml(j.source || '')}</td>
+        <td>${badgeStatus(j.status)}</td>
+        <td>${j.priority}</td>
+        <td class="muted">${escapeHtml((j.apiKeyId || '').slice(0, 8))}…</td>
+        <td>${j.attempt}/${j.maxAttempts}</td>
+        <td>${fmtTime(j.queuedAt)}</td>
+        <td class="row-actions">
+          ${
+            j.status === 'queued' || j.status === 'leased' || j.status === 'running'
+              ? `<button type="button" class="btn danger sm" data-q-cancel="${j.id}">${escapeHtml(t('queue.cancel'))}</button>`
+              : ''
+          }
+          ${
+            j.status === 'queued'
+              ? `<button type="button" class="btn secondary sm" data-q-pri="${j.id}" data-pri="${j.priority}">${escapeHtml(t('queue.priorityBtn'))}</button>`
+              : ''
+          }
+          ${
+            j.status === 'failed' || j.status === 'dead' || j.status === 'cancelled'
+              ? `<button type="button" class="btn secondary sm" data-q-requeue="${j.id}">${escapeHtml(t('queue.requeue'))}</button>`
+              : ''
+          }
+        </td>
+      </tr>`,
+        )
+        .join('')
+    : `<tr><td colspan="8" class="muted">${escapeHtml(t('queue.empty'))}</td></tr>`;
+
+  const statusOpts = [
+    ['', t('queue.allStatuses')],
+    ['queued', t('queue.filterQueued')],
+    ['active', t('queue.filterRunning')],
+    ['dead', t('queue.filterDead')],
+    ['failed', t('queue.filterFailed')],
+    ['succeeded', t('queue.filterSucceeded')],
+    ['cancelled', t('queue.filterCancelled')],
+  ]
+    .map(
+      ([v, lab]) =>
+        `<option value="${escapeHtml(v)}" ${queueStatusFilter === v ? 'selected' : ''}>${escapeHtml(lab)}</option>`,
+    )
+    .join('');
+
+  document.getElementById('app').innerHTML = shell(`
+    <div class="topbar">
+      <div>
+        <h2>${escapeHtml(t('queue.title'))}</h2>
+        <p class="muted">${escapeHtml(t('queue.subtitle'))}</p>
+      </div>
+      <div class="toolbar">
+        <button type="button" class="btn secondary sm" id="q-refresh">${escapeHtml(t('queue.refresh'))}</button>
+        <button type="button" class="btn secondary sm" id="q-pause">${escapeHtml(pol.paused ? t('queue.resume') : t('queue.pause'))}</button>
+        <button type="button" class="btn secondary sm" id="q-drain">${escapeHtml(pol.drainMode ? t('queue.undrain') : t('queue.drainBtn'))}</button>
+        <button type="button" class="btn danger sm" id="q-purge">${escapeHtml(t('queue.purgeDead'))}</button>
+      </div>
+    </div>
+    <div class="grid-3" style="margin-bottom:16px">
+      ${dashKpiCard({ label: t('queue.depth'), value: String(s.depth ?? 0), tone: (s.depth || 0) > 20 ? 'warn' : '' })}
+      ${dashKpiCard({ label: t('queue.queued'), value: String(s.queued ?? by.queued ?? 0) })}
+      ${dashKpiCard({ label: t('queue.activeJobs'), value: `${s.running ?? by.running ?? 0} / ${pol.globalConcurrency ?? '—'}`, sub: `${t('queue.worker')}: ${s.workerActive ?? 0}` })}
+      ${dashKpiCard({
+        label: t('queue.dead'),
+        value: String(deadCount),
+        tone: deadCount > 0 ? 'warn' : '',
+      })}
+      ${dashKpiCard({
+        label: t('queue.oldest'),
+        value: s.oldestQueuedAgeMs ? `${Math.round(s.oldestQueuedAgeMs / 1000)}s` : '—',
+      })}
+      ${dashKpiCard({
+        label: t('queue.running'),
+        value: pol.paused
+          ? t('queue.paused')
+          : pol.drainMode
+            ? t('queue.drain')
+            : t('queue.running'),
+        tone: pol.paused ? 'warn' : '',
+      })}
+    </div>
+    ${
+      deadCount > 0
+        ? `<div class="card" style="margin-bottom:16px;border-color:var(--warn,#c90)">
+      <h3>${escapeHtml(t('queue.dlqTitle'))} (${deadCount})</h3>
+      <p class="muted">${escapeHtml(t('queue.dlqHint'))}</p>
+      <div class="toolbar">
+        <button type="button" class="btn secondary sm" id="q-filter-dead">${escapeHtml(t('queue.filterDead'))}</button>
+        <button type="button" class="btn danger sm" id="q-purge-dlq">${escapeHtml(t('queue.purgeDead'))}</button>
+      </div>
+    </div>`
+        : ''
+    }
+    <div class="card" style="margin-bottom:16px">
+      <h3>${escapeHtml(t('queue.savePolicy'))}</h3>
+      <div class="form-grid">
+        <label class="check-inline"><input type="checkbox" id="qp-enabled" ${pol.enabled !== false ? 'checked' : ''}/> ${escapeHtml(t('queue.enabled'))}</label>
+        <label>${escapeHtml(t('queue.globalConcurrency'))}
+          <input type="number" id="qp-gconc" min="1" max="64" value="${Number(pol.globalConcurrency) || 2}" />
+        </label>
+        <label>${escapeHtml(t('queue.perKeyConcurrency'))}
+          <input type="number" id="qp-kconc" min="1" max="16" value="${Number(pol.perKeyConcurrency) || 1}" />
+        </label>
+        <label>${escapeHtml(t('queue.maxDepth'))}
+          <input type="number" id="qp-depth" min="1" value="${Number(pol.maxQueueDepth) || 100}" />
+        </label>
+        <label>${escapeHtml(t('queue.maxDepthKey'))}
+          <input type="number" id="qp-depthk" min="1" value="${Number(pol.maxQueueDepthPerKey) || 20}" />
+        </label>
+        <label>${escapeHtml(t('queue.fairness'))}
+          <select id="qp-fair">
+            <option value="weighted_round_robin" ${pol.fairness === 'weighted_round_robin' ? 'selected' : ''}>${escapeHtml(t('queue.wrr'))}</option>
+            <option value="fifo_global" ${pol.fairness === 'fifo_global' ? 'selected' : ''}>${escapeHtml(t('queue.fifo'))}</option>
+          </select>
+        </label>
+        <label>${escapeHtml(t('queue.defaultPriority'))}
+          <input type="number" id="qp-pri" min="0" value="${Number(pol.defaultPriority) || 100}" />
+        </label>
+        <label>${escapeHtml(t('queue.playgroundPriority'))}
+          <input type="number" id="qp-ppri" min="0" value="${Number(pol.playgroundPriority) || 50}" />
+        </label>
+        <label>${escapeHtml(t('queue.leaseMs'))}
+          <input type="number" id="qp-lease" min="5000" value="${Number(pol.leaseMs) || 45000}" />
+        </label>
+        <label>${escapeHtml(t('queue.maxWaitMs'))}
+          <input type="number" id="qp-wait" min="5000" value="${Number(pol.maxWaitMs) || 600000}" />
+        </label>
+      </div>
+      <div class="toolbar" style="margin-top:12px">
+        <button type="button" class="btn sm" id="qp-save">${escapeHtml(t('queue.savePolicy'))}</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="panel-h" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+        <h3 style="margin:0">${escapeHtml(t('queue.jobs'))} (${jobsRes.total ?? jobs.length})</h3>
+        <label style="display:flex;align-items:center;gap:8px;margin:0">
+          <span class="muted">${escapeHtml(t('queue.filterStatus'))}</span>
+          <select id="q-status-filter">${statusOpts}</select>
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID / ${escapeHtml(t('queue.errorCol'))}</th><th>Src</th><th>Status</th><th>Pri</th><th>Key</th><th>Try</th><th>Queued</th><th></th>
+            </tr>
+          </thead>
+          <tbody>${jobRows}</tbody>
+        </table>
+      </div>
+    </div>
+  `);
+  bindShell();
+
+  document.getElementById('q-refresh').onclick = () => renderQueue().catch(onErr);
+  document.getElementById('q-pause').onclick = async () => {
+    await api(pol.paused ? '/queue/resume' : '/queue/pause', { method: 'POST', body: '{}' });
+    renderQueue().catch(onErr);
+  };
+  document.getElementById('q-drain').onclick = async () => {
+    await api(pol.drainMode ? '/queue/undrain' : '/queue/drain', { method: 'POST', body: '{}' });
+    renderQueue().catch(onErr);
+  };
+  const doPurge = async () => {
+    if (!(await uiConfirm({ title: t('queue.purgeDead'), message: t('queue.purgeDead'), variant: 'danger' }))) return;
+    await api('/queue/purge-dead', { method: 'POST', body: '{}' });
+    renderQueue().catch(onErr);
+  };
+  document.getElementById('q-purge').onclick = () => doPurge().catch(onErr);
+  document.getElementById('q-purge-dlq')?.addEventListener('click', () => doPurge().catch(onErr));
+  document.getElementById('q-filter-dead')?.addEventListener('click', () => {
+    queueStatusFilter = 'dead';
+    renderQueue().catch(onErr);
+  });
+  document.getElementById('q-status-filter').onchange = (ev) => {
+    queueStatusFilter = ev.target.value || '';
+    renderQueue().catch(onErr);
+  };
+  document.getElementById('qp-save').onclick = async () => {
+    const body = {
+      enabled: document.getElementById('qp-enabled').checked,
+      globalConcurrency: Number(document.getElementById('qp-gconc').value),
+      perKeyConcurrency: Number(document.getElementById('qp-kconc').value),
+      maxQueueDepth: Number(document.getElementById('qp-depth').value),
+      maxQueueDepthPerKey: Number(document.getElementById('qp-depthk').value),
+      fairness: document.getElementById('qp-fair').value,
+      defaultPriority: Number(document.getElementById('qp-pri').value),
+      playgroundPriority: Number(document.getElementById('qp-ppri').value),
+      leaseMs: Number(document.getElementById('qp-lease').value),
+      maxWaitMs: Number(document.getElementById('qp-wait').value),
+    };
+    await api('/queue/policy', { method: 'PUT', body: JSON.stringify(body) });
+    showError('');
+    renderQueue().catch(onErr);
+  };
+  document.querySelectorAll('[data-q-cancel]').forEach((b) => {
+    b.onclick = async () => {
+      await api(`/queue/jobs/${b.dataset.qCancel}/cancel`, { method: 'POST', body: '{}' });
+      renderQueue().catch(onErr);
+    };
+  });
+  document.querySelectorAll('[data-q-requeue]').forEach((b) => {
+    b.onclick = async () => {
+      await api(`/queue/jobs/${b.dataset.qRequeue}/requeue`, { method: 'POST', body: '{}' });
+      renderQueue().catch(onErr);
+    };
+  });
+  document.querySelectorAll('[data-q-pri]').forEach((b) => {
+    b.onclick = async () => {
+      const cur = Number(b.dataset.pri) || 100;
+      const raw = window.prompt(t('queue.priorityPh'), String(cur));
+      if (raw == null) return;
+      const priority = Number(raw);
+      if (!Number.isFinite(priority) || priority < 0 || priority > 1000) return;
+      await api(`/queue/jobs/${b.dataset.qPri}/priority`, {
+        method: 'POST',
+        body: JSON.stringify({ priority }),
+      });
+      renderQueue().catch(onErr);
+    };
+  });
+
+  queueTimer = setInterval(() => {
+    if (state.page !== 'queue') {
+      clearInterval(queueTimer);
+      queueTimer = null;
+      return;
+    }
+    renderQueue().catch(() => {});
+  }, 3000);
+}

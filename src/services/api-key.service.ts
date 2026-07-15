@@ -1,36 +1,50 @@
 import { createHash, scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 import { prisma } from '../config/database';
 import { AUDIT_ACTIONS, KEY_MODES, ROLES } from '../config/constants';
-import type {
-  ApiKeyCreatedEntity,
-  ApiKeyPublicEntity,
-} from '../entities/api-key.entity';
+import type { ApiKeyCreatedEntity, ApiKeyPublicEntity } from '../entities';
 import type {
   AuthenticatedApiKey,
   ApiKeyMode,
   ApiKeyRole,
-} from '../interfaces/auth.interface';
+} from '../interfaces';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { apiKeyPrefix, createApiKeySecret, createId } from '../utils/id';
 import { parseIpList, serializeIpList } from '../utils/ip-match';
 import { auditService } from './audit.service';
+import { normalizeApiKeyRole } from './role-normalize.service';
 
-function hashApiKey(rawKey: string): string {
+/** Legacy: plain SHA-256 hex (64 chars). */
+export function hashApiKeySha256(rawKey: string): string {
   return createHash('sha256').update(rawKey, 'utf8').digest('hex');
 }
 
-function verifyApiKey(rawKey: string, keyHash: string): boolean {
-  const computed = hashApiKey(rawKey);
+/** Preferred: scrypt$saltHex$hashHex */
+export function scryptHash(rawKey: string, salt = randomBytes(16)): string {
+  const hash = scryptSync(rawKey, salt, 32);
+  return `scrypt$${salt.toString('hex')}$${hash.toString('hex')}`;
+}
+
+/** New keys: scrypt. Prefer scryptHash for clarity. */
+export function hashApiKey(rawKey: string): string {
+  return scryptHash(rawKey);
+}
+
+export function verifyApiKey(rawKey: string, keyHash: string): boolean {
   try {
+    if (keyHash.startsWith('scrypt$')) {
+      const parts = keyHash.split('$');
+      if (parts.length !== 3) return false;
+      const salt = Buffer.from(parts[1]!, 'hex');
+      const expected = Buffer.from(parts[2]!, 'hex');
+      const actual = scryptSync(rawKey, salt, expected.length);
+      return timingSafeEqual(actual, expected);
+    }
+    // Legacy SHA-256
+    const computed = hashApiKeySha256(rawKey);
     return timingSafeEqual(Buffer.from(computed, 'hex'), Buffer.from(keyHash, 'hex'));
   } catch {
     return false;
   }
-}
-
-export function scryptHash(rawKey: string, salt = randomBytes(16)): string {
-  const hash = scryptSync(rawKey, salt, 32);
-  return `${salt.toString('hex')}:${hash.toString('hex')}`;
 }
 
 function mapPublic(r: {
@@ -51,7 +65,7 @@ function mapPublic(r: {
     id: r.id,
     name: r.name,
     keyPrefix: r.keyPrefix,
-    role: r.role as ApiKeyRole,
+    role: normalizeApiKeyRole(r.role) as ApiKeyRole,
     mode: (r.mode === KEY_MODES.AGENT ? KEY_MODES.AGENT : KEY_MODES.SAFE) as ApiKeyMode,
     isActive: r.isActive,
     rateLimit: r.rateLimit,
@@ -69,25 +83,51 @@ export class ApiKeyService {
       throw ExceptionFactory.unauthorized();
     }
 
-    const keyHash = hashApiKey(rawKey);
-    const record = await prisma.apiKey.findUnique({ where: { keyHash } });
+    // Prefer O(1) legacy SHA-256 lookup; scrypt rows match via keyPrefix + verify
+    const shaHash = hashApiKeySha256(rawKey);
+    let record = await prisma.apiKey.findUnique({ where: { keyHash: shaHash } });
+
+    if (!record) {
+      const prefix = apiKeyPrefix(rawKey);
+      const candidates = await prisma.apiKey.findMany({
+        where: { keyPrefix: prefix, isActive: true },
+        take: 20,
+      });
+      for (const row of candidates) {
+        if (verifyApiKey(rawKey, row.keyHash)) {
+          record = row;
+          break;
+        }
+      }
+    }
 
     if (!record || !record.isActive) {
       throw ExceptionFactory.unauthorized();
     }
 
-    void prisma.apiKey
-      .update({
-        where: { id: record.id },
-        data: { lastUsedAt: new Date() },
-      })
-      .catch(() => undefined);
+    // Opportunistic migrate legacy SHA-256 → scrypt
+    if (!record.keyHash.startsWith('scrypt$')) {
+      const upgraded = scryptHash(rawKey);
+      void prisma.apiKey
+        .update({
+          where: { id: record.id },
+          data: { keyHash: upgraded, lastUsedAt: new Date() },
+        })
+        .catch(() => undefined);
+    } else {
+      void prisma.apiKey
+        .update({
+          where: { id: record.id },
+          data: { lastUsedAt: new Date() },
+        })
+        .catch(() => undefined);
+    }
 
     return {
       id: record.id,
       name: record.name,
       keyPrefix: record.keyPrefix,
-      role: record.role as ApiKeyRole,
+      role: normalizeApiKeyRole(record.role) as ApiKeyRole,
       mode: (record.mode === KEY_MODES.AGENT ? KEY_MODES.AGENT : KEY_MODES.SAFE) as ApiKeyMode,
       rateLimit: record.rateLimit,
       isActive: record.isActive,
@@ -110,7 +150,7 @@ export class ApiKeyService {
     rawKey?: string;
   }): Promise<ApiKeyCreatedEntity> {
     const key = input.rawKey ?? createApiKeySecret();
-    const keyHash = hashApiKey(key);
+    const keyHash = scryptHash(key);
     const prefix = apiKeyPrefix(key);
 
     const existing = await prisma.apiKey.findUnique({ where: { keyHash } });
@@ -227,7 +267,7 @@ export class ApiKeyService {
       id: record.id,
       name: record.name,
       keyPrefix: record.keyPrefix,
-      role: record.role as ApiKeyRole,
+      role: normalizeApiKeyRole(record.role) as ApiKeyRole,
       mode: (record.mode === KEY_MODES.AGENT
         ? KEY_MODES.AGENT
         : KEY_MODES.SAFE) as ApiKeyMode,
@@ -314,4 +354,3 @@ export class ApiKeyService {
 }
 
 export const apiKeyService = new ApiKeyService();
-export { hashApiKey, verifyApiKey };

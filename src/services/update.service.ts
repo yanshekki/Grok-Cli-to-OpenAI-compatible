@@ -7,61 +7,22 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { ExceptionFactory } from '../exceptions/exception.factory';
+import type { InstallChannel } from '../interfaces/install-channel.type';
+import type { UpdateProgress } from '../interfaces/update-progress.type';
+import type { UpdateResult } from '../interfaces/update-result.interface';
+import type { VersionInfo } from '../interfaces/version-info.interface';
+import type { VersionStatus } from '../interfaces/version-status.type';
+
+export type { UpdateProgress } from '../interfaces/update-progress.type';
+export type { InstallChannel } from '../interfaces/install-channel.type';
+export type { VersionStatus } from '../interfaces/version-status.type';
+export type { VersionInfo } from '../interfaces/version-info.interface';
+export type { UpdateResult } from '../interfaces/update-result.interface';
 
 const PRISMA_VERSION = '6.5.0';
 
-/** Optional progress hooks for CLI loading UI */
-export type UpdateProgress = {
-  /** Called at the start of each major step */
-  step?: (info: { index: number; total: number; title: string }) => void;
-  /** Called while a long command is about to run */
-  start?: (label: string) => void;
-  /** Called when a step succeeds */
-  succeed?: (label: string) => void;
-  /** Called when a step fails */
-  fail?: (label: string) => void;
-};
-
 export const GITHUB_REPO = 'yanshekki/Grok-Cli-to-OpenAI-compatible';
 export const NPM_PACKAGE = 'grok-cli-to-openai-compatible';
-
-export type InstallChannel = 'git' | 'npm-global' | 'npm-local' | 'unknown';
-
-/** How local package version compares to registry / channel */
-export type VersionStatus =
-  | 'update_available'
-  | 'up_to_date'
-  | 'ahead'
-  | 'unknown';
-
-export interface VersionInfo {
-  current: string;
-  latestNpm: string | null;
-  latestGithub: string | null;
-  latest: string | null;
-  /** True only when a published version is strictly newer than local */
-  updateAvailable: boolean;
-  /**
-   * update_available — registry newer than local
-   * up_to_date — matches latest known release
-   * ahead — local newer than npm/GitHub (common on git/dev)
-   * unknown — could not fetch remote versions
-   */
-  versionStatus: VersionStatus;
-  channel: InstallChannel;
-  packageRoot: string;
-  installSource: string;
-}
-
-export interface UpdateResult {
-  ok: boolean;
-  channel: InstallChannel;
-  fromVersion: string;
-  toVersion: string | null;
-  log: string[];
-  restartRequired: boolean;
-  message: string;
-}
 
 function getPackageRoot(): string {
   // dist/services -> dist -> package root

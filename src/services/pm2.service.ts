@@ -14,6 +14,8 @@ import {
 import { getDefaultHome, resolveRuntimePaths } from '../cli/lib/paths';
 import { DEFAULT_PORT } from '../cli/lib/paths';
 import { readEnvFile, upsertEnvFile } from '../cli/lib/env-file';
+import type { Pm2RuntimeConfig } from '../interfaces/pm2-runtime-config.interface';
+import type { RunnerMode } from '../interfaces/runner-mode.type';
 import {
   defaultPm2Config,
   normalizePm2Config,
@@ -21,13 +23,13 @@ import {
   pm2RuntimeConfigPath,
   readPm2Config,
   writePm2Config,
-  type Pm2RuntimeConfig,
 } from './pm2-config';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 
 const execFileAsync = promisify(execFile);
 
-export type RunnerMode = 'pm2' | 'gctoac' | 'none' | 'unknown';
+export type { RunnerMode } from '../interfaces/runner-mode.type';
+export type { Pm2RuntimeConfig } from '../interfaces/pm2-runtime-config.interface';
 
 function gctoacPidFile(): string {
   const home = process.env.GCTOAC_HOME?.trim() || getDefaultHome();
@@ -181,7 +183,7 @@ function detectPortHolders(port: number): {
   };
 }
 
-/** Free port / stop gctoac before PM2 binds */
+/** Free port by stopping known gctoac/pm2 gateway processes only (never kill strangers). */
 async function freePortForPm2(port: number): Promise<string[]> {
   const notes: string[] = [];
   const pidFile = gctoacPidFile();
@@ -191,9 +193,19 @@ async function freePortForPm2(port: number): Promise<string[]> {
     clearPid(pidFile);
     notes.push(`stopped gctoac pid ${gctoacPid}`);
   }
-  for (const p of findPidsOnPort(port)) {
-    await killPid(p);
-    notes.push(`killed listener pid ${p}`);
+  // Try stop/delete our PM2 app if it holds the port
+  try {
+    const cfg = readPm2Config();
+    await runPm2(['stop', cfg.name]).catch(() => undefined);
+    notes.push(`pm2 stop ${cfg.name}`);
+  } catch {
+    /* ignore */
+  }
+  const holders = findPidsOnPort(port);
+  if (holders.length) {
+    notes.push(
+      `port ${port} still held by pid(s) ${holders.join(',')}; not killing unknown processes`,
+    );
   }
   await new Promise((r) => setTimeout(r, 500));
   return notes;

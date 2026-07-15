@@ -1,4 +1,9 @@
-import { BAN_SOURCES, AUDIT_ACTIONS, type BanSource } from '../config/constants';
+import {
+  AUDIT_ACTIONS,
+  BAN_SOURCES,
+  type BanSource,
+} from '../config/constants';
+import type { AutoBanEvent } from '../interfaces/auto-ban-event.interface';
 import { ddosPolicyService } from './ddos-policy.service';
 import { auditService } from './audit.service';
 import { normalizeIp } from '../utils/ip-match';
@@ -9,15 +14,7 @@ async function getIpBlacklist() {
   return m.ipBlacklistService;
 }
 
-export type AutoBanEvent = {
-  id: string;
-  ip: string;
-  reason: string;
-  source: BanSource;
-  durationMs: number;
-  escalated: boolean;
-  at: number;
-};
+export type { AutoBanEvent } from '../interfaces/auto-ban-event.interface';
 
 const MAX_EVENTS = 50;
 const events: AutoBanEvent[] = [];

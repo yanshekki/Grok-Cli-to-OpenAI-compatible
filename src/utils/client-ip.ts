@@ -1,4 +1,6 @@
 import type { Request } from 'express';
+import type { ProxyIpConfig } from '../interfaces/proxy-ip-config.interface';
+import type { ProxyIpSource } from '../interfaces/proxy-ip-source.type';
 import {
   ipAllowed,
   isValidIpOrCidr,
@@ -6,28 +8,8 @@ import {
   parseIpList,
 } from './ip-match';
 
-/**
- * How to resolve the real client IP when behind reverse proxies.
- * Headers (CF / X-Real-IP / XFF) are ONLY trusted when the TCP peer
- * is in `trustedProxies` (default: loopback). Otherwise socket IP is used.
- */
-export type ProxyIpSource =
-  | 'auto'
-  | 'cloudflare'
-  | 'nginx'
-  | 'x-forwarded-for'
-  | 'socket';
-
-export type ProxyIpConfig = {
-  /** Express trust proxy hops; 0 = do not trust any proxy headers */
-  trustHops: number;
-  source: ProxyIpSource;
-  /**
-   * CIDR/IP of reverse proxies allowed to set client-IP headers.
-   * Default loopback only — add e.g. 10.0.0.0/8 if nginx is on another host.
-   */
-  trustedProxies: string[];
-};
+export type { ProxyIpSource } from '../interfaces/proxy-ip-source.type';
+export type { ProxyIpConfig } from '../interfaces/proxy-ip-config.interface';
 
 /** Default: only local reverse proxies (same host) may inject IP headers. */
 export const DEFAULT_TRUSTED_PROXIES = ['127.0.0.1', '::1'];
@@ -94,8 +76,20 @@ function normalizeSource(s: unknown): ProxyIpSource {
   return 'auto';
 }
 
+/** Reject world-open CIDRs that would enable IP header spoofing. */
+function isOverlyBroadCidr(entry: string): boolean {
+  const e = entry.trim().toLowerCase();
+  return (
+    e === '0.0.0.0/0' ||
+    e === '::/0' ||
+    e === '0.0.0.0' ||
+    e === '::' ||
+    e === '*'
+  );
+}
+
 function sanitizeTrusted(list: string[] | undefined): string[] {
-  const parsed = parseIpList(list ?? []);
+  const parsed = parseIpList(list ?? []).filter((e) => !isOverlyBroadCidr(e));
   if (!parsed.length) return [...DEFAULT_TRUSTED_PROXIES];
   // Always keep loopback as safe defaults alongside custom list
   const set = new Set([...DEFAULT_TRUSTED_PROXIES, ...parsed]);

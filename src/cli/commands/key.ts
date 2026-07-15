@@ -7,8 +7,8 @@ import {
   createKey,
   listKeys,
   revokeKey,
+  normalizeKeyRole,
   type KeyMode,
-  type KeyRole,
 } from '../lib/db-keys';
 import { fail, info, ok, warn } from '../lib/print';
 
@@ -55,7 +55,7 @@ export async function cmdKeyCreate(opts: {
   const env = ensureEnvFile(paths);
   loadEnvIntoProcess(paths.envFile);
 
-  const role: KeyRole = opts.role === 'user' ? 'user' : 'admin';
+  const role = normalizeKeyRole(opts.role);
   const mode: KeyMode = opts.mode === 'agent' ? 'agent' : 'safe';
   const databaseUrl = env.DATABASE_URL || paths.databaseUrl;
   const port = env.PORT || DEFAULT_PORT;

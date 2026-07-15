@@ -8,22 +8,12 @@ import {
   type KeyMode,
 } from '../config/constants';
 import { env } from '../config/env';
-import type { AuthenticatedApiKey } from '../interfaces/auth.interface';
+import type { AuthenticatedApiKey } from '../interfaces/authenticated-api-key.interface';
+import type { ResolvedPolicy } from '../interfaces/resolved-policy.interface';
 import { resolveSafeCwd } from '../utils/path-safe';
 import { settingsService } from './settings.service';
 
-export interface ResolvedPolicy {
-  mode: KeyMode;
-  alwaysApprove: boolean;
-  cwd: string;
-  timeoutMs: number;
-  maxTurns: number | null;
-  /** If set, passed as --tools allowlist */
-  toolsAllowlist: string | null;
-  /** If set, passed as --disallowed-tools */
-  toolsDenylist: string | null;
-  sandboxForced: boolean;
-}
+export type { ResolvedPolicy } from '../interfaces/resolved-policy.interface';
 
 export class PolicyService {
   async resolve(

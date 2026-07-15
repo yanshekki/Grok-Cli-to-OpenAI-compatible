@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import path from 'node:path';
 import type { Response } from 'express';
 import { prisma } from '../config/database';
 import {
@@ -7,15 +9,17 @@ import {
   MAX_TOTAL_PROMPT_CHARS,
 } from '../config/constants';
 import type { CreateChatCompletionDto } from '../dto/chat.dto';
-import type { AuthenticatedApiKey } from '../interfaces/auth.interface';
-import type {
-  GrokResponseMeta,
-  OpenAiChatCompletion,
-} from '../interfaces/openai.interface';
-import type { GrokRunOptions } from '../interfaces/grok.interface';
+import type { ChatContext } from '../interfaces/chat-context.interface';
+import type { GrokCollectedOutput } from '../interfaces/grok-collected-output.interface';
+import type { GrokRunOptions } from '../interfaces/grok-run-options.interface';
+import type { GrokResponseMeta } from '../interfaces/grok-response-meta.interface';
+import type { OpenAiChatCompletion } from '../interfaces/open-ai-chat-completion.interface';
+import type { ResolvedPolicy } from '../interfaces/resolved-policy.interface';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { HttpException } from '../exceptions/http.exception';
 import { createChatCompletionId, createId } from '../utils/id';
+import { rmSafe, ensureDir } from '../utils/fs-safe';
+import { toBytes } from '../utils/prisma-bytes';
 import {
   mapFinishChunk,
   mapGrokToChatCompletion,
@@ -30,27 +34,28 @@ import { auditService } from './audit.service';
 import { documentService } from './document.service';
 import { encryptionService } from './encryption.service';
 import { grokCliService } from './grok-cli.service';
-import { policyService, type ResolvedPolicy } from './policy.service';
+import { policyService } from './policy.service';
 import { settingsService } from './settings.service';
+import { chatQueueService } from './queue/chat-queue.service';
+import { jobWaiterRegistry } from './queue/job-waiter';
+import { queuePolicyService } from './queue/queue-policy.service';
 
-export interface ChatContext {
-  apiKey: AuthenticatedApiKey;
-  requestId: string;
-  ip?: string;
-  userAgent?: string;
-}
+export type { ChatContext } from '../interfaces/chat-context.interface';
+export type { GrokCollectedOutput } from '../interfaces/grok-collected-output.interface';
+export type { ResolvedPolicy } from '../interfaces/resolved-policy.interface';
 
-interface GrokCollectedOutput {
-  text: string;
-  reasoning: string;
-  sessionId?: string;
-  stopReason?: string;
-  requestId?: string;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toBytes(buf: Buffer): any {
-  return Buffer.from(buf);
+/** Namespace session ids per API key so tenants cannot resume each other's CLI sessions. */
+function namespacedSessionId(
+  apiKeyId: string,
+  clientSessionId?: string,
+): string | undefined {
+  if (!clientSessionId?.trim()) return undefined;
+  const raw = clientSessionId.trim().slice(0, 128);
+  const digest = createHash('sha256')
+    .update(`${apiKeyId}:${raw}`, 'utf8')
+    .digest('hex')
+    .slice(0, 32);
+  return `gog_${digest}`;
 }
 
 function policyToRunOpts(
@@ -60,6 +65,7 @@ function policyToRunOpts(
     model: string;
     stream: boolean;
     sessionId?: string;
+    apiKeyId: string;
   },
 ): GrokRunOptions {
   return {
@@ -67,7 +73,7 @@ function policyToRunOpts(
     model: base.model,
     cwd: policy.cwd,
     stream: base.stream,
-    sessionId: base.sessionId,
+    sessionId: namespacedSessionId(base.apiKeyId, base.sessionId),
     timeoutMs: policy.timeoutMs,
     alwaysApprove: policy.alwaysApprove,
     maxTurns: policy.maxTurns,
@@ -76,163 +82,365 @@ function policyToRunOpts(
   };
 }
 
+export type ExecuteCompletionOptions = {
+  /** Called by queue worker — skip enqueue */
+  fromQueue?: boolean;
+  jobId?: string;
+  /** SSE headers already sent (queue status event) */
+  sseAlreadyInit?: boolean;
+  source?: 'v1' | 'playground';
+  /** Scoped idempotency key (usually apiKeyId:clientKey) */
+  idempotencyKey?: string;
+};
+
 export class ChatService {
+  /**
+   * Public entry: enqueue when queue enabled, else run immediately.
+   */
   async createCompletion(
     dto: CreateChatCompletionDto,
     ctx: ChatContext,
     res?: Response,
+    options?: ExecuteCompletionOptions,
+  ): Promise<OpenAiChatCompletion | void> {
+    if (options?.fromQueue) {
+      return this.executeCompletion(dto, ctx, res, options);
+    }
+
+    const qPolicy = await queuePolicyService.get();
+    if (qPolicy.enabled) {
+      return this.createCompletionQueued(
+        dto,
+        ctx,
+        res,
+        options?.source || 'v1',
+        options?.idempotencyKey,
+      );
+    }
+    return this.executeCompletion(dto, ctx, res, options);
+  }
+
+  /** Enqueue + wait (stream holds SSE until worker finishes). */
+  private async createCompletionQueued(
+    dto: CreateChatCompletionDto,
+    ctx: ChatContext,
+    res?: Response,
+    source: 'v1' | 'playground' = 'v1',
+    idempotencyKey?: string,
+  ): Promise<OpenAiChatCompletion | void> {
+    const stream = Boolean(dto.stream);
+    const enq = await chatQueueService.enqueue({
+      dto,
+      ctx,
+      source,
+      idempotencyKey,
+    });
+    const { jobId, position, policy } = enq;
+    if (enq.alreadyDone) {
+      // Idempotent replay: do not re-run. Stream clients get a terminal queue event.
+      if (stream && res) {
+        if (!res.headersSent) initSse(res);
+        writeSseData(res, {
+          object: 'gog.queue',
+          status: 'succeeded',
+          job_id: jobId,
+          result_chat_request_id: enq.resultChatRequestId ?? null,
+          message: 'Idempotent replay: job already completed',
+        });
+        writeSseDone(res);
+        res.end();
+        return;
+      }
+      throw ExceptionFactory.validation(
+        'Idempotent request already completed; omit Idempotency-Key to start a new job',
+      );
+    }
+
+    const ee = jobWaiterRegistry.register(jobId, res);
+    if (stream) {
+      if (!res) throw ExceptionFactory.internal('Streaming requires Response');
+      if (!res.headersSent) {
+        initSse(res);
+      }
+      writeSseData(res, {
+        object: 'gog.queue',
+        status: 'queued',
+        job_id: jobId,
+        position,
+        message: `Queued (position ${position})`,
+      });
+      ee.on('queue', (ev: { position: number }) => {
+        if (!res.writableEnded) {
+          writeSseData(res, {
+            object: 'gog.queue',
+            status: 'queued',
+            job_id: jobId,
+            position: ev.position,
+          });
+        }
+      });
+    }
+
+    // Position updates while waiting
+    const posTimer = setInterval(() => {
+      void chatQueueService.estimatePosition(jobId).then((p) => {
+        if (p > 0) jobWaiterRegistry.emitQueue(jobId, p);
+      });
+    }, 2000);
+
+    const maxWait = policy.maxWaitMs;
+    try {
+      const result = await new Promise<OpenAiChatCompletion | void>(
+        (resolve, reject) => {
+          const timer = setTimeout(() => {
+            reject(ExceptionFactory.queueTimeout());
+          }, maxWait);
+
+          const onAbort = () => {
+            void chatQueueService.requestCancel(jobId);
+          };
+          res?.on('close', onAbort);
+
+          ee.once('done', (ev: { result?: OpenAiChatCompletion }) => {
+            clearTimeout(timer);
+            res?.off('close', onAbort);
+            resolve(ev.result);
+          });
+          ee.once('error', (ev: { error: Error }) => {
+            clearTimeout(timer);
+            res?.off('close', onAbort);
+            reject(ev.error);
+          });
+        },
+      );
+      return result;
+    } catch (err) {
+      if (stream && res && !res.writableEnded) {
+        const message = err instanceof Error ? err.message : 'Queue error';
+        writeSseData(res, {
+          error: {
+            message,
+            type: 'server_error',
+            code:
+              err instanceof HttpException ? err.code : 'queue_error',
+          },
+        });
+        writeSseDone(res);
+        res.end();
+      }
+      throw err;
+    } finally {
+      clearInterval(posTimer);
+      jobWaiterRegistry.cleanup(jobId);
+    }
+  }
+
+  /**
+   * Run Grok completion (worker or direct). Does not enqueue.
+   */
+  async executeCompletion(
+    dto: CreateChatCompletionDto,
+    ctx: ChatContext,
+    res?: Response,
+    options?: ExecuteCompletionOptions,
   ): Promise<OpenAiChatCompletion | void> {
     const settings = await settingsService.getAll();
     const model = dto.model || settings.defaultModel;
     const stream = Boolean(dto.stream);
     const includeReasoning = dto.include_reasoning !== false;
     const policy = await policyService.resolve(ctx.apiKey, dto.cwd);
-    const documentIds = dto.document_ids ?? [];
+    const documentIds = [
+      ...new Set((dto.document_ids ?? []).filter((id) => typeof id === 'string' && id)),
+    ];
+
+    // Materialize under policy.cwd/attachments so tools use relative paths only
+    // (avoids absolute host paths in the prompt). Cleaned up after the request.
+    const requestSlug = (ctx.requestId || createId()).replace(/[^a-zA-Z0-9_-]/g, '');
+    const attachRel = path.join('attachments', requestSlug);
+    const attachDir =
+      documentIds.length > 0 ? path.join(policy.cwd, attachRel) : '';
 
     let docContext = '';
-    if (documentIds.length > 0) {
-      docContext = await documentService.buildContextFromDocuments(
-        ctx.apiKey.id,
-        documentIds,
-        MAX_DOCUMENT_CONTEXT_CHARS,
-      );
-    }
-
-    const normalizedMessages = dto.messages.map((m) => ({
-      role: m.role,
-      content: typeof m.content === 'string' ? m.content : String(m.content ?? ''),
-    }));
-
-    if (docContext) {
-      normalizedMessages.unshift({
-        role: 'system',
-        content: `The user has attached the following documents for context:\n\n${docContext}`,
-      });
-    }
-
-    const prompt = messagesToPrompt(normalizedMessages);
-    if (prompt.length > MAX_TOTAL_PROMPT_CHARS) {
-      throw ExceptionFactory.validation(
-        `Total prompt exceeds ${MAX_TOTAL_PROMPT_CHARS} characters`,
-      );
-    }
-
-    if (!grokCliService.tryAcquire()) {
-      throw ExceptionFactory.concurrencyLimit();
-    }
-
-    const chatRequestDbId = createId();
-    const completionId = createChatCompletionId();
-    const promptEnc = encryptionService.encrypt(prompt);
-    const started = Date.now();
-
-    await prisma.chatRequest.create({
-      data: {
-        id: chatRequestDbId,
-        requestId: ctx.requestId,
-        apiKeyId: ctx.apiKey.id,
-        model,
-        stream,
-        status: CHAT_STATUS.PENDING,
-        promptCiphertext: toBytes(promptEnc.ciphertext),
-        promptIv: toBytes(promptEnc.iv),
-        promptTag: toBytes(promptEnc.tag),
-        ip: ctx.ip,
-        userAgent: ctx.userAgent,
-        policyMode: policy.mode,
-        documents: {
-          create: documentIds.map((documentId) => ({ documentId })),
-        },
-      },
-    });
+    let materializedCount = 0;
 
     try {
-      if (stream) {
-        if (!res) {
-          throw ExceptionFactory.internal('Streaming requires Response');
-        }
-        await this.runStream({
-          dto,
-          ctx,
-          res,
-          model,
-          policy,
-          prompt,
-          completionId,
-          chatRequestDbId,
-          started,
-          includeReasoning,
-        });
-        return;
+      if (documentIds.length > 0) {
+        await ensureDir(attachDir);
+        const built = await documentService.buildContextFromDocuments(
+          ctx.apiKey.id,
+          documentIds,
+          MAX_DOCUMENT_CONTEXT_CHARS,
+          {
+            materializeDir: attachDir,
+            pathPrefix: attachRel,
+          },
+        );
+        docContext = built.context;
+        materializedCount = built.files.length;
+        logger.info(
+          {
+            requestId: ctx.requestId,
+            apiKeyId: ctx.apiKey.id,
+            documentCount: documentIds.length,
+            materializedCount,
+            contextChars: docContext.length,
+            attachDir: attachRel,
+          },
+          'Document context prepared for Grok CLI',
+        );
       }
 
-      const collected = await this.collectFromGrokStream(
-        policyToRunOpts(policy, {
-          prompt,
-          model,
-          stream: true,
-          sessionId: dto.session_id,
-        }),
-      );
+      const normalizedMessages = dto.messages.map((m) => ({
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content : String(m.content ?? ''),
+      }));
 
-      const auditPayload = this.buildAuditPayload(collected, includeReasoning);
-      const responseEnc = encryptionService.encrypt(auditPayload);
-      const durationMs = Date.now() - started;
+      if (docContext) {
+        normalizedMessages.unshift({
+          role: 'system',
+          content:
+            `The user has attached the following documents for this request. ` +
+            `Use their contents (and on-disk paths when tools allow) when answering.\n\n${docContext}`,
+        });
+      }
 
-      await prisma.chatRequest.update({
-        where: { id: chatRequestDbId },
+      const prompt = messagesToPrompt(normalizedMessages);
+      if (prompt.length > MAX_TOTAL_PROMPT_CHARS) {
+        throw ExceptionFactory.validation(
+          `Total prompt exceeds ${MAX_TOTAL_PROMPT_CHARS} characters`,
+        );
+      }
+
+      // Queue worker already limits concurrency; direct mode still uses in-process slots
+      const fromQueue = Boolean(options?.fromQueue);
+      if (!fromQueue && !grokCliService.tryAcquire()) {
+        throw ExceptionFactory.concurrencyLimit();
+      }
+      if (fromQueue) {
+        // Soft acquire so stats still reflect load (best-effort)
+        grokCliService.tryAcquire();
+      }
+
+      const chatRequestDbId = createId();
+      const completionId = createChatCompletionId();
+      const promptEnc = encryptionService.encrypt(prompt);
+      const started = Date.now();
+
+      await prisma.chatRequest.create({
         data: {
-          status: CHAT_STATUS.SUCCESS,
-          durationMs,
-          grokSessionId: collected.sessionId ?? null,
-          responseCiphertext: toBytes(responseEnc.ciphertext),
-          responseIv: toBytes(responseEnc.iv),
-          responseTag: toBytes(responseEnc.tag),
-        },
-      });
-
-      await auditService.log({
-        apiKeyId: ctx.apiKey.id,
-        action: AUDIT_ACTIONS.CHAT_CREATE,
-        resource: 'chat_request',
-        resourceId: chatRequestDbId,
-        meta: {
+          id: chatRequestDbId,
           requestId: ctx.requestId,
+          apiKeyId: ctx.apiKey.id,
           model,
-          stream: false,
-          durationMs,
-          documentCount: documentIds.length,
-          includeReasoning,
-          hasReasoning: collected.reasoning.length > 0,
+          stream,
+          status: CHAT_STATUS.PENDING,
+          promptCiphertext: toBytes(promptEnc.ciphertext),
+          promptIv: toBytes(promptEnc.iv),
+          promptTag: toBytes(promptEnc.tag),
+          ip: ctx.ip,
+          userAgent: ctx.userAgent,
           policyMode: policy.mode,
-        },
-        ip: ctx.ip,
-      });
-
-      return mapGrokToChatCompletion(
-        model,
-        {
-          text: collected.text,
-          stopReason: collected.stopReason,
-          sessionId: collected.sessionId,
-          requestId: collected.requestId,
-        },
-        {
-          completionId,
-          reasoningContent: collected.reasoning || null,
-          includeReasoning,
-          grok: {
-            sessionId: collected.sessionId,
-            stopReason: collected.stopReason,
-            requestId: collected.requestId,
+          documents: {
+            create: documentIds.map((documentId) => ({ documentId })),
           },
         },
-      );
-    } catch (err) {
-      await this.markFailed(chatRequestDbId, started, err);
-      throw err;
+      });
+
+      try {
+        if (stream) {
+          if (!res) {
+            throw ExceptionFactory.internal('Streaming requires Response');
+          }
+          await this.runStream({
+            dto,
+            ctx,
+            res,
+            model,
+            policy,
+            prompt,
+            completionId,
+            chatRequestDbId,
+            started,
+            includeReasoning,
+            skipRoleChunk: Boolean(options?.sseAlreadyInit),
+            jobId: options?.jobId,
+          });
+          return;
+        }
+
+        const collected = await this.collectFromGrokStream(
+          policyToRunOpts(policy, {
+            prompt,
+            model,
+            stream: true,
+            sessionId: dto.session_id,
+            apiKeyId: ctx.apiKey.id,
+          }),
+        );
+
+        const auditPayload = this.buildAuditPayload(collected, includeReasoning);
+        const responseEnc = encryptionService.encrypt(auditPayload);
+        const durationMs = Date.now() - started;
+
+        await prisma.chatRequest.update({
+          where: { id: chatRequestDbId },
+          data: {
+            status: CHAT_STATUS.SUCCESS,
+            durationMs,
+            grokSessionId: collected.sessionId ?? null,
+            responseCiphertext: toBytes(responseEnc.ciphertext),
+            responseIv: toBytes(responseEnc.iv),
+            responseTag: toBytes(responseEnc.tag),
+          },
+        });
+
+        await auditService.log({
+          apiKeyId: ctx.apiKey.id,
+          action: AUDIT_ACTIONS.CHAT_CREATE,
+          resource: 'chat_request',
+          resourceId: chatRequestDbId,
+          meta: {
+            requestId: ctx.requestId,
+            model,
+            stream: false,
+            durationMs,
+            documentCount: documentIds.length,
+            includeReasoning,
+            hasReasoning: collected.reasoning.length > 0,
+            policyMode: policy.mode,
+          },
+          ip: ctx.ip,
+        });
+
+        return mapGrokToChatCompletion(
+          model,
+          {
+            text: collected.text,
+            stopReason: collected.stopReason,
+            sessionId: collected.sessionId,
+            requestId: collected.requestId,
+          },
+          {
+            completionId,
+            reasoningContent: collected.reasoning || null,
+            includeReasoning,
+            grok: {
+              sessionId: collected.sessionId,
+              stopReason: collected.stopReason,
+              requestId: collected.requestId,
+            },
+          },
+        );
+      } catch (err) {
+        await this.markFailed(chatRequestDbId, started, err);
+        throw err;
+      } finally {
+        grokCliService.release();
+      }
     } finally {
-      grokCliService.release();
+      if (attachDir) {
+        await rmSafe(attachDir);
+      }
     }
   }
 
@@ -290,6 +498,8 @@ export class ChatService {
     chatRequestDbId: string;
     started: number;
     includeReasoning: boolean;
+    skipRoleChunk?: boolean;
+    jobId?: string;
   }): Promise<void> {
     const {
       dto,
@@ -302,6 +512,8 @@ export class ChatService {
       chatRequestDbId,
       started,
       includeReasoning,
+      skipRoleChunk,
+      jobId,
     } = args;
     const created = Math.floor(Date.now() / 1000);
     const textParts: string[] = [];
@@ -313,10 +525,23 @@ export class ChatService {
 
     res.on('close', () => {
       clientClosed = true;
+      if (jobId) void chatQueueService.requestCancel(jobId);
     });
 
-    initSse(res);
-    writeSseData(res, mapRoleChunk(model, completionId, created));
+    if (!res.headersSent) {
+      initSse(res);
+    }
+    if (!skipRoleChunk) {
+      writeSseData(res, mapRoleChunk(model, completionId, created));
+    } else {
+      // Queue already opened SSE — still announce assistant role
+      writeSseData(res, mapRoleChunk(model, completionId, created));
+      writeSseData(res, {
+        object: 'gog.queue',
+        status: 'running',
+        job_id: jobId,
+      });
+    }
 
     try {
       for await (const event of grokCliService.stream(
@@ -325,6 +550,7 @@ export class ChatService {
           model,
           stream: true,
           sessionId: dto.session_id,
+          apiKeyId: ctx.apiKey.id,
         }),
       )) {
         if (clientClosed) break;
@@ -375,12 +601,13 @@ export class ChatService {
       await prisma.chatRequest.update({
         where: { id: chatRequestDbId },
         data: {
-          status: CHAT_STATUS.SUCCESS,
+          status: clientClosed ? CHAT_STATUS.CANCELLED : CHAT_STATUS.SUCCESS,
           durationMs,
           grokSessionId: grokSessionId ?? null,
           responseCiphertext: toBytes(responseEnc.ciphertext),
           responseIv: toBytes(responseEnc.iv),
           responseTag: toBytes(responseEnc.tag),
+          errorMessage: clientClosed ? 'Client disconnected' : null,
         },
       });
 
@@ -398,6 +625,7 @@ export class ChatService {
           includeReasoning,
           hasReasoning: reasoningParts.length > 0,
           policyMode: policy.mode,
+          cancelled: clientClosed,
         },
         ip: ctx.ip,
       });

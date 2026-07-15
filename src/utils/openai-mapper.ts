@@ -1,19 +1,13 @@
-import type {
-  GrokResponseMeta,
-  OpenAiChatCompletion,
-  OpenAiChatCompletionChunk,
-  OpenAiModel,
-  OpenAiModelList,
-} from '../interfaces/openai.interface';
-import type { GrokJsonResult } from '../interfaces/grok.interface';
+import type { GrokJsonResult } from '../interfaces/grok-json-result.interface';
+import type { GrokResponseMeta } from '../interfaces/grok-response-meta.interface';
+import type { MapCompletionOptions } from '../interfaces/map-completion-options.interface';
+import type { OpenAiChatCompletion } from '../interfaces/open-ai-chat-completion.interface';
+import type { OpenAiChatCompletionChunk } from '../interfaces/open-ai-chat-completion-chunk.interface';
+import type { OpenAiModel } from '../interfaces/open-ai-model.interface';
+import type { OpenAiModelList } from '../interfaces/open-ai-model-list.interface';
 import { createChatCompletionId } from './id';
 
-export interface MapCompletionOptions {
-  completionId?: string;
-  reasoningContent?: string | null;
-  includeReasoning?: boolean;
-  grok?: GrokResponseMeta;
-}
+export type { MapCompletionOptions } from '../interfaces/map-completion-options.interface';
 
 export function mapGrokToChatCompletion(
   model: string,

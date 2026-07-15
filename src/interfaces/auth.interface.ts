@@ -1,15 +1,4 @@
-export type ApiKeyRole = 'client' | 'admin';
-export type ApiKeyMode = 'safe' | 'agent';
-
-export interface AuthenticatedApiKey {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  role: ApiKeyRole;
-  mode: ApiKeyMode;
-  rateLimit: number;
-  isActive: boolean;
-  maxTurns: number | null;
-  timeoutMs: number | null;
-  ipWhitelist: string[];
-}
+/** @deprecated Import from individual files or `interfaces/index` — kept for compatibility. */
+export type { ApiKeyRole } from './api-key-role.type';
+export type { ApiKeyMode } from './api-key-mode.type';
+export type { AuthenticatedApiKey } from './authenticated-api-key.interface';

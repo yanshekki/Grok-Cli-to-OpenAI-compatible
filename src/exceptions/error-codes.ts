@@ -13,6 +13,10 @@ export const ErrorCodes = {
   DOCUMENT_TYPE_NOT_ALLOWED: 'document_type_not_allowed',
   INVALID_CWD: 'invalid_cwd',
   SERVICE_UNAVAILABLE: 'service_unavailable',
+  QUEUE_FULL: 'queue_full',
+  QUEUE_PAUSED: 'queue_draining',
+  QUEUE_TIMEOUT: 'queue_wait_timeout',
+  QUEUE_CANCELLED: 'queue_cancelled',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

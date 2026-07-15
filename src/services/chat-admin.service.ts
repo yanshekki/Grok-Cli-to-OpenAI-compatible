@@ -2,21 +2,11 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/database';
 import { AUDIT_ACTIONS } from '../config/constants';
 import { ExceptionFactory } from '../exceptions/exception.factory';
+import type { ChatListQuery } from '../interfaces/chat-list-query.interface';
 import { encryptionService } from './encryption.service';
 import { auditService } from './audit.service';
 
-export interface ChatListQuery {
-  limit?: number;
-  offset?: number;
-  status?: string;
-  apiKeyId?: string;
-  model?: string;
-  q?: string;
-  from?: string;
-  to?: string;
-  hasDocuments?: boolean | string;
-  policyMode?: string;
-}
+export type { ChatListQuery } from '../interfaces/chat-list-query.interface';
 
 function decryptField(
   ciphertext: Buffer | Uint8Array | null | undefined,

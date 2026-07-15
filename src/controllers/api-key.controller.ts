@@ -5,7 +5,7 @@ import { ExceptionFactory } from '../exceptions/exception.factory';
 import { apiKeyService } from '../services/api-key.service';
 import { auditService } from '../services/audit.service';
 import { asyncHandler } from '../utils/async-handler';
-import type { ApiKeyMode, ApiKeyRole } from '../interfaces/auth.interface';
+import type { ApiKeyMode, ApiKeyRole } from '../interfaces';
 import { requestIp } from '../utils/client-ip';
 
 export class ApiKeyController {

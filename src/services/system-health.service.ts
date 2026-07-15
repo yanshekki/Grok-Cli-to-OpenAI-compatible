@@ -2,34 +2,13 @@ import execa from 'execa';
 import fs from 'node:fs';
 import path from 'node:path';
 import { env } from '../config/env';
+import type { SoftwareCheck } from '../interfaces/software-check.interface';
+import type { SystemSoftwareReport } from '../interfaces/system-software-report.interface';
 
-export type SoftwareId =
-  | 'node'
-  | 'npm'
-  | 'grok'
-  | 'pm2'
-  | 'prisma'
-  | 'git'
-  | 'gateway';
-
-export type SoftwareLevel = 'required' | 'recommended' | 'optional' | 'bundled';
-
-export interface SoftwareCheck {
-  id: SoftwareId;
-  name: string;
-  level: SoftwareLevel;
-  requiredVersion?: string;
-  installed: boolean;
-  version: string | null;
-  path: string | null;
-  ok: boolean;
-  detail?: string;
-}
-
-export interface SystemSoftwareReport {
-  allRequiredOk: boolean;
-  checks: SoftwareCheck[];
-}
+export type { SoftwareId } from '../interfaces/software-id.type';
+export type { SoftwareLevel } from '../interfaces/software-level.type';
+export type { SoftwareCheck } from '../interfaces/software-check.interface';
+export type { SystemSoftwareReport } from '../interfaces/system-software-report.interface';
 
 function packageRoot(): string {
   return path.resolve(__dirname, '../..');

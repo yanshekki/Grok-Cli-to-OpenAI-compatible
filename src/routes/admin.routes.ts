@@ -15,13 +15,19 @@ import {
   createConversationSchema,
   updateConversationSchema,
 } from '../dto/conversation.dto';
-import { requireAdmin, requireApiKey } from '../middlewares/auth.middleware';
+import { requireAdminAuth } from '../middlewares/auth.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import { uploadSingle } from '../middlewares/upload.middleware';
 import { env } from '../config/env';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { settingsService } from '../services/settings.service';
 import { asyncHandler } from '../utils/async-handler';
+import { adminAuthHandlers } from '../controllers/admin/auth.handlers';
+import { adminOtpLoginSchema } from '../dto/admin-auth.dto';
+import {
+  chatBurstLimiter,
+  chatRateLimiter,
+} from '../middlewares/rate-limit.middleware';
 
 const router = Router();
 
@@ -37,9 +43,20 @@ const ensureAdminPanel = asyncHandler(async (_req, _res, next) => {
 });
 
 router.use(ensureAdminPanel);
-router.use(requireApiKey);
-router.use(requireAdmin);
 
+// Public: OTP → session (rate-limited via global + burst helpers)
+router.post(
+  '/auth/login',
+  chatRateLimiter,
+  chatBurstLimiter,
+  validate(adminOtpLoginSchema, 'body'),
+  adminAuthHandlers.login,
+);
+
+// Authenticated admin (session token OR admin API key)
+router.use(requireAdminAuth);
+
+router.post('/auth/logout', adminAuthHandlers.logout);
 router.get('/me', adminController.me);
 // Admin chat playground (select API key by id — no raw secret)
 router.post(
@@ -170,5 +187,32 @@ router.get('/pm2/config', adminController.pm2GetConfig);
 router.put('/pm2/config', adminController.pm2SaveConfig);
 router.post('/pm2/config/reset', adminController.pm2ResetConfig);
 router.post('/pm2/switch', adminController.pm2Switch);
+
+// Chat work queue control center
+router.get('/queue/stats', adminController.queueStats);
+router.get('/queue/jobs', adminController.queueListJobs);
+router.get('/queue/jobs/:id', validate(adminIdParamSchema, 'params'), adminController.queueGetJob);
+router.post(
+  '/queue/jobs/:id/cancel',
+  validate(adminIdParamSchema, 'params'),
+  adminController.queueCancelJob,
+);
+router.post(
+  '/queue/jobs/:id/requeue',
+  validate(adminIdParamSchema, 'params'),
+  adminController.queueRequeueJob,
+);
+router.post(
+  '/queue/jobs/:id/priority',
+  validate(adminIdParamSchema, 'params'),
+  adminController.queueSetPriority,
+);
+router.get('/queue/policy', adminController.queueGetPolicy);
+router.put('/queue/policy', adminController.queuePutPolicy);
+router.post('/queue/pause', adminController.queuePause);
+router.post('/queue/resume', adminController.queueResume);
+router.post('/queue/drain', adminController.queueDrain);
+router.post('/queue/undrain', adminController.queueUndrain);
+router.post('/queue/purge-dead', adminController.queuePurgeDead);
 
 export default router;

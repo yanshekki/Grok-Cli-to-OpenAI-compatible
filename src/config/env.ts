@@ -80,6 +80,12 @@ const envSchema = z.object({
   PROXY_IP_SOURCE: z
     .enum(['auto', 'cloudflare', 'nginx', 'x-forwarded-for', 'socket'])
     .default('auto'),
+  /**
+   * Durable chat work-queue backend.
+   * sqlite = ChatJob table + in-process worker (default, production-ready).
+   * redis / kafka = reserved multi-node backends (not implemented yet).
+   */
+  QUEUE_BACKEND: z.enum(['sqlite', 'redis', 'kafka']).default('sqlite'),
 });
 
 function parseEncryptionKey(raw: string): Buffer {

@@ -7,15 +7,11 @@ import type {
   CreateConversationDto,
   UpdateConversationDto,
 } from '../dto/conversation.dto';
+import { toBytes } from '../utils/prisma-bytes';
 import { encryptionService } from './encryption.service';
 
 const PREVIEW_MAX = 80;
 const MESSAGES_VERSION = 1;
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toBytes(buf: Buffer): any {
-  return Buffer.from(buf);
-}
 
 function truncatePreview(text: string, max = PREVIEW_MAX): string {
   const cleaned = text.replace(/\s+/g, ' ').trim();

@@ -31,7 +31,14 @@ import './interfaces/express.interface';
 /** Bust browser cache when any admin SPA asset changes */
 function adminAssetVersion(adminDir: string): string {
   try {
-    const files = ['app.js', 'i18n.js', 'styles.css', 'index.html', 'boot.js'];
+    const files = [
+      'app.js',
+      'i18n.js',
+      'styles.css',
+      'index.html',
+      'boot.js',
+      'allowed-extensions.js',
+    ];
     let max = 0;
     for (const f of files) {
       try {

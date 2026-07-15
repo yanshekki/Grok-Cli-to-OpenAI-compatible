@@ -61,4 +61,20 @@ export const ExceptionFactory = {
   serviceUnavailable(message = 'Service unavailable'): HttpException {
     return new HttpException(503, message, ErrorCodes.SERVICE_UNAVAILABLE);
   },
+
+  queueFull(message = 'Chat queue is full'): HttpException {
+    return new HttpException(429, message, ErrorCodes.QUEUE_FULL);
+  },
+
+  queueUnavailable(message = 'Chat queue is paused or draining'): HttpException {
+    return new HttpException(503, message, ErrorCodes.QUEUE_PAUSED);
+  },
+
+  queueTimeout(message = 'Timed out waiting in chat queue'): HttpException {
+    return new HttpException(504, message, ErrorCodes.QUEUE_TIMEOUT);
+  },
+
+  queueCancelled(message = 'Chat job was cancelled'): HttpException {
+    return new HttpException(409, message, ErrorCodes.QUEUE_CANCELLED);
+  },
 };

@@ -1,4 +1,7 @@
-export type ChatRequestStatus = 'pending' | 'success' | 'error' | 'timeout';
+import type { ChatRequestStatus } from './chat-request-status.type';
+
+export type { ChatRequestStatus } from './chat-request-status.type';
+export type { EncryptedPayload } from './encrypted-payload.entity';
 
 export interface ChatRequestEntity {
   id: string;
@@ -13,10 +16,4 @@ export interface ChatRequestEntity {
   ip: string | null;
   userAgent: string | null;
   createdAt: Date;
-}
-
-export interface EncryptedPayload {
-  ciphertext: Buffer;
-  iv: Buffer;
-  tag: Buffer;
 }

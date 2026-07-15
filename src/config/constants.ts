@@ -138,6 +138,8 @@ export const CHAT_STATUS = {
   SUCCESS: 'success',
   ERROR: 'error',
   TIMEOUT: 'timeout',
+  /** Client disconnected mid-stream */
+  CANCELLED: 'cancelled',
 } as const;
 
 export const AUDIT_ACTIONS = {
@@ -169,6 +171,12 @@ export const AUDIT_ACTIONS = {
   CONVERSATION_CREATE: 'conversation.create',
   CONVERSATION_UPDATE: 'conversation.update',
   CONVERSATION_DELETE: 'conversation.delete',
+  ADMIN_LOGIN: 'admin.login',
+  ADMIN_LOGOUT: 'admin.logout',
+  ADMIN_OTP_CREATE: 'admin.otp_create',
+  QUEUE_POLICY_UPDATE: 'queue.policy_update',
+  QUEUE_CANCEL: 'queue.cancel',
+  QUEUE_REQUEUE: 'queue.requeue',
 } as const;
 
 export const ROLES = {
@@ -181,18 +189,27 @@ export const KEY_MODES = {
   AGENT: 'agent',
 } as const;
 
-export type KeyMode = (typeof KEY_MODES)[keyof typeof KEY_MODES];
+/** Re-export canonical mode type (lives in interfaces/). */
+export type { KeyMode, ApiKeyMode } from '../interfaces/api-key-mode.type';
 
-/** Tools stripped in safe mode (Grok CLI names may vary; denylist is best-effort). */
+/**
+ * Tools stripped in safe mode (denylist). Prefer SAFE_READONLY_TOOLS allowlist
+ * when safeToolsMode=readonly (stronger). Names cover common Grok CLI aliases.
+ */
 export const SAFE_DISALLOWED_TOOLS = [
   'run_terminal_cmd',
   'run_terminal_command',
   'Bash',
   'bash',
+  'Shell',
+  'shell',
   'search_replace',
   'Edit',
+  'edit',
   'Write',
   'write',
+  'MultiEdit',
+  'NotebookEdit',
   'web_search',
   'web_fetch',
   'WebSearch',
@@ -204,6 +221,8 @@ export const SAFE_DISALLOWED_TOOLS = [
   'image_edit',
   'image_to_video',
   'reference_to_video',
+  'mcp',
+  'MCP',
 ].join(',');
 
 export const SETTING_KEYS = {
@@ -215,6 +234,23 @@ export const SETTING_KEYS = {
   ADMIN_PANEL_ENABLED: 'admin_panel_enabled',
   /** JSON blob: runtime DDoS / rate-limit / auto-ban policy */
   DDOS_POLICY: 'ddos_policy',
+  /** JSON blob: chat work-queue policy */
+  QUEUE_POLICY: 'queue_policy',
+} as const;
+
+export const CHAT_JOB_STATUS = {
+  QUEUED: 'queued',
+  LEASED: 'leased',
+  RUNNING: 'running',
+  SUCCEEDED: 'succeeded',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled',
+  DEAD: 'dead',
+} as const;
+
+export const CHAT_JOB_SOURCE = {
+  V1: 'v1',
+  PLAYGROUND: 'playground',
 } as const;
 
 /** IpBlacklist.source values */
@@ -234,7 +270,9 @@ export const SAFE_TOOLS_MODES = {
   READONLY: 'readonly',
 } as const;
 
-export const SAFE_READONLY_TOOLS = 'read_file,grep,list_dir';
+/** Strongest safe default: only read-only inspection tools. */
+export const SAFE_READONLY_TOOLS =
+  'read_file,Read,grep,Grep,list_dir,LS,Glob,glob';
 
 export const STORAGE_TYPES = {
   DB: 'db',

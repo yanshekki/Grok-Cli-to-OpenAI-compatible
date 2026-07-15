@@ -1,4 +1,4 @@
-import type { NextFunction, Request, Response } from 'express';
+import type { Request } from 'express';
 import { ROLES } from '../config/constants';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import {
@@ -6,6 +6,10 @@ import {
   recordFailedAuth,
 } from './rate-limit.middleware';
 import { apiKeyService } from '../services/api-key.service';
+import {
+  adminAuthService,
+  isSessionToken,
+} from '../services/admin-auth.service';
 import { asyncHandler } from '../utils/async-handler';
 import { ipAllowed } from '../utils/ip-match';
 import { requestIp } from '../utils/client-ip';
@@ -35,6 +39,11 @@ export const requireApiKey = asyncHandler(async (req, _res, next) => {
     recordFailedAuth(req);
     throw ExceptionFactory.unauthorized('Missing Authorization: Bearer <api_key>');
   }
+  // Session tokens are admin-panel only — not valid for /v1 OpenAI API
+  if (isSessionToken(token)) {
+    recordFailedAuth(req);
+    throw ExceptionFactory.unauthorized('Use an API key for this endpoint');
+  }
   try {
     req.apiKey = await apiKeyService.authenticate(token);
     clearFailedAuth(req);
@@ -43,7 +52,6 @@ export const requireApiKey = asyncHandler(async (req, _res, next) => {
     throw err;
   }
 
-  // Per-key IP whitelist (empty / null = allow all)
   const wl = req.apiKey.ipWhitelist;
   if (Array.isArray(wl) && wl.length > 0) {
     const ip = clientIp(req);
@@ -69,6 +77,82 @@ export const requireAdmin = asyncHandler(async (req, _res, next) => {
   next();
 });
 
-export function optionalApiKey(_req: Request, _res: Response, next: NextFunction): void {
+/**
+ * Admin panel / admin API auth:
+ * - Bearer gog_sess_* → OTP session (preferred for SPA)
+ * - Bearer gk_live_* → admin API key (automation / CLI)
+ */
+export const requireAdminAuth = asyncHandler(async (req, _res, next) => {
+  const token = extractBearer(req);
+  if (!token) {
+    recordFailedAuth(req);
+    throw ExceptionFactory.unauthorized(
+      'Missing Authorization. Log in with a one-time code (gctoac admin otp) or use an admin API key.',
+    );
+  }
+
+  if (isSessionToken(token)) {
+    try {
+      const actor = await adminAuthService.resolveSessionToken(token);
+      if (!actor) {
+        recordFailedAuth(req);
+        throw ExceptionFactory.unauthorized('Session expired or invalid. Run: gctoac admin otp');
+      }
+      req.apiKey = actor;
+      clearFailedAuth(req);
+      next();
+      return;
+    } catch (err) {
+      recordFailedAuth(req);
+      throw err;
+    }
+  }
+
+  try {
+    req.apiKey = await apiKeyService.authenticate(token);
+    clearFailedAuth(req);
+  } catch (err) {
+    recordFailedAuth(req);
+    throw err;
+  }
+
+  if (normalizeRole(req.apiKey.role) !== ROLES.ADMIN) {
+    throw ExceptionFactory.forbidden('Admin role required');
+  }
+
+  const wl = req.apiKey.ipWhitelist;
+  if (Array.isArray(wl) && wl.length > 0) {
+    const ip = clientIp(req);
+    if (!ipAllowed(ip, wl)) {
+      throw ExceptionFactory.forbidden(
+        `API key not allowed from IP ${ip} (whitelist enforced).`,
+      );
+    }
+  }
+
   next();
-}
+});
+
+/**
+ * Attach apiKey when Bearer present; otherwise continue unauthenticated.
+ */
+export const optionalApiKey = asyncHandler(async (req, _res, next) => {
+  const token = extractBearer(req);
+  if (!token) {
+    next();
+    return;
+  }
+  if (isSessionToken(token)) {
+    const actor = await adminAuthService.resolveSessionToken(token);
+    if (actor) req.apiKey = actor;
+    next();
+    return;
+  }
+  try {
+    req.apiKey = await apiKeyService.authenticate(token);
+    clearFailedAuth(req);
+  } catch {
+    /* optional */
+  }
+  next();
+});

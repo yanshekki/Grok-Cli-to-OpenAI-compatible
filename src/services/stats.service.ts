@@ -117,6 +117,7 @@ export class StatsService {
         active: grokCliService.activeCount,
         max: grokCliService.maxConcurrent,
       },
+      queue: await this.getQueueSnapshot(),
       protection: {
         autoBanEnabled: policy.autoBanEnabled,
         autoAuthEnabled: policy.autoAuthEnabled,
@@ -143,6 +144,30 @@ export class StatsService {
       },
       recentChats,
     };
+  }
+
+  private async getQueueSnapshot() {
+    try {
+      const { chatQueueService } = await import('./queue/chat-queue.service');
+      const { chatWorkerService } = await import('./queue/chat-worker.service');
+      const { queuePolicyService } = await import('./queue/queue-policy.service');
+      const s = await chatQueueService.stats();
+      const pol = await queuePolicyService.get();
+      return {
+        enabled: pol.enabled,
+        paused: pol.paused,
+        drainMode: pol.drainMode,
+        depth: s.depth,
+        queued: s.queued,
+        running: s.running,
+        dead: s.dead,
+        oldestQueuedAgeMs: s.oldestQueuedAgeMs,
+        globalConcurrency: pol.globalConcurrency,
+        workerActive: chatWorkerService.getActiveCount(),
+      };
+    } catch {
+      return null;
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-import type { AuthenticatedApiKey } from './auth.interface';
+import type { AuthenticatedApiKey } from './authenticated-api-key.interface';
 
 declare global {
   namespace Express {

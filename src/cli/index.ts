@@ -23,6 +23,7 @@ import {
   cmdAdminOn,
   cmdAdminStatus,
 } from './commands/admin-panel';
+import { cmdAdminOtp } from './commands/admin-otp';
 import { cmdLogsClear, cmdLogsShow } from './commands/logs';
 import { DEFAULT_PORT } from './lib/paths';
 
@@ -131,8 +132,16 @@ keyCmd
   .command('create')
   .description('Create API key and print plaintext once (default: admin)')
   .option('-n, --name <name>', 'Key name')
-  .option('-r, --role <role>', 'admin | user', 'admin')
-  .option('-m, --mode <mode>', 'safe | agent (user keys; admin is always agent)', 'safe')
+  .option(
+    '-r, --role <role>',
+    'admin | client (alias: user → client)',
+    'admin',
+  )
+  .option(
+    '-m, --mode <mode>',
+    'safe | agent (client keys; admin is always agent)',
+    'safe',
+  )
   .option('--rate-limit <n>', 'Per-key rate limit', (v) => Number(v))
   .action(
     async (opts: {
@@ -200,6 +209,16 @@ adminCmd
   .description('Disable Admin panel (settings DB); re-enable with: gctoac admin on')
   .action(async () => {
     await cmdAdminOff(globalOpts());
+  });
+
+adminCmd
+  .command('otp')
+  .alias('login-code')
+  .description(
+    'Generate a one-time Admin panel login code (5 min, single use). Required for every SPA login.',
+  )
+  .action(async () => {
+    await cmdAdminOtp(globalOpts());
   });
 
 program

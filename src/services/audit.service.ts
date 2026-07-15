@@ -1,5 +1,5 @@
 import { prisma } from '../config/database';
-import type { AuditLogCreateInput } from '../entities/audit-log.entity';
+import type { AuditLogCreateInput } from '../entities';
 
 export class AuditService {
   async log(input: AuditLogCreateInput): Promise<void> {

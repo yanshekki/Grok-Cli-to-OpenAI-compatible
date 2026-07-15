@@ -1,3 +1,5 @@
+export type { AuditLogCreateInput } from './audit-log-create-input.entity';
+
 export interface AuditLogEntity {
   id: string;
   apiKeyId: string | null;
@@ -7,13 +9,4 @@ export interface AuditLogEntity {
   metaJson: string | null;
   ip: string | null;
   createdAt: Date;
-}
-
-export interface AuditLogCreateInput {
-  apiKeyId?: string | null;
-  action: string;
-  resource?: string | null;
-  resourceId?: string | null;
-  meta?: Record<string, unknown> | null;
-  ip?: string | null;
 }

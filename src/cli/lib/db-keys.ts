@@ -1,8 +1,19 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 
-export type KeyRole = 'admin' | 'user';
+/** Canonical roles — match API ROLES.CLIENT / ROLES.ADMIN */
+export type KeyRole = 'admin' | 'client';
 export type KeyMode = 'safe' | 'agent';
+
+/** Accept CLI aliases: user → client */
+export function normalizeKeyRole(role?: string | null): KeyRole {
+  const r = String(role || '')
+    .trim()
+    .toLowerCase();
+  if (r === 'admin') return 'admin';
+  // user is legacy alias for client
+  return 'client';
+}
 
 export interface CreatedKey {
   id: string;
@@ -47,13 +58,13 @@ function openPrisma(databaseUrl: string): PrismaClient {
 export async function createKey(options: {
   databaseUrl: string;
   name?: string;
-  role?: KeyRole;
+  role?: KeyRole | string;
   mode?: KeyMode;
   rateLimit?: number;
   rawKey?: string;
 }): Promise<CreatedKey> {
-  const role: KeyRole = options.role === 'user' ? 'user' : 'admin';
-  // Admin keys always agent; user defaults to safe
+  const role = normalizeKeyRole(options.role);
+  // Admin keys always agent; client defaults to safe
   const mode: KeyMode =
     role === 'admin' ? 'agent' : options.mode === 'agent' ? 'agent' : 'safe';
   const name =
@@ -66,6 +77,12 @@ export async function createKey(options: {
 
   const prisma = openPrisma(options.databaseUrl);
   try {
+    // Backfill legacy role=user → client
+    await prisma.apiKey.updateMany({
+      where: { role: 'user' },
+      data: { role: 'client' },
+    });
+
     const existing = await prisma.apiKey.findUnique({ where: { keyHash } });
     if (existing) {
       throw new Error('Generated key collides with an existing hash — retry');

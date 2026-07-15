@@ -15,7 +15,7 @@ export function validate(schema: ZodSchema, target: Target = 'body') {
       next(ExceptionFactory.validation('Request validation failed', details));
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     (req as any)[target] = result.data;
     next();
   };

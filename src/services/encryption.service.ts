@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { env } from '../config/env';
-import type { EncryptedPayload } from '../entities/chat-request.entity';
+import type { EncryptedPayload } from '../entities/encrypted-payload.entity';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 
 const ALGO = 'aes-256-gcm';

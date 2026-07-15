@@ -1,4 +1,7 @@
-export type DocumentStorageType = 'db' | 'filesystem';
+import type { DocumentStorageType } from './document-storage-type.type';
+
+export type { DocumentStorageType } from './document-storage-type.type';
+export type { DocumentPublicEntity } from './document-public.entity';
 
 export interface DocumentEntity {
   id: string;
@@ -11,13 +14,4 @@ export interface DocumentEntity {
   checksumSha256: string;
   createdAt: Date;
   deletedAt: Date | null;
-}
-
-export interface DocumentPublicEntity {
-  id: string;
-  originalName: string;
-  mimeType: string;
-  sizeBytes: number;
-  checksumSha256: string;
-  createdAt: Date;
 }

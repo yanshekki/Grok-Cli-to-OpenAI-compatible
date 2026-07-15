@@ -1,4 +1,8 @@
-import type { ApiKeyMode, ApiKeyRole } from '../interfaces/auth.interface';
+import type { ApiKeyMode } from '../interfaces/api-key-mode.type';
+import type { ApiKeyRole } from '../interfaces/api-key-role.type';
+
+export type { ApiKeyPublicEntity } from './api-key-public.entity';
+export type { ApiKeyCreatedEntity } from './api-key-created.entity';
 
 export interface ApiKeyEntity {
   id: string;
@@ -13,25 +17,4 @@ export interface ApiKeyEntity {
   timeoutMs: number | null;
   createdAt: Date;
   lastUsedAt: Date | null;
-}
-
-export interface ApiKeyPublicEntity {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  role: ApiKeyRole;
-  mode: ApiKeyMode;
-  isActive: boolean;
-  rateLimit: number;
-  maxTurns: number | null;
-  timeoutMs: number | null;
-  /** Empty = allow all IPs */
-  ipWhitelist: string[];
-  createdAt: Date;
-  lastUsedAt: Date | null;
-}
-
-export interface ApiKeyCreatedEntity extends ApiKeyPublicEntity {
-  /** Plaintext key — only returned once at creation time */
-  key: string;
 }

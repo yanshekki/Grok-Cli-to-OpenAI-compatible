@@ -11,6 +11,10 @@ async function bootstrap(): Promise<void> {
   await prisma.$connect();
   logger.info('Database connected');
 
+  // Normalize legacy CLI roles (user → client) before serving traffic
+  const { backfillApiKeyRoles } = await import('./services/role-normalize.service');
+  await backfillApiKeyRoles();
+
   // Load bans + DDoS policy before accepting traffic (no race on first request)
   const { ipBlacklistService } = await import('./services/ip-blacklist.service');
   const { ddosPolicyService } = await import('./services/ddos-policy.service');
@@ -19,6 +23,14 @@ async function bootstrap(): Promise<void> {
     ddosPolicyService.load(),
   ]);
   logger.info('IP blacklist and DDoS policy loaded');
+
+  const { queuePolicyService } = await import('./services/queue/queue-policy.service');
+  const { chatWorkerService } = await import('./services/queue/chat-worker.service');
+  const { getQueueBackend } = await import('./services/queue/queue-backend.factory');
+  // Fail fast if QUEUE_BACKEND is redis/kafka (not implemented)
+  getQueueBackend();
+  await queuePolicyService.load();
+  chatWorkerService.start();
 
   const app = createApp();
   const server = app.listen(env.PORT, env.HOST, () => {
@@ -45,6 +57,14 @@ async function bootstrap(): Promise<void> {
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutting down');
+    try {
+      const { chatWorkerService } = await import(
+        './services/queue/chat-worker.service'
+      );
+      chatWorkerService.stop();
+    } catch {
+      /* ignore */
+    }
     server.close(async () => {
       try {
         await disconnectDatabase();

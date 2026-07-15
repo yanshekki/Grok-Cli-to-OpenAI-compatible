@@ -1,21 +1,16 @@
 import { prisma } from '../config/database';
 import { env } from '../config/env';
 import { SETTING_KEYS, SAFE_TOOLS_MODES } from '../config/constants';
+import type { AppSettings } from '../interfaces/app-settings.type';
 
-export type AppSettings = {
-  globalSafeMode: boolean;
-  safeMaxTurns: number;
-  safeTimeoutMs: number;
-  safeToolsMode: 'none' | 'readonly';
-  defaultModel: string;
-  adminPanelEnabled: boolean;
-};
+export type { AppSettings } from '../interfaces/app-settings.type';
 
 const DEFAULTS: AppSettings = {
   globalSafeMode: false,
   safeMaxTurns: 4,
   safeTimeoutMs: 120_000,
-  safeToolsMode: SAFE_TOOLS_MODES.NONE,
+  /** Strongest default: readonly tools only in safe mode */
+  safeToolsMode: SAFE_TOOLS_MODES.READONLY,
   defaultModel: 'grok-4.5',
   adminPanelEnabled: true,
 };
@@ -40,7 +35,7 @@ export class SettingsService {
       globalSafeMode: env.GROK_SAFE_MODE,
       safeMaxTurns: env.GROK_SAFE_MAX_TURNS,
       safeTimeoutMs: env.GROK_SAFE_TIMEOUT_MS,
-      safeToolsMode: SAFE_TOOLS_MODES.NONE,
+      safeToolsMode: SAFE_TOOLS_MODES.READONLY,
       defaultModel: env.GROK_DEFAULT_MODEL,
       adminPanelEnabled: env.ADMIN_PANEL_ENABLED,
     };

@@ -1,25 +1,36 @@
-import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { prisma } from '../config/database';
 import {
   AUDIT_ACTIONS,
   STORAGE_TYPES,
   isImageMime,
+  isTextualMime,
 } from '../config/constants';
 import { env } from '../config/env';
-import type { DocumentPublicEntity } from '../entities/document.entity';
+import type { DocumentPublicEntity } from '../entities/document-public.entity';
+import type { DocumentContextResult } from '../interfaces/document-context-result.interface';
+import type { MaterializedDocument } from '../interfaces/materialized-document.interface';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { createId } from '../utils/id';
+import { logger } from '../utils/logger';
 import { assertSafeUpload } from '../utils/file-sniff';
-import { ensureRelativeStoragePath } from '../utils/path-safe';
+import {
+  ensureRelativeStoragePath,
+  sanitizeFilename,
+} from '../utils/path-safe';
 import { auditService } from './audit.service';
+import { toPrismaBytes } from '../utils/prisma-bytes';
 import { encryptionService } from './encryption.service';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toPrismaBytes(buf: Buffer): any {
-  return Buffer.from(buf);
-}
+const execFileAsync = promisify(execFile);
+
+export type { MaterializedDocument } from '../interfaces/materialized-document.interface';
+export type { DocumentContextResult } from '../interfaces/document-context-result.interface';
 
 export class DocumentService {
   async ensureStorageDir(): Promise<void> {
@@ -193,55 +204,179 @@ export class DocumentService {
     });
   }
 
+  /**
+   * Decrypt owned documents into `targetDir` so Grok CLI (safe sandbox tools)
+   * can `read_file` / open them by absolute path.
+   */
+  async materializeDocuments(
+    apiKeyId: string,
+    documentIds: string[],
+    targetDir: string,
+  ): Promise<MaterializedDocument[]> {
+    if (documentIds.length === 0) return [];
+    await fs.mkdir(targetDir, { recursive: true });
+
+    const usedNames = new Set<string>();
+    const out: MaterializedDocument[] = [];
+
+    for (const id of documentIds) {
+      const doc = await this.getOwned(apiKeyId, id);
+      const buf = await this.readDecryptedContent(apiKeyId, id);
+      let safeName = sanitizeFilename(doc.originalName);
+      if (usedNames.has(safeName)) {
+        const ext = path.extname(safeName);
+        const stem = path.basename(safeName, ext);
+        safeName = `${stem}-${id.slice(0, 8)}${ext}`;
+      }
+      usedNames.add(safeName);
+      const fullPath = path.join(targetDir, safeName);
+      await fs.writeFile(fullPath, buf, { mode: 0o600 });
+      out.push({
+        id: doc.id,
+        originalName: doc.originalName,
+        mimeType: doc.mimeType,
+        sizeBytes: doc.sizeBytes,
+        path: fullPath,
+      });
+    }
+
+    return out;
+  }
+
+  /**
+   * Build prompt context from documents. Optionally materialize files into
+   * `materializeDir`. Prefer `pathPrefix` (relative to Grok cwd) in the prompt
+   * so tools never need absolute host paths.
+   */
   async buildContextFromDocuments(
     apiKeyId: string,
     documentIds: string[],
     maxChars: number,
-  ): Promise<string> {
-    if (documentIds.length === 0) return '';
+    options?: { materializeDir?: string; pathPrefix?: string },
+  ): Promise<DocumentContextResult> {
+    if (documentIds.length === 0) return { context: '', files: [] };
+
+    const files = options?.materializeDir
+      ? await this.materializeDocuments(apiKeyId, documentIds, options.materializeDir)
+      : [];
+    const prefix = (options?.pathPrefix || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    const displayPath = (f: MaterializedDocument) => {
+      if (prefix) {
+        const base = path.basename(f.path);
+        return `${prefix}/${base}`.replace(/\/+/g, '/');
+      }
+      // Fallback: basename only (never leak full host path when prefix missing)
+      return path.basename(f.path);
+    };
+    const pathById = new Map(files.map((f) => [f.id, displayPath(f)]));
 
     const parts: string[] = [];
     let used = 0;
+
+    if (files.length > 0) {
+      const list = files
+        .map(
+          (f) =>
+            `- ${f.originalName} (${f.mimeType}, ${f.sizeBytes} bytes) → ${displayPath(f)}`,
+        )
+        .join('\n');
+      const intro =
+        `Attached files are written under the working directory for tools ` +
+        `(read_file / list_dir). Use these paths relative to cwd:\n${list}\n\n`;
+      parts.push(intro);
+      used += intro.length;
+    }
 
     for (const id of documentIds) {
       const doc = await this.getOwned(apiKeyId, id);
       const remaining = maxChars - used;
       if (remaining <= 0) break;
 
-      const header = `--- Document: ${doc.originalName} (${doc.id}) ---\n`;
+      const relPath = pathById.get(id);
+      const pathLine = relPath ? `path: ${relPath}\n` : '';
+      const header = `--- Document: ${doc.originalName} (${doc.id}) ---\n${pathLine}`;
 
-      // Images: inject metadata only (no raw binary into prompt)
+      let bodyText: string;
+
       if (isImageMime(doc.mimeType)) {
-        const meta =
+        bodyText =
           `[image attachment: name=${doc.originalName}, mime=${doc.mimeType}, ` +
-          `size=${doc.sizeBytes} bytes, document_id=${doc.id}, sha256=${doc.checksumSha256}]\n`;
-        const chunk =
-          header.length + meta.length > remaining
-            ? header + meta.slice(0, Math.max(0, remaining - header.length))
-            : header + meta;
-        parts.push(chunk);
-        used += chunk.length;
-        continue;
-      }
-
-      const buf = await this.readDecryptedContent(apiKeyId, id);
-      let text = buf.toString('utf8');
-      // Skip clearly binary garbage for context
-      if (text.includes('\u0000')) {
-        text = `[binary file: ${doc.originalName}, ${doc.sizeBytes} bytes, sha256=${doc.checksumSha256}]`;
+          `size=${doc.sizeBytes} bytes, document_id=${doc.id}, sha256=${doc.checksumSha256}` +
+          (relPath ? `, file=${relPath}` : '') +
+          `]\n` +
+          `Note: image bytes are not inlined into the prompt; open the file path if vision/file tools are available.\n`;
+      } else {
+        const buf = await this.readDecryptedContent(apiKeyId, id);
+        bodyText = await this.bufferToContextText(doc, buf);
       }
 
       const body =
-        header.length + text.length > remaining
-          ? text.slice(0, Math.max(0, remaining - header.length)) + '\n...[truncated]'
-          : text;
+        header.length + bodyText.length > remaining
+          ? bodyText.slice(0, Math.max(0, remaining - header.length)) +
+            '\n...[truncated]'
+          : bodyText;
 
       const chunk = header + body + '\n';
       parts.push(chunk);
       used += chunk.length;
     }
 
-    return parts.join('\n');
+    return { context: parts.join('\n'), files };
+  }
+
+  /** Convert file bytes to prompt-safe text (PDF extract, textual decode, or placeholder). */
+  private async bufferToContextText(
+    doc: { originalName: string; mimeType: string; sizeBytes: number; checksumSha256: string },
+    buf: Buffer,
+  ): Promise<string> {
+    const mime = (doc.mimeType || '').toLowerCase();
+    const ext = path.extname(doc.originalName).toLowerCase();
+
+    if (mime === 'application/pdf' || ext === '.pdf') {
+      const extracted = await this.extractPdfText(buf);
+      if (extracted && extracted.trim()) {
+        return extracted;
+      }
+      return (
+        `[pdf file: ${doc.originalName}, ${doc.sizeBytes} bytes, sha256=${doc.checksumSha256}; ` +
+        `text extraction unavailable — use the on-disk path with tools if present]`
+      );
+    }
+
+    if (isTextualMime(mime) || !buf.includes(0)) {
+      const text = buf.toString('utf8');
+      if (!text.includes('\u0000')) {
+        return text;
+      }
+    }
+
+    return `[binary file: ${doc.originalName}, ${doc.sizeBytes} bytes, sha256=${doc.checksumSha256}]`;
+  }
+
+  /** Best-effort PDF text via poppler `pdftotext` when installed. */
+  private async extractPdfText(buf: Buffer): Promise<string | null> {
+    const tmpIn = path.join(os.tmpdir(), `gctoac-pdf-${randomUUID()}.pdf`);
+    try {
+      await fs.writeFile(tmpIn, buf, { mode: 0o600 });
+      const { stdout } = await execFileAsync(
+        'pdftotext',
+        ['-layout', '-enc', 'UTF-8', '-nopgbrk', tmpIn, '-'],
+        {
+          maxBuffer: 12 * 1024 * 1024,
+          timeout: 45_000,
+        },
+      );
+      const text = String(stdout || '').replace(/\u0000/g, '').trim();
+      return text || null;
+    } catch (err) {
+      logger.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'pdftotext extraction failed',
+      );
+      return null;
+    } finally {
+      await fs.unlink(tmpIn).catch(() => undefined);
+    }
   }
 
   private toPublic(doc: {

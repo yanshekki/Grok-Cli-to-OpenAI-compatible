@@ -14,6 +14,11 @@ export class ChatController {
     const dto = req.body as CreateChatCompletionDto;
     const stream = Boolean(dto.stream);
 
+    const idem =
+      req.header('idempotency-key') ||
+      req.header('Idempotency-Key') ||
+      undefined;
+
     const result = await chatService.createCompletion(
       dto,
       {
@@ -23,6 +28,12 @@ export class ChatController {
         userAgent: req.header('user-agent') ?? undefined,
       },
       stream ? res : undefined,
+      {
+        source: 'v1',
+        idempotencyKey: idem
+          ? `${req.apiKey.id}:${String(idem).slice(0, 200)}`
+          : undefined,
+      },
     );
 
     if (!stream && result) {

@@ -23,9 +23,10 @@
 - Thinking / `reasoning_content`（DeepSeek 風格 + Grok `thought`）
 - 每把 key 的 **safe** / **agent** 政策 + 全域安全覆寫
 - AES-256-GCM 加密 + 完整 chat 稽核
-- **Admin Panel** — 儀表板、對話、金鑰、文件、稽核、用量、**DDoS 中心**、PM2、系統更新
+- **Admin Panel** — OTP 登入（`gctoac admin otp`）、儀表板、對話、金鑰、文件、稽核、用量、**對話佇列**、**DDoS 中心**、安全設定、PM2、系統更新
+- **持久化對話佇列** — 每個對話先入隊（Kafka 級租約語意）再由進程內 worker 消費；Admin 可暫停／排空／取消／死信；可選 `Idempotency-Key`
 - **DDoS／防濫用** — 可配置限流、多規則自動封鎖、反向代理真實客戶端 IP（nginx / Cloudflare）
-- 控制 CLI：setup、start/stop/restart、status、doctor、logs、update、keys、admin on/off
+- 控制 CLI：setup、start/stop/restart、status、doctor、logs、update、keys、**`admin otp`**、admin on/off
 
 ```text
 Client (OpenAI SDK / curl / Open WebUI)
@@ -33,9 +34,13 @@ Client (OpenAI SDK / curl / Open WebUI)
         ▼
    Express Gateway :3847
    · 認證 · 限流 · safe/agent
+   · 入隊 ChatJob（AES-GCM payload）· SSE 以 gog.queue 佔位
    · 代理感知 Client IP · 自動封鎖
-   · 加密稽核 · Admin /admin
+   · 加密稽核 · Admin /admin（佇列控制）
    · gctoac start | stop | status | update
+        │
+        ▼
+   進程內 worker（租約 / 公平輪詢 / 併發）
         │
         ▼
    grok -p …  （本機 Grok CLI）
@@ -67,16 +72,22 @@ gctoac start    # http://127.0.0.1:3847
 gctoac status   # runner、port、proxy、health
 ```
 
-開啟 Admin（貼上 **admin API key**）：
+開啟 Admin（OTP 登入 — **不會**在瀏覽器長期保存 API key）：
+
+```bash
+gctoac admin otp     # 產生一次性登入碼（5 分鐘、單次使用）
+```
 
 ```text
 http://127.0.0.1:3847/admin/
 ```
 
-若遺失 setup 時的 key：
+在登入頁貼上 OTP。**每次登入都要新碼**（session 約 12 小時）。
+
+**API** 存取（OpenAI client／腳本）請用 `gk_live_…` key：
 
 ```bash
-gctoac key create    # 明文只顯示一次
+gctoac key create    # 明文只顯示一次（預設 role: admin）
 gctoac key list      # 只顯示 prefix（明文不會存庫）
 ```
 
@@ -191,6 +202,7 @@ PORT=4000
 | `gctoac logs clear` | 清空日誌（與 Admin 清除一致） |
 | `gctoac admin status` | Admin 面板開關狀態 |
 | `gctoac admin on` / `off` | 開關 Admin（DB；**只能用 CLI `on` 重開**） |
+| `gctoac admin otp` | 一次性 Admin **SPA 登入碼**（5 分鐘、單次；別名 `login-code`） |
 | `gctoac migrate` | Prisma migrate deploy |
 | `gctoac seed` | 產生 admin API key（若未有） |
 | `gctoac key` / `key create` | 建立 API key（明文只顯示一次） |
@@ -206,6 +218,7 @@ PORT=4000
 gctoac --home ~/.gctoac-alt setup
 gctoac --port 3847 start
 gctoac status
+gctoac admin otp       # 開啟 Admin SPA 登入
 gctoac logs clear
 ```
 
@@ -221,10 +234,12 @@ gctoac logs clear
 | Safe / Agent | 每 key 政策；可全域強制 safe |
 | 加密 | AES-256-GCM 加密 prompt、response、檔案 |
 | 對話歷史 | 多輪對話、上下文模式（full / summary / recent） |
-| Admin Panel | 儀表板、對話、金鑰、文件、稽核、用量、DDoS、PM2、系統 |
+| Admin Panel | OTP session 登入、儀表板、對話、金鑰、文件、稽核、用量、**佇列**、DDoS、安全設定、PM2、系統 |
+| 對話佇列 | 持久化 SQLite 工作、公平輪詢、暫停／排空、死信、Idempotency-Key、`QUEUE_BACKEND` |
 | DDoS 中心 | 即時連線、黑名單、自動封鎖、可配置策略與預設檔 |
 | 反向代理 | 信任層數 + CF / nginx / X-Forwarded-For 真實 IP |
-| CLI | 生命週期、preferred runner、日誌、自我更新 |
+| 認證 | API key：**scrypt** hash（舊 SHA-256 登入時自動升級）；Admin SPA：OTP → session |
+| CLI | 生命週期、preferred runner、日誌、自我更新、`admin otp` |
 | 運維 | SQLite、PM2、日誌自動裁剪（>5 MB）、GitHub Actions CI |
 
 ---
@@ -239,10 +254,13 @@ Authorization: Bearer gk_live_...
 
 ### Chat（stream）
 
+佇列啟用時（預設），stream 可能先出現 `gog.queue` 排隊事件，再是一般 OpenAI chunk。
+
 ```bash
 curl -sN http://127.0.0.1:3847/v1/chat/completions \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: my-client-req-001" \
   -d '{
     "model": "grok-4.5",
     "stream": true,
@@ -250,6 +268,8 @@ curl -sN http://127.0.0.1:3847/v1/chat/completions \
     "messages": [{"role":"user","content":"數到 3"}]
   }'
 ```
+
+`Idempotency-Key` 可選（依 API key 隔離）。同一 key 在 job 進行中可安全重試。
 
 ### OpenAI SDK
 
@@ -297,6 +317,42 @@ console.log(res.choices[0].message.content);
 | `text` | `content` / `delta.content` | — |
 | `end` | `finish_reason` | `grok.sessionId`、`grok.stopReason` |
 
+### 持久化對話佇列
+
+佇列政策**啟用**時（預設），每個 `POST /v1/chat/completions` 會寫入 `ChatJob` 表，再由進程內 worker 以租約／心跳／開機回收語意消費。
+
+| 主題 | 行為 |
+|------|------|
+| **語意** | At-least-once；claim 時 visibility timeout（lease）；重啟回收 in-flight |
+| **公平** | 預設依 API key **加權輪詢**，或全域 FIFO；每 key + 全域併發上限 |
+| **Stream** | 連線保持；先收到 `object: "gog.queue"` 排隊事件，再是一般 OpenAI chunk |
+| **背壓** | `maxQueueDepth` / `maxQueueDepthPerKey` → **429** `queue_full`；drain／停用 → **503** `queue_draining`；等待逾時 → **504**；取消 → **409** |
+| **冪等** | 可選 `Idempotency-Key`（依 API key 隔離）。進行中重用；成功回 already-done；失敗／死信／取消後可重試 |
+| **後端** | `QUEUE_BACKEND=sqlite`（預設、可上線）。`redis`／`kafka` 預留給多機（尚未實作 — 選用會啟動失敗） |
+| **Payload** | Job 內容以 AES-GCM 加密存於 `ChatJob` |
+| **Admin** | **佇列**頁：KPI、暫停／排空、政策、狀態篩選（含死信／`active`）、取消／重新入隊／優先級／清理已完成（24h+） |
+
+Stream 預覽：
+
+```text
+data: {"object":"gog.queue","status":"queued","job_id":"…","position":2}
+data: {"object":"gog.queue","status":"queued","job_id":"…","position":1}
+data: {"id":"chatcmpl-…","object":"chat.completion.chunk",…}
+```
+
+Admin 操作（OTP **session** token 或 admin API key）：
+
+```http
+GET  /admin/api/queue/stats
+GET  /admin/api/queue/jobs?status=dead
+GET  /admin/api/queue/jobs?status=active
+POST /admin/api/queue/pause | /resume | /drain | /undrain
+PUT  /admin/api/queue/policy
+POST /admin/api/queue/jobs/:id/cancel | /requeue
+POST /admin/api/queue/jobs/:id/priority   # body: {"priority":0-1000}
+POST /admin/api/queue/purge-dead
+```
+
 ### 端點
 
 | Method | Path | 說明 |
@@ -304,11 +360,13 @@ console.log(res.choices[0].message.content);
 | GET | `/health` | 存活 |
 | GET | `/ready` | DB + Grok 檢查 |
 | GET | `/v1/models` | 模型列表 |
-| POST | `/v1/chat/completions` | 對話 |
+| POST | `/v1/chat/completions` | 對話（佇列啟用時先排隊；可選 `Idempotency-Key`） |
 | POST | `/v1/documents` | 上傳（欄位 `file`） |
 | GET/DELETE | `/v1/documents`… | 列表 / 軟刪除 |
 | POST/GET/DELETE | `/v1/api-keys`… | Admin 管理 key |
-| * | `/admin/api/*` | Admin JSON API（需 `role=admin`） |
+| POST | `/admin/api/auth/login` | OTP → session token（公開，有限流） |
+| POST | `/admin/api/auth/logout` | 撤銷 session |
+| * | `/admin/api/*` | Admin JSON API（OTP session **或** `role=admin` API key） |
 
 ---
 
@@ -331,21 +389,37 @@ console.log(res.choices[0].message.content);
 http://127.0.0.1:3847/admin/
 ```
 
+### 登入（OTP）
+
+Admin **SPA 不會接受長期 API key**。請產生一次性登入碼：
+
+```bash
+gctoac admin otp          # 別名：gctoac admin login-code
+```
+
+- 有效 **5 分鐘**、**單次使用**
+- Session token 存於 `sessionStorage`（約 **12 小時**）
+- 登出／逾時／換瀏覽器後需重新取碼
+
+Admin **JSON API**（`/admin/api/*`）可用：
+
+- `Authorization: Bearer gog_sess_…`（OTP session），或  
+- `Authorization: Bearer gk_live_…`（`role=admin`）
+
 | 頁面 | 功能 |
 |------|------|
-| **儀表板** | 24h KPI、成功率、防護摘要、模型用量、運行狀態（port／加密） |
-| **對話** | 多輪 playground、歷史、上下文模式、附件 |
+| **儀表板** | 24h KPI、成功率、**佇列深度**、防護摘要、模型用量、運行狀態（port／加密） |
+| **對話** | 多輪 playground、歷史、上下文模式、附件（佇列啟用時同樣先入隊） |
 | **對話記錄** | 搜尋／篩選／分頁；**完整解密** prompt／reasoning／response |
 | **API 金鑰** | 建立／編輯 mode／role／限流／IP 白名單；撤銷 |
 | **文件** | 搜尋／篩選／分頁；預覽、下載、刪除；DB 與檔案系統儲存 |
 | **稽核日誌** | 搜尋／篩選／分頁；可讀動作標籤 |
 | **用量與防護** | 24h 統計、按模型／按金鑰分 tab、限流摘要 |
+| **佇列** | 持久化工作列表、死信／狀態篩選、暫停／排空、併發與公平政策、取消／重新入隊／優先級／清理 |
 | **DDoS 中心** | 即時連線、黑名單、自動封鎖事件、**可配置防護策略**（寬鬆／均衡／嚴格／自訂）、反向代理 IP |
-| **安全設定** | 全域 safe、tools、timeout |
+| **安全設定** | 全域 safe、safe tools／turns／timeout、預設模型、關閉 Admin 面板（只能用 CLI 重開） |
 | **PM2** | Runner 切換（gctoac ↔ PM2）、**監聽連接埠**（預設 3847）、設定、**清除日誌** + 自動裁剪 |
 | **系統狀態** | 健康、軟體檢查、一鍵更新並重啟 |
-
-Admin API 前綴：`/admin/api/*`（需要 `role=admin`）。
 
 ### DDoS／防濫用（運行時）
 
@@ -394,14 +468,19 @@ proxy_set_header X-Forwarded-Proto $scheme;
 |------|------|
 | `NODE_ENV` | 預設 **`production`**。本機開發才設 `development`（美化日誌） |
 | `PORT` | 預設 **`3847`**（亦可在 Admin → PM2 修改） |
+| `HOST` | 監聽位址（預設 `0.0.0.0`） |
 | `DATABASE_URL` | SQLite，例如 `file:../data/gateway.db`（相對 `prisma/`） |
 | `ENCRYPTION_KEY` | 32-byte key：`openssl rand -base64 32` |
+| `ADMIN_BOOTSTRAP_KEY` | 可選；首次 setup 用此字串作 admin key |
 | `GROK_BIN` | 預設 `grok` |
 | `GROK_DEFAULT_MODEL` | 預設模型 |
 | `GROK_DEFAULT_CWD` / `GROK_CWD_ALLOWLIST` | Agent cwd 政策 |
+| `GROK_TIMEOUT_MS` | Agent 預設 timeout（ms） |
 | `GROK_ALWAYS_APPROVE` | 只對 agent；safe 一律關閉 |
 | `GROK_SAFE_MODE` | 強制全部 key 用 safe |
-| `GROK_MAX_CONCURRENT` | 最多並行 Grok 進程 |
+| `GROK_SAFE_MAX_TURNS` / `GROK_SAFE_TIMEOUT_MS` | Safe 模式預設（亦可在 Admin → 安全設定改） |
+| `GROK_MAX_CONCURRENT` | 最多並行 Grok 進程（亦作佇列全域併發預設種子） |
+| `QUEUE_BACKEND` | 對話佇列後端：**`sqlite`**（預設）。`redis`／`kafka` 預留（尚未實作） |
 | `ADMIN_PANEL_ENABLED` | 硬關 `/admin`（env，需重啟）。運行時：`gctoac admin on\|off` |
 | `PM2_ADMIN_ENABLED` | 允許 Admin 控制 PM2 |
 | `CORS_ORIGINS` | 逗號分隔 origins（改 `PORT` 時請一併更新） |
@@ -411,8 +490,12 @@ proxy_set_header X-Forwarded-Proto $scheme;
 | `GCTOAC_HOME` | CLI 資料目錄（預設 `~/.gctoac`） |
 | `STORAGE_DIR` | 加密大檔 + sandbox |
 | `UPLOAD_MAX_BYTES` / `DOCUMENT_DB_MAX_BYTES` | 上傳上限／DB 與檔案系統分界 |
+| `BODY_LIMIT` | JSON body 大小上限（預設 `1mb`） |
+| `LOG_LEVEL` | `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace` |
 
 **請備份 `ENCRYPTION_KEY`。** 遺失後歷史資料無法解密。
+
+運行時佇列政策（併發、公平、暫停／排空、深度）存於 DB（`queue_policy`），在 **Admin → 佇列** 編輯 — 不只靠 env。
 
 ---
 
@@ -459,12 +542,13 @@ gctoac doctor         # 會標示 mixed runners
 ## 專案結構
 
 ```text
-src/           TypeScript 原始碼（app、routes、services、cli）
-public/admin/  Admin SPA
-prisma/        Schema、migrations、seed
-dist/          編譯後 JS（gitignore；npm run build / prepublishOnly 產生）
-scripts/       prepare、install.sh
-tests/         Vitest
+src/                  TypeScript 原始碼（app、routes、services、cli）
+src/services/queue/   持久化對話佇列（政策、ChatJob、worker、backend 介面）
+public/admin/         Admin SPA（OTP 登入 + 各頁）
+prisma/               Schema、migrations（含 chat_jobs）、seed
+dist/                 編譯後 JS（gitignore；npm run build / prepublishOnly 產生）
+scripts/              prepare、install.sh
+tests/                Vitest（單元 + 整合）
 ```
 
 ---
@@ -493,14 +577,15 @@ npm publish --access public --otp=<2FA六位碼>
 
 ## 安全注意
 
-- API key 只存 **SHA-256 hash**  
-- Chat prompt/response 與文件以 **AES-256-GCM** 靜態加密  
+- API key 存 **scrypt** hash（`scrypt$salt$hash`）；舊 **SHA-256** 列在驗證時會自動升級  
+- Chat prompt/response、文件與 **佇列 job payload** 以 **AES-256-GCM** 靜態加密  
 - 對外 client 請用 **`safe`** mode  
+- **Admin SPA：** 只用 OTP（`gctoac admin otp`）→ 短時 session 存 `sessionStorage`（XSS = 在 session 有效期內完全接管）  
 - **客戶端 IP：** 只有 **可信代理列表** 內的 TCP peer（預設 `127.0.0.1`）先會採信 `CF-Connecting-IP`／`X-Real-IP`／`XFF`。直連客戶**無法偽造 header** 繞過限流或 ban 他人。遠端 nginx 請把其 IP 加進 Admin → DDoS → 可信代理。  
-- Admin 只應開喺本機／VPN；admin key 存 `sessionStorage`（XSS = 完全接管）  
-- 不要 commit `.env`，不要外洩 admin key  
+- Admin 只應開喺本機／VPN  
+- 不要 commit `.env`，不要外洩 admin key／OTP  
 - 可完全關閉 Admin：`gctoac admin off`（只能用 `gctoac admin on` 重開）  
-- 一鍵更新／PM2／改 port 需 admin（視 admin key 為 root）
+- 一鍵更新／PM2／改 port 需 admin（視 admin key／OTP session 為 root）
 
 ---
 

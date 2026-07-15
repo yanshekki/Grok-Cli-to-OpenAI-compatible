@@ -18,7 +18,7 @@ function exitCli(code = 0): never {
   } catch {
     /* ignore */
   }
-  // eslint-disable-next-line no-process-exit
+   
   process.exit(code);
 }
 

@@ -1,6 +1,6 @@
 import { DEFAULT_MODELS } from '../config/constants';
 import { env } from '../config/env';
-import type { OpenAiModel, OpenAiModelList } from '../interfaces/openai.interface';
+import type { OpenAiModel, OpenAiModelList } from '../interfaces';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { mapModelsList } from '../utils/openai-mapper';
 import { grokCliService } from './grok-cli.service';

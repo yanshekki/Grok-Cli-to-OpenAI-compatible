@@ -138,6 +138,34 @@ model Setting {
   @@map("settings")
 }
 
+/// One-time admin panel login codes (CLI-generated).
+model AdminOtp {
+  id        String    @id @default(uuid())
+  /// scrypt hash of the plaintext code
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  createdIp String?
+
+  @@index([expiresAt])
+  @@map("admin_otps")
+}
+
+/// Admin SPA sessions issued after successful OTP login.
+model AdminSession {
+  id         String    @id @default(uuid())
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  ip         String?
+  userAgent  String?
+
+  @@index([expiresAt])
+  @@map("admin_sessions")
+}
+
 /// Admin playground multi-turn threads (not ChatRequest audit logs).
 model ChatConversation {
   id                 String   @id @default(uuid())
@@ -168,4 +196,43 @@ model ChatConversation {
   @@index([updatedAt])
   @@index([apiKeyId, updatedAt])
   @@map("chat_conversations")
+}
+
+/// Durable chat work queue (Kafka-like admission + lease).
+model ChatJob {
+  id                   String    @id @default(uuid())
+  requestId            String
+  apiKeyId             String
+  /// v1 | playground
+  source               String    @default("v1")
+  /// queued | leased | running | succeeded | failed | cancelled | dead
+  status               String    @default("queued")
+  /// lower = higher priority
+  priority             Int       @default(100)
+  attempt              Int       @default(0)
+  maxAttempts          Int       @default(1)
+  leaseOwner           String?
+  leaseUntil           DateTime?
+  notBefore            DateTime?
+  queuedAt             DateTime  @default(now())
+  startedAt            DateTime?
+  finishedAt           DateTime?
+  cancelRequested      Boolean   @default(false)
+  model                String?
+  stream               Boolean   @default(true)
+  /// encrypted JSON payload (dto + context)
+  payloadCiphertext    Bytes
+  payloadIv            Bytes
+  payloadTag           Bytes
+  resultChatRequestId  String?
+  errorCode            String?
+  errorMessage         String?
+  idempotencyKey       String?
+
+  @@index([status, priority, queuedAt])
+  @@index([apiKeyId, status, queuedAt])
+  @@index([leaseUntil])
+  @@index([requestId])
+  @@unique([idempotencyKey])
+  @@map("chat_jobs")
 }

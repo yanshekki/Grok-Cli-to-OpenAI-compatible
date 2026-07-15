@@ -6,17 +6,16 @@ import {
   chatBurstLimiter,
   chatRateLimiter,
 } from '../../middlewares/rate-limit.middleware';
-import { concurrencyGuard } from '../../middlewares/concurrency.middleware';
 import { validate } from '../../middlewares/validate.middleware';
 
 const router = Router();
 
+// Note: concurrencyGuard removed — durable chat queue handles admission
 router.post(
   '/completions',
   requireApiKey,
   chatRateLimiter,
   chatBurstLimiter,
-  concurrencyGuard,
   validate(createChatCompletionSchema, 'body'),
   chatController.createCompletion,
 );

@@ -4,7 +4,7 @@ import { GrokCliService } from '../../src/services/grok-cli.service';
 describe('GrokCliService parsers', () => {
   const service = new GrokCliService();
 
-  it('buildArgs includes required flags', () => {
+  it('buildArgs includes required flags for short -p prompt', () => {
     const args = service.buildArgs({
       prompt: 'hello',
       model: 'grok-4.5',
@@ -28,6 +28,21 @@ describe('GrokCliService parsers', () => {
     expect(args).toContain('3');
     expect(args).toContain('--disallowed-tools');
     expect(args).toContain('web_search');
+  });
+
+  it('buildArgs uses --prompt-file when promptFile set', () => {
+    const args = service.buildArgs({
+      prompt: 'ignored-when-file',
+      promptFile: '/tmp/prompt.txt',
+      model: 'm',
+      cwd: '/tmp',
+      stream: false,
+      alwaysApprove: false,
+    });
+    expect(args).toContain('--prompt-file');
+    expect(args).toContain('/tmp/prompt.txt');
+    expect(args).not.toContain('-p');
+    expect(args).not.toContain('--always-approve');
   });
 
   it('buildArgs omits always-approve when disabled by policy', () => {

@@ -1,4 +1,7 @@
 import { createInterface } from 'node:readline';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 // execa@5 is CJS-compatible (v8+ is ESM-only and breaks CommonJS dist/)
 import execa from 'execa';
 import { env } from '../config/env';
@@ -7,9 +10,12 @@ import type {
   GrokRunOptions,
   GrokRunResult,
   GrokStreamEvent,
-} from '../interfaces/grok.interface';
+} from '../interfaces';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { logger } from '../utils/logger';
+
+/** Prompts longer than this always go via --prompt-file (avoid ARG_MAX). */
+const PROMPT_FILE_THRESHOLD = 2_000;
 
 export class GrokCliService {
   private active = 0;
@@ -34,17 +40,29 @@ export class GrokCliService {
     this.active = Math.max(0, this.active - 1);
   }
 
-  buildArgs(options: GrokRunOptions): string[] {
-    const args = [
-      '-p',
-      options.prompt,
+  /**
+   * Build CLI args. Prefer `--prompt-file` for large prompts to avoid ARG_MAX.
+   * When `promptFile` is set, `-p` is omitted.
+   */
+  buildArgs(
+    options: GrokRunOptions & { promptFile?: string },
+  ): string[] {
+    const args: string[] = [];
+
+    if (options.promptFile) {
+      args.push('--prompt-file', options.promptFile);
+    } else {
+      args.push('-p', options.prompt);
+    }
+
+    args.push(
       '-m',
       options.model,
       '--cwd',
       options.cwd,
       '--output-format',
       options.stream ? 'streaming-json' : 'json',
-    ];
+    );
 
     const alwaysApprove =
       options.alwaysApprove !== undefined
@@ -73,8 +91,29 @@ export class GrokCliService {
     return args;
   }
 
+  /** Write prompt to a temp file when large (or forceFile). Caller must cleanup. */
+  async preparePromptFile(
+    prompt: string,
+    forceFile = false,
+  ): Promise<{ promptFile?: string; cleanup: () => Promise<void> }> {
+    if (!forceFile && prompt.length <= PROMPT_FILE_THRESHOLD) {
+      return { cleanup: async () => undefined };
+    }
+    const dir = path.join(env.storageDir, 'tmp', 'prompts');
+    await fs.mkdir(dir, { recursive: true });
+    const promptFile = path.join(dir, `prompt-${randomUUID()}.txt`);
+    await fs.writeFile(promptFile, prompt, { mode: 0o600, encoding: 'utf8' });
+    return {
+      promptFile,
+      cleanup: async () => {
+        await fs.unlink(promptFile).catch(() => undefined);
+      },
+    };
+  }
+
   async runOnce(options: GrokRunOptions): Promise<GrokRunResult> {
-    const args = this.buildArgs({ ...options, stream: false });
+    const { promptFile, cleanup } = await this.preparePromptFile(options.prompt);
+    const args = this.buildArgs({ ...options, stream: false, promptFile });
     const timeout = options.timeoutMs ?? env.GROK_TIMEOUT_MS;
 
     logger.debug(
@@ -82,6 +121,8 @@ export class GrokCliService {
         bin: env.GROK_BIN,
         model: options.model,
         cwd: options.cwd,
+        promptChars: options.prompt.length,
+        promptFile: promptFile ? true : false,
         alwaysApprove: options.alwaysApprove,
         maxTurns: options.maxTurns,
         toolsAllowlist: options.toolsAllowlist,
@@ -125,11 +166,20 @@ export class GrokCliService {
         );
       }
       throw err;
+    } finally {
+      await cleanup();
     }
   }
 
-  async *stream(options: GrokRunOptions): AsyncGenerator<GrokStreamEvent> {
-    const args = this.buildArgs({ ...options, stream: true });
+  async *stream(
+    options: GrokRunOptions,
+  ): AsyncGenerator<GrokStreamEvent, void, unknown> {
+    // Always use prompt-file for stream to avoid ARG_MAX and shell limits
+    const { promptFile, cleanup } = await this.preparePromptFile(
+      options.prompt,
+      true,
+    );
+    const args = this.buildArgs({ ...options, stream: true, promptFile });
     const timeout = options.timeoutMs ?? env.GROK_TIMEOUT_MS;
 
     const proc = execa(env.GROK_BIN, args, {
@@ -140,6 +190,7 @@ export class GrokCliService {
     });
 
     if (!proc.stdout) {
+      await cleanup();
       throw ExceptionFactory.grokError('Grok CLI produced no stdout');
     }
 
@@ -174,6 +225,7 @@ export class GrokCliService {
       } catch {
         /* ignore */
       }
+      await cleanup();
     }
   }
 
@@ -208,7 +260,7 @@ export class GrokCliService {
   parseModelsOutput(stdout: string): string[] {
     const models: string[] = [];
     for (const line of stdout.split('\n')) {
-      const match = line.match(/^\s*[\*\-]\s+([a-zA-Z0-9._\-]+)/);
+      const match = line.match(/^\s*[*+-]\s+([a-zA-Z0-9._-]+)/);
       if (match?.[1]) {
         models.push(match[1]);
       }

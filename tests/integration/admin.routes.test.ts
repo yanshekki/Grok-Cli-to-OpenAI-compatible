@@ -11,7 +11,7 @@ function hashApiKey(rawKey: string): string {
   return createHash('sha256').update(rawKey, 'utf8').digest('hex');
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function toBytes(buf: Buffer): any {
   return Buffer.from(buf);
 }
