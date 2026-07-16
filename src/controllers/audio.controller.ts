@@ -13,7 +13,8 @@ export class AudioController {
     if (!req.apiKey) throw ExceptionFactory.unauthorized();
     const features = await apiFeaturesService.get();
     if (!features.audioApi) {
-      throw ExceptionFactory.mediaNotSupported(
+      throw ExceptionFactory.featureDisabled(
+        'audioApi',
         'Audio API is disabled (Admin → API features → audioApi)',
       );
     }
@@ -45,7 +46,8 @@ export class AudioController {
     if (!req.apiKey) throw ExceptionFactory.unauthorized();
     const features = await apiFeaturesService.get();
     if (!features.audioApi) {
-      throw ExceptionFactory.mediaNotSupported(
+      throw ExceptionFactory.featureDisabled(
+        'audioApi',
         'Audio API is disabled (Admin → API features → audioApi)',
       );
     }

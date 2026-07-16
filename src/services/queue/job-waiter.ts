@@ -42,7 +42,13 @@ export class JobWaiterRegistry {
   }
 
   getResponse(jobId: string): Response | undefined {
-    return this.entries.get(jobId)?.res;
+    const res = this.entries.get(jobId)?.res;
+    if (!res) return undefined;
+    // Client gone — treat as no live stream target (avoid worker DLQ)
+    if (res.writableEnded || res.destroyed) {
+      return undefined;
+    }
+    return res;
   }
 
   emitQueue(jobId: string, position: number): void {

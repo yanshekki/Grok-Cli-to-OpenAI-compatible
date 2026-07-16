@@ -5,6 +5,7 @@
 export {
   t,
   tf,
+  hasT,
   getLocale,
   setLocale,
   langSwitchHtml,

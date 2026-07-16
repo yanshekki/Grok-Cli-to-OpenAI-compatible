@@ -6,6 +6,7 @@ export type MediaAssetRow = {
   mime: string;
   bytes: number;
   filename?: string | null;
+  originalName?: string | null;
   source?: string | null;
   provider?: string | null;
   prompt?: string | null;

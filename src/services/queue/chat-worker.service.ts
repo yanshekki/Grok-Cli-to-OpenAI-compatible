@@ -112,7 +112,17 @@ export class ChatWorkerService {
         userAgent: payload.userAgent,
       };
 
-      const result = await chatService.executeCompletion(payload.dto, ctx, res, {
+      // Stream jobs without a live HTTP client still run offline (persist result).
+      // Previously this threw "Streaming requires Response" → false dead-letter.
+      const dto = payload.dto;
+      if (dto.stream && !res) {
+        logger.info(
+          { jobId, requestId: payload.requestId },
+          'Queue stream job has no live client Response; running offline collect',
+        );
+      }
+
+      const result = await chatService.executeCompletion(dto, ctx, res, {
         fromQueue: true,
         jobId,
         sseAlreadyInit: Boolean(res && res.headersSent),

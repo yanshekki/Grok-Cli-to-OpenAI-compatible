@@ -19,11 +19,20 @@ export interface ImageGenRequest {
   prompt: string;
   model?: string;
   n?: number;
+  /** OpenAI-compat pixel size or legacy field; prefer aspectRatio */
   size?: string;
+  /** Grok Imagine aspect_ratio (1:1, 16:9, …) */
+  aspectRatio?: string;
   /** Working directory for tool-based providers */
   cwd?: string;
   apiKeyId: string;
+  /** From policyService / system settings (aligned with chat) */
   timeoutMs?: number;
+  maxTurns?: number | null;
+  alwaysApprove?: boolean;
+  toolsAllowlist?: string | null;
+  toolsDenylist?: string | null;
+  permissionMode?: string | null;
 }
 
 export interface ImageEditRequest extends ImageGenRequest {

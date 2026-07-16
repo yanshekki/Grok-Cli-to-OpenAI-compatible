@@ -70,6 +70,9 @@ const dict = {
       savePolicy: 'Save policy',
       refresh: 'Refresh',
       jobs: 'Jobs',
+      tabOverview: 'Overview',
+      tabJobs: 'Jobs',
+      tabPolicy: 'Policy',
       jobsMeta: '{n} matching',
       cancel: 'Cancel',
       requeue: 'Requeue',
@@ -112,6 +115,7 @@ const dict = {
       dlqHint: 'Jobs that exhausted retries — requeue or purge when ready.',
       viewDlq: 'View DLQ',
       statusPanel: 'Runtime status',
+      statusPanelHint: 'Live consumer, admission, and worker identity. Auto-refreshes every few seconds.',
       policyTitle: 'Queue policy',
       policyHint: 'Pick a scheme or fine-tune values. Save to apply. Editing pauses auto-refresh.',
       presetTitle: 'Policy schemes',
@@ -683,6 +687,12 @@ const dict = {
       title: 'Media library',
       intro:
         'Generated images / video jobs from /v1/images and /v1/videos. Image generation needs agent keys + imagesApi. Toggle flags under API features.',
+      tabStudio: 'Studio',
+      tabAssets: 'Assets',
+      tabJobs: 'Jobs',
+      kpiAssetsSub: 'Stored media files',
+      kpiJobsSub: 'Video generation jobs',
+      kpiStudioSub: 'Generate, edit, or image-to-video',
       assets: 'Assets',
       jobs: 'Video jobs',
       empty: 'No media assets yet',
@@ -1050,6 +1060,59 @@ const dict = {
       uaLabel: 'UA',
       httpStatus: 'HTTP',
     },
+    errors: {
+      unauthorized: 'Invalid or missing credentials. Please sign in again.',
+      forbidden: 'You do not have permission for this action.',
+      not_found: 'The requested resource was not found.',
+      validation_error: 'Invalid request. Please check your input.',
+      rate_limit_exceeded: 'Rate limit exceeded. Please try again later.',
+      concurrency_limit_exceeded:
+        'Too many concurrent Grok jobs. Please wait and retry.',
+      internal_error: 'An internal server error occurred.',
+      grok_error: 'Grok CLI returned an error.',
+      grok_timeout: 'Grok CLI timed out.',
+      grok_not_available: 'Grok CLI is not available on this server.',
+      document_too_large: 'The document exceeds the maximum allowed size.',
+      document_type_not_allowed: 'This document type is not allowed.',
+      invalid_cwd: 'The working directory is not allowed.',
+      service_unavailable: 'The service is temporarily unavailable.',
+      queue_full: 'The chat queue is full. Please try again later.',
+      queue_draining: 'The chat queue is paused or draining.',
+      queue_wait_timeout: 'Timed out while waiting in the chat queue.',
+      queue_cancelled: 'The chat job was cancelled.',
+      media_not_supported: 'This media feature is not available or is disabled.',
+      media_provider_unavailable: 'The media provider is not available.',
+      media_generation_failed: 'Media generation failed.',
+      media_forbidden:
+        'Media generation is not allowed for this API key. Use an agent-mode key or an admin session.',
+      feature_disabled: 'This API feature is disabled.',
+      feature: {
+        imagesApi:
+          'Images API is disabled. Enable it under Admin → API features → Images API.',
+        videoApi:
+          'Video API is disabled. Enable it under Admin → API features → Videos API.',
+        audioApi:
+          'Audio API is disabled. Enable it under Admin → API features → Audio API.',
+        tools:
+          'Tools are disabled. Enable Tools under Admin → API features (required for image generation).',
+        filesOpenAiAlias:
+          'OpenAI Files API alias is disabled. Enable it under Admin → API features → Files API alias.',
+      },
+      media: {
+        agent_or_admin_required:
+          'Image generation requires an agent-mode API key or an admin session. Safe-mode keys cannot use image tools.',
+        source_required:
+          'Provide an image file, a media asset, or a document as the source.',
+        source_must_be_image:
+          'The selected source must be an image for edit or video generation.',
+        no_image_in_sandbox:
+          'Grok finished but no image file was found. Ensure imagesApi and tools are enabled, and the key is agent-mode or admin.',
+        no_video_in_sandbox:
+          'Grok finished but no video file was found in the sandbox.',
+        provider_no_edit:
+          'The current media provider does not support image edits.',
+      },
+    },
   },
   'zh-Hant': {
     brand: 'Grok Gateway',
@@ -1118,6 +1181,9 @@ const dict = {
       savePolicy: '儲存政策',
       refresh: '重新整理',
       jobs: '工作列表',
+      tabOverview: '總覽',
+      tabJobs: '工作列表',
+      tabPolicy: '政策',
       jobsMeta: '共 {n} 筆',
       cancel: '取消',
       requeue: '重新入隊',
@@ -1159,6 +1225,7 @@ const dict = {
       dlqHint: '已用盡重試次數 — 可重新入隊或清理。',
       viewDlq: '查看死信',
       statusPanel: '運行狀態',
+      statusPanelHint: '消費者、接單與 worker 實例即時狀態；每隔數秒自動重新整理。',
       policyTitle: '佇列政策',
       policyHint: '可先選方案再微調數值；儲存後生效。編輯時會暫停自動重新整理。',
       presetTitle: '政策方案',
@@ -1725,6 +1792,12 @@ const dict = {
       title: '媒體庫',
       intro:
         '由 /v1/images、/v1/videos 產出嘅檔案。生圖要 agent key + imagesApi。開關喺「API 能力」。',
+      tabStudio: '工作室',
+      tabAssets: '資產',
+      tabJobs: '工作',
+      kpiAssetsSub: '已儲存的媒體檔案',
+      kpiJobsSub: '影片生成工作',
+      kpiStudioSub: '生成、編輯或圖生影片',
       assets: '資產',
       jobs: '影片 jobs',
       empty: '暫時未有媒體資產',
@@ -2083,15 +2156,85 @@ const dict = {
       uaLabel: 'UA',
       httpStatus: 'HTTP',
     },
+    errors: {
+      unauthorized: '憑證無效或缺失，請重新登入。',
+      forbidden: '您沒有執行此操作的權限。',
+      not_found: '找不到請求的資源。',
+      validation_error: '請求無效，請檢查輸入內容。',
+      rate_limit_exceeded: '已超過速率限制，請稍後再試。',
+      concurrency_limit_exceeded: 'Grok 並行工作過多，請稍候再試。',
+      internal_error: '伺服器發生內部錯誤。',
+      grok_error: 'Grok CLI 回傳錯誤。',
+      grok_timeout: 'Grok CLI 執行逾時。',
+      grok_not_available: '此伺服器無法使用 Grok CLI。',
+      document_too_large: '文件大小超過允許上限。',
+      document_type_not_allowed: '不允許此文件類型。',
+      invalid_cwd: '不允許使用此工作目錄。',
+      service_unavailable: '服務暫時無法使用。',
+      queue_full: '對話佇列已滿，請稍後再試。',
+      queue_draining: '對話佇列已暫停或正在排空。',
+      queue_wait_timeout: '在對話佇列中等待逾時。',
+      queue_cancelled: '對話工作已取消。',
+      media_not_supported: '此媒體功能不可用或已停用。',
+      media_provider_unavailable: '媒體提供者不可用。',
+      media_generation_failed: '媒體生成失敗。',
+      media_forbidden:
+        '此 API 金鑰不允許生成媒體。請使用 agent 模式金鑰或管理員工作階段。',
+      feature_disabled: '此 API 功能已停用。',
+      feature: {
+        imagesApi:
+          'Images API 已停用。請至「管理 → API 能力 → Images API」啟用。',
+        videoApi:
+          'Video API 已停用。請至「管理 → API 能力 → Videos API」啟用。',
+        audioApi:
+          'Audio API 已停用。請至「管理 → API 能力 → Audio API」啟用。',
+        tools:
+          'Tools 已停用。請至「管理 → API 能力」啟用 Tools（圖像生成需要）。',
+        filesOpenAiAlias:
+          'OpenAI Files API 別名已停用。請至「管理 → API 能力 → Files API 別名」啟用。',
+      },
+      media: {
+        agent_or_admin_required:
+          '圖像生成需要 agent 模式 API 金鑰或管理員工作階段。安全模式金鑰無法使用圖像工具。',
+        source_required: '請提供圖像檔、媒體資產或文件作為來源。',
+        source_must_be_image: '編輯或生成影片時，來源必須為圖像。',
+        no_image_in_sandbox:
+          'Grok 已結束，但未在沙箱中找到圖像檔。請確認已啟用 imagesApi 與 tools，且金鑰為 agent 模式或管理員。',
+        no_video_in_sandbox: 'Grok 已結束，但未在沙箱中找到影片檔。',
+        provider_no_edit: '目前媒體提供者不支援圖像編輯。',
+      },
+    },
   },
 };
 
 function detectLocale() {
-  const saved = localStorage.getItem(LANG_KEY);
-  if (saved === 'en' || saved === 'zh-Hant') return saved;
-  const nav = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
-  if (nav.startsWith('zh')) return 'zh-Hant';
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(LANG_KEY);
+      if (saved === 'en' || saved === 'zh-Hant') return saved;
+    }
+  } catch {
+    /* node / private mode */
+  }
+  try {
+    const nav = (
+      (typeof navigator !== 'undefined' &&
+        (navigator.language || navigator.userLanguage)) ||
+      'en'
+    ).toLowerCase();
+    if (nav.startsWith('zh')) return 'zh-Hant';
+  } catch {
+    /* ignore */
+  }
   return 'en';
+}
+
+function safeStorageSet(key, value) {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
 }
 
 let locale = detectLocale();
@@ -2103,7 +2246,7 @@ export function getLocale() {
 export function setLocale(next) {
   if (next !== 'en' && next !== 'zh-Hant') return;
   locale = next;
-  localStorage.setItem(LANG_KEY, next);
+  safeStorageSet(LANG_KEY, next);
 }
 
 export function t(path) {
@@ -2121,6 +2264,11 @@ export function t(path) {
     }
   }
   return typeof cur === 'string' ? cur : path;
+}
+
+/** True if path resolves to a real string (not missing key). */
+export function hasT(path) {
+  return t(path) !== path;
 }
 
 /** t() with {name} placeholders: tf('keys.ipCount', { n: 3 }) */

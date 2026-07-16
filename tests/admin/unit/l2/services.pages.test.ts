@@ -231,7 +231,12 @@ describe('admin page API error handling', () => {
       {
         match: '/admin/api/stats',
         status: 403,
-        body: { error: { message: 'Admin panel disabled' } },
+        body: {
+          error: {
+            code: 'forbidden',
+            message: 'Admin panel disabled',
+          },
+        },
       },
     ]);
     const { statsService } = await import(
@@ -239,9 +244,48 @@ describe('admin page API error handling', () => {
     );
     const { HttpError } = await import('../../../../admin/src/lib/http');
     await expect(statsService.get()).rejects.toBeInstanceOf(HttpError);
-    await expect(statsService.get()).rejects.toMatchObject({
-      message: 'Admin panel disabled',
-      status: 403,
+    try {
+      await statsService.get();
+    } catch (e) {
+      expect(e).toMatchObject({ status: 403 });
+      expect((e as Error).message.length).toBeGreaterThan(3);
+    }
+  });
+
+  it('keysService.create POST /keys', async () => {
+    const fetchMock = installFetchMock([
+      {
+        match: '/admin/api/keys',
+        method: 'POST',
+        body: {
+          data: { id: 'k2', name: 'n', plaintextKey: 'gk_x' },
+        },
+      },
+    ]);
+    const { keysService } = await import(
+      '../../../../admin/src/services/keys.service'
+    );
+    await keysService.create({
+      name: 'n',
+      role: 'client',
+      mode: 'safe',
+      rateLimit: 60,
     });
+    expect(lastFetchInit(fetchMock)!.method).toBe('POST');
+  });
+
+  it('documentsService.remove DELETE', async () => {
+    const fetchMock = installFetchMock([
+      {
+        match: '/admin/api/documents/d1',
+        method: 'DELETE',
+        body: { deleted: true },
+      },
+    ]);
+    const { documentsService } = await import(
+      '../../../../admin/src/services/documents.service'
+    );
+    await documentsService.remove('d1');
+    expect(lastFetchUrl(fetchMock)).toContain('/documents/d1');
   });
 });

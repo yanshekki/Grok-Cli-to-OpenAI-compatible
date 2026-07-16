@@ -393,10 +393,30 @@ export class ChatService {
       });
 
       try {
-        if (stream) {
-          if (!res) {
+        // Stream only when we still have a live HTTP Response (client connected).
+        // Queue workers often lose `res` after client disconnect, process restart,
+        // or multi-instance reclaim — never DLQ those; complete offline instead.
+        const canStreamToClient = Boolean(
+          stream && res && !res.writableEnded && !res.destroyed,
+        );
+        if (stream && !canStreamToClient) {
+          if (!options?.fromQueue && !res) {
             throw ExceptionFactory.internal('Streaming requires Response');
           }
+          logger.warn(
+            {
+              requestId: ctx.requestId,
+              jobId: options?.jobId,
+              fromQueue: Boolean(options?.fromQueue),
+              hasRes: Boolean(res),
+              writableEnded: res?.writableEnded,
+              destroyed: res?.destroyed,
+            },
+            'Stream completion without live Response — collecting offline',
+          );
+        }
+
+        if (canStreamToClient && res) {
           await this.runStream({
             dto,
             ctx,

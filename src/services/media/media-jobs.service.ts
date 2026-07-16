@@ -55,11 +55,18 @@ export class MediaJobsService {
     apiKey: AuthenticatedApiKey;
     prompt: string;
     model?: string;
+    /** Grok allows 6 or 10 only */
     seconds?: number;
+    aspectRatio?: string;
+    sourceAssetId?: string;
+    sourceDocumentId?: string;
+    /** Uploaded frame bytes (admin SPA drag/drop) */
+    sourceBytes?: Buffer;
   }): Promise<MediaJobPublic> {
     const features = await apiFeaturesService.get();
     if (!features.videoApi) {
-      throw ExceptionFactory.mediaNotSupported(
+      throw ExceptionFactory.featureDisabled(
+        'videoApi',
         'Video API is disabled (Admin → API features → videoApi)',
       );
     }
@@ -73,6 +80,15 @@ export class MediaJobsService {
 
     const owner = await toPersistentApiKeyId(input.apiKey.id);
     const id = createId();
+    const seconds = input.seconds === 10 ? 10 : 6;
+    const providerEnv = (process.env.MEDIA_PROVIDER || 'grok-tools').toLowerCase();
+    const provider =
+      providerEnv === 'mock' || providerEnv === 'none' || providerEnv === 'stub'
+        ? providerEnv === 'mock'
+          ? 'mock'
+          : 'stub'
+        : 'grok-tools';
+
     const row = await prisma.mediaJob.create({
       data: {
         id,
@@ -81,17 +97,19 @@ export class MediaJobsService {
         status: 'queued',
         prompt: input.prompt,
         model: input.model ?? null,
-        provider:
-          (process.env.MEDIA_PROVIDER || 'mock').toLowerCase() === 'mock'
-            ? 'mock'
-            : 'grok-tools',
+        provider,
       },
     });
 
-    // Fire-and-forget process
-    void this.processVideoJob(row.id, input.apiKey.id, input.prompt).catch(
-      () => undefined,
-    );
+    void this.processVideoJob(row.id, owner, {
+      prompt: input.prompt,
+      model: input.model,
+      seconds,
+      aspectRatio: input.aspectRatio,
+      sourceAssetId: input.sourceAssetId,
+      sourceDocumentId: input.sourceDocumentId,
+      sourceBytes: input.sourceBytes,
+    }).catch(() => undefined);
 
     return toPublic(row);
   }
@@ -99,7 +117,15 @@ export class MediaJobsService {
   private async processVideoJob(
     jobId: string,
     apiKeyId: string,
-    prompt: string,
+    opts: {
+      prompt: string;
+      model?: string;
+      seconds: number;
+      aspectRatio?: string;
+      sourceAssetId?: string;
+      sourceDocumentId?: string;
+      sourceBytes?: Buffer;
+    },
   ): Promise<void> {
     await prisma.mediaJob.update({
       where: { id: jobId },
@@ -107,24 +133,141 @@ export class MediaJobsService {
     });
 
     try {
-      // Real video gen is heavy; mock stores a placeholder image asset
-      // (clients still poll job → content). Label mime as video/mp4 only if real.
-      const arts = await mockMediaProvider.generateImage({
-        prompt: `[video placeholder] ${prompt}`,
+      const providerEnv = (process.env.MEDIA_PROVIDER || 'grok-tools').toLowerCase();
+      if (providerEnv === 'mock' || providerEnv === 'none' || providerEnv === 'stub') {
+        const arts = await mockMediaProvider.generateImage({
+          prompt: `[video placeholder ${opts.seconds}s] ${opts.prompt}`,
+          apiKeyId,
+          n: 1,
+          aspectRatio: opts.aspectRatio,
+        });
+        const art = arts[0]!;
+        const stored = await mediaStoreService.save({
+          apiKeyId,
+          kind: 'video',
+          mime: 'image/png',
+          bytes: art.bytes,
+          originalName: `video-${jobId.slice(0, 8)}.png`,
+          source: 'generation',
+          provider: art.source.provider,
+          prompt: opts.prompt,
+          meta: {
+            kind: 'video_placeholder',
+            seconds: opts.seconds,
+            aspect_ratio: opts.aspectRatio,
+            note: 'Mock video uses PNG placeholder',
+          },
+        });
+        await prisma.mediaJob.update({
+          where: { id: jobId },
+          data: {
+            status: 'completed',
+            resultAssetId: stored.id,
+            completedAt: new Date(),
+          },
+        });
+        return;
+      }
+
+      // Real path: Grok image_to_video via CLI (needs a source frame)
+      const { grokToolsMediaProvider } = await import(
+        './providers/grok-tools.provider'
+      );
+      const { settingsService } = await import('../settings.service');
+      const { env } = await import('../../config/env');
+      const { resolveGrokAspectRatio } = await import('../../config/constants');
+      const pathMod = await import('node:path');
+      const fsMod = await import('node:fs/promises');
+
+      let sourceBytes: Buffer | null = opts.sourceBytes?.length
+        ? opts.sourceBytes
+        : null;
+      if (!sourceBytes && opts.sourceAssetId) {
+        try {
+          const got = await mediaStoreService.readBytes(
+            opts.sourceAssetId,
+            apiKeyId,
+          );
+          sourceBytes = got.bytes;
+        } catch {
+          const row = await prisma.mediaAsset.findFirst({
+            where: { id: opts.sourceAssetId, deletedAt: null },
+          });
+          if (row) {
+            const full = pathMod.join(env.storageDir, 'media', row.storagePath);
+            sourceBytes = await fsMod.readFile(full);
+          }
+        }
+      } else if (opts.sourceDocumentId) {
+        const doc = await prisma.document.findFirst({
+          where: { id: opts.sourceDocumentId, deletedAt: null },
+        });
+        if (doc) {
+          const { documentService } = await import('../document.service');
+          sourceBytes = await documentService.readDecryptedContent(
+            doc.apiKeyId,
+            doc.id,
+          );
+        }
+      }
+
+      const settings = await settingsService.getAll();
+      const model = opts.model || settings.defaultModel;
+      const aspect = resolveGrokAspectRatio(null, opts.aspectRatio);
+      // Limits follow system Safety settings (same as image gen)
+      const timeoutMs = settings.globalSafeMode
+        ? settings.safeTimeoutMs
+        : env.GROK_TIMEOUT_MS;
+      const maxTurns = settings.globalSafeMode ? settings.safeMaxTurns : null;
+
+      // No source → text→image frame first (Grok has no pure text-to-video)
+      if (!sourceBytes) {
+        const frameArts = await grokToolsMediaProvider.generateImage({
+          prompt: opts.prompt,
+          apiKeyId,
+          n: 1,
+          model,
+          aspectRatio: aspect,
+          timeoutMs,
+          maxTurns,
+          alwaysApprove: true,
+          permissionMode: 'bypassPermissions',
+        });
+        sourceBytes = frameArts[0]?.bytes ?? null;
+      }
+
+      if (!sourceBytes) {
+        throw new Error('No source frame for image_to_video');
+      }
+
+      const videoArts = await grokToolsMediaProvider.generateVideoFromImage({
+        prompt: opts.prompt,
+        imageBytes: sourceBytes,
         apiKeyId,
-        n: 1,
+        model,
+        seconds: opts.seconds,
+        aspectRatio: opts.aspectRatio,
+        timeoutMs,
+        maxTurns,
+        alwaysApprove: true,
+        permissionMode: 'bypassPermissions',
       });
-      const art = arts[0]!;
+      const art = videoArts[0]!;
       const stored = await mediaStoreService.save({
         apiKeyId,
         kind: 'video',
-        mime: 'image/png', // placeholder until real mp4 provider
+        mime: art.mime,
         bytes: art.bytes,
-        originalName: `video-${jobId.slice(0, 8)}.png`,
+        originalName: art.originalName || `video-${jobId.slice(0, 8)}.mp4`,
         source: 'generation',
         provider: art.source.provider,
-        prompt,
-        meta: { kind: 'video_placeholder', note: 'Mock video uses PNG placeholder' },
+        prompt: opts.prompt,
+        meta: {
+          kind: 'video',
+          seconds: opts.seconds,
+          aspect_ratio: opts.aspectRatio,
+          source_asset_id: opts.sourceAssetId || null,
+        },
       });
 
       await prisma.mediaJob.update({

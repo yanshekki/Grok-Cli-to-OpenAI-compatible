@@ -4,9 +4,118 @@ import { mediaService } from '../services/media.service';
 import { bindShell, shell } from '../components/shell';
 import { uiConfirm } from '../lib/confirm';
 import { listRows, listTotal, type ListEnvelope } from '../lib/list';
+import {
+  isBrowserPreviewable,
+  mediaPreviewKind,
+  mediaPreviewStageHtml,
+} from '../lib/media-preview';
 import { getState, onErr, patchState } from '../state/store';
 import type { MediaAssetRow, MediaJobRow } from '../types/api/media';
 import type { RenderCtx } from '../router';
+
+let previewObjectUrl: string | null = null;
+
+function revokePreviewUrl(): void {
+  if (previewObjectUrl) {
+    try {
+      URL.revokeObjectURL(previewObjectUrl);
+    } catch {
+      /* ignore */
+    }
+    previewObjectUrl = null;
+  }
+}
+
+function closeMediaPreviewModal(): void {
+  document
+    .querySelectorAll('#media-preview-modal video, #media-preview-modal audio')
+    .forEach((el) => {
+      try {
+        (el as HTMLMediaElement).pause();
+      } catch {
+        /* ignore */
+      }
+    });
+  revokePreviewUrl();
+  document.getElementById('media-preview-modal')?.remove();
+}
+
+function openMediaPreviewModal(meta: {
+  id: string;
+  mime?: string;
+  filename?: string;
+  prompt?: string;
+  kind?: string;
+  bytes?: number;
+  blob: Blob;
+}): void {
+  closeMediaPreviewModal();
+  const url = URL.createObjectURL(meta.blob);
+  previewObjectUrl = url;
+  const mime = meta.mime || meta.blob.type || '';
+  const filename = meta.filename || meta.id;
+  const pKind = mediaPreviewKind(mime, filename) || 'image';
+  const stage = mediaPreviewStageHtml(
+    pKind,
+    url,
+    filename,
+    escapeHtml,
+    t('common.loading') || '…',
+  );
+  const sub = [filename, mime, meta.kind].filter(Boolean).join(' · ');
+  const promptHtml = meta.prompt
+    ? `<div class="media-lb-prompt"><span class="muted">${escapeHtml(t('media.prompt'))}</span><p>${escapeHtml(meta.prompt)}</p></div>`
+    : '';
+
+  const html = `
+    <div class="modal-back" id="media-preview-modal">
+      <div class="modal modal--xl modal--media-preview" role="dialog" aria-modal="true">
+        <div class="modal-h">
+          <div class="modal-title-block">
+            <strong>${escapeHtml(t('media.preview'))}</strong>
+            <div class="muted">${escapeHtml(sub)}</div>
+          </div>
+          <button type="button" class="modal-x" id="media-preview-x" aria-label="close">×</button>
+        </div>
+        <div class="modal-b">
+          <div class="media-lightbox">
+            <div class="media-lb-stage">${stage}</div>
+            ${promptHtml}
+          </div>
+        </div>
+        <div class="modal-f">
+          <button type="button" class="btn secondary sm" id="media-preview-dl">${escapeHtml(t('media.download'))}</button>
+          <button type="button" class="btn sm" id="media-preview-close">${escapeHtml(t('common.cancel'))}</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('app')?.insertAdjacentHTML('beforeend', html);
+
+  const close = () => closeMediaPreviewModal();
+  document.getElementById('media-preview-x')?.addEventListener('click', close);
+  document.getElementById('media-preview-close')?.addEventListener('click', close);
+  document.getElementById('media-preview-modal')?.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).id === 'media-preview-modal') close();
+  });
+  document.getElementById('media-preview-dl')?.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || `media-${meta.id.slice(0, 8)}`;
+    a.click();
+  });
+
+  if (pKind === 'text') {
+    meta.blob
+      .text()
+      .then((text) => {
+        const el = document.querySelector('#media-preview-modal .media-lb-stage');
+        if (el) {
+          el.innerHTML = `<pre class="media-lb-text">${escapeHtml(text.slice(0, 400_000))}</pre>`;
+        }
+      })
+      .catch(() => undefined);
+  }
+}
 
 export async function renderMediaPage(ctx: RenderCtx): Promise<void> {
   const kind = getState().mediaKind || '';
@@ -21,14 +130,16 @@ export async function renderMediaPage(ctx: RenderCtx): Promise<void> {
   const assetRows = assets.length
     ? assets
         .map((a) => {
-          const isImg = String(a.mime || '').startsWith('image/');
-          const preview = isImg
-            ? `<button type="button" class="btn ghost sm" data-media-preview="${escapeHtml(a.id)}">${escapeHtml(t('media.preview'))}</button>`
-            : '—';
+          const mime = a.mime || '';
+          const fname = a.filename || a.originalName || '';
+          const canPreview = isBrowserPreviewable(mime, fname);
+          const preview = canPreview
+            ? `<button type="button" class="btn ghost sm" data-media-preview="${escapeHtml(a.id)}" data-media-mime="${escapeHtml(mime)}" data-media-name="${escapeHtml(fname)}" data-media-prompt="${escapeHtml(a.prompt || '')}" data-media-kind="${escapeHtml(a.kind || '')}">${escapeHtml(t('media.preview'))}</button>`
+            : '';
           return `<tr>
             <td class="mono">${escapeHtml(String(a.id).slice(0, 8))}…</td>
             <td>${escapeHtml(a.kind || '')}</td>
-            <td>${escapeHtml(a.mime || '')}</td>
+            <td>${escapeHtml(mime || '')}</td>
             <td>${escapeHtml(String(a.bytes ?? ''))}</td>
             <td>${escapeHtml(a.provider || '')}</td>
             <td class="muted" title="${escapeHtml(a.prompt || '')}">${escapeHtml((a.prompt || '—').slice(0, 40))}</td>
@@ -100,10 +211,6 @@ export async function renderMediaPage(ctx: RenderCtx): Promise<void> {
         </table>
       </div>
     </div>
-    <div id="media-preview-box" class="panel" style="margin-top:1rem;display:none">
-      <div class="panel-h"><strong>${escapeHtml(t('media.preview'))}</strong></div>
-      <div class="panel-pad" id="media-preview-pad"></div>
-    </div>
   `);
 
   bindShell(ctx.rerender);
@@ -121,15 +228,17 @@ export async function renderMediaPage(ctx: RenderCtx): Promise<void> {
   document.querySelectorAll('[data-media-preview]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       try {
-        const id = (btn as HTMLElement).getAttribute('data-media-preview')!;
+        const el = btn as HTMLElement;
+        const id = el.getAttribute('data-media-preview')!;
         const blob = await mediaService.downloadBlob(id);
-        const url = URL.createObjectURL(blob);
-        const box = document.getElementById('media-preview-box');
-        const pad = document.getElementById('media-preview-pad');
-        if (box && pad) {
-          box.style.display = '';
-          pad.innerHTML = `<img src="${url}" alt="preview" style="max-width:100%;max-height:420px;border-radius:8px" />`;
-        }
+        openMediaPreviewModal({
+          id,
+          blob,
+          mime: el.getAttribute('data-media-mime') || blob.type,
+          filename: el.getAttribute('data-media-name') || '',
+          prompt: el.getAttribute('data-media-prompt') || '',
+          kind: el.getAttribute('data-media-kind') || '',
+        });
       } catch (e) {
         onErr(e);
       }

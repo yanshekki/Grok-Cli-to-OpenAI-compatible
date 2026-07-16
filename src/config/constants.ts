@@ -287,3 +287,76 @@ export const STORAGE_TYPES = {
 
 /** Fallback models if `grok models` cannot be parsed */
 export const DEFAULT_MODELS = ['grok-4.5', 'grok-composer-2.5-fast', 'grok-build'] as const;
+
+/**
+ * Grok Imagine `aspect_ratio` values (image_gen / image_edit multi-ref).
+ * Prefer these over OpenAI pixel sizes when calling Grok tools.
+ */
+export const GROK_ASPECT_RATIOS = [
+  'auto',
+  '1:1',
+  '16:9',
+  '9:16',
+  '4:3',
+  '3:4',
+  '3:2',
+  '2:3',
+  '2:1',
+  '1:2',
+] as const;
+
+/** OpenAI Images API size strings (compat); mapped to Grok aspect ratios. */
+export const OPENAI_IMAGE_SIZES = [
+  '256x256',
+  '512x512',
+  '1024x1024',
+  '1792x1024',
+  '1024x1792',
+] as const;
+
+/** Grok image_to_video / reference_to_video duration (seconds). */
+export const GROK_VIDEO_DURATIONS = [6, 10] as const;
+
+/**
+ * Map OpenAI-style `size` or Grok `aspect_ratio` → canonical aspect ratio string.
+ */
+export function resolveGrokAspectRatio(
+  sizeOrAspect?: string | null,
+  aspectRatio?: string | null,
+): string {
+  const ar = (aspectRatio || '').trim();
+  if (ar && (GROK_ASPECT_RATIOS as readonly string[]).includes(ar)) return ar;
+
+  const s = (sizeOrAspect || '').trim();
+  if (!s) return '1:1';
+  if ((GROK_ASPECT_RATIOS as readonly string[]).includes(s)) return s;
+
+  switch (s) {
+    case '256x256':
+    case '512x512':
+    case '1024x1024':
+      return '1:1';
+    case '1792x1024':
+      return '16:9';
+    case '1024x1792':
+      return '9:16';
+    default:
+      // WxH → nearest common ratio when possible
+      const m = s.match(/^(\d+)\s*[x×]\s*(\d+)$/i);
+      if (m) {
+        const w = Number(m[1]);
+        const h = Number(m[2]);
+        if (w > 0 && h > 0) {
+          const r = w / h;
+          if (Math.abs(r - 1) < 0.08) return '1:1';
+          if (Math.abs(r - 16 / 9) < 0.08) return '16:9';
+          if (Math.abs(r - 9 / 16) < 0.08) return '9:16';
+          if (Math.abs(r - 4 / 3) < 0.08) return '4:3';
+          if (Math.abs(r - 3 / 4) < 0.08) return '3:4';
+          if (Math.abs(r - 3 / 2) < 0.08) return '3:2';
+          if (Math.abs(r - 2 / 3) < 0.08) return '2:3';
+        }
+      }
+      return 'auto';
+  }
+}

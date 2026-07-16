@@ -23,11 +23,12 @@
 - Thinking / `reasoning_content`（DeepSeek 風格 + Grok `thought`）
 - 每把 key 的 **safe** / **agent** 政策 + 全域安全覆寫
 - AES-256-GCM 加密 + 完整 chat 稽核
-- **Admin Panel** — OTP 登入（`gctoac admin otp`）、儀表板、對話、金鑰、文件、稽核、用量、**對話佇列**、**DDoS 中心**、安全設定、PM2、系統更新
-- **持久化對話佇列** — 每個對話先入隊（租約認領）再由進程內 worker 消費；Admin 可暫停／排空／取消／死信；可選 `Idempotency-Key`
+- **Admin Panel** — OTP 登入（`gctoac admin otp`）、儀表板、對話、金鑰、文件、稽核、用量、**媒體庫**、**對話佇列**、**DDoS 中心**、安全設定、**API 能力**、PM2、系統更新；各頁統一 **KPI + 分 tab** 版面
+- **媒體庫** — 工作室（生成／編輯／圖生影片）、資產與工作列表、瀏覽器預覽 lightbox（圖／片／聲／PDF／文字）
+- **持久化對話佇列** — 每個對話先入隊（租約認領）再由進程內 worker 消費；Admin 可暫停／排空／取消／死信；可選 `Idempotency-Key`；無 live Response 時離線收集串流結果
 - **DDoS／防濫用** — 可配置限流、多規則自動封鎖、反向代理真實客戶端 IP（nginx / Cloudflare）
-- 控制 CLI：生命週期 + **settings / queue / ddos / keys / docs / chats / stats / models / admin sessions**（與 Admin 對齊，見下方 CLI 表）
-- **API features**（Admin + `gctoac api features`）：協議與 Grok 能力閘（tools / vision / schema / effort…）
+- 控制 CLI：生命週期 + **settings / api features / queue / ddos / keys / docs / chats / stats / models / admin sessions**（與 Admin 對齊，見下方 CLI 表）
+- **API features**（Admin 分 tab + `gctoac api features`）：協議與 Grok 能力閘（tools / vision / schema / effort…）
 
 ### Grok CLI 能力對齊（產品「100%」定義）
 
@@ -306,9 +307,10 @@ gctoac logs clear
 | Safe / Agent | 每 key 政策；可全域強制 safe |
 | 加密 | AES-256-GCM 加密 prompt、response、檔案 |
 | 對話歷史 | 多輪對話、上下文模式（full / summary / recent） |
-| Admin Panel | OTP session 登入、儀表板、對話、金鑰、文件、稽核、用量、**佇列**、DDoS、安全設定、PM2、系統 |
-| 對話佇列 | 持久化 SQLite 工作、公平輪詢、暫停／排空、死信、Idempotency-Key、`QUEUE_BACKEND` |
-| DDoS 中心 | 即時連線、黑名單、自動封鎖、可配置策略與預設檔 |
+| Admin Panel | OTP session 登入；**分 tab** 頁面（佇列／媒體／系統／PM2／DDoS／API 能力）；精簡 EN／繁中文案 |
+| 媒體庫 | 工作室（生成／編輯／影片）、資產與工作、多格式預覽 lightbox（`blob:` CSP 安全） |
+| 對話佇列 | 持久化 SQLite 工作、公平輪詢、暫停／排空、死信、Idempotency-Key、`QUEUE_BACKEND`、離線串流 fallback |
+| DDoS 中心 | 即時連線、黑名單、自動封鎖、可配置策略與預設檔（分 tab） |
 | 反向代理 | 信任層數 + CF / nginx / X-Forwarded-For 真實 IP |
 | 認證 | API key：**scrypt** hash（舊 SHA-256 登入時自動升級）；Admin SPA：OTP → session |
 | CLI | 生命週期、preferred runner、日誌、自我更新、`admin otp` |
@@ -489,11 +491,15 @@ Admin **JSON API**（`/admin/api/*`）可用：
 | **文件** | 搜尋／篩選／分頁；預覽、下載、刪除；DB 與檔案系統儲存 |
 | **稽核日誌** | 搜尋／篩選／分頁；可讀動作標籤 |
 | **用量與防護** | 24h 統計、按模型／按金鑰分 tab、限流摘要 |
-| **佇列** | 持久化工作列表、死信／狀態篩選、暫停／排空、併發與公平政策、取消／重新入隊／優先級／清理 |
-| **DDoS 中心** | 即時連線、黑名單、自動封鎖事件、**可配置防護策略**（寬鬆／均衡／嚴格／自訂）、反向代理 IP |
-| **安全設定** | 全域 safe、safe tools／turns／timeout、預設模型、關閉 Admin 面板（只能用 CLI 重開） |
-| **PM2** | Runner 切換（gctoac ↔ PM2）、**監聽連接埠**（預設 3847）、設定、**清除日誌** + 自動裁剪 |
-| **系統狀態** | 健康、軟體檢查、一鍵更新並重啟 |
+| **媒體庫** | **分 tab：** 工作室 · 資產 · 工作。KPI 條。工作室模式：生成／編輯／圖生影片（Grok 長寬比）。素材庫選取 + 拖放來源。預覽 lightbox（圖／片／聲／PDF／文字） |
+| **佇列** | **分 tab：** 總覽 · 工作列表 · 政策。KPI 條（自動 soft-refresh）。暫停／排空、死信篩選、取消／重新入隊／優先級／清理、併發與公平預設 |
+| **DDoS 中心** | **分 tab：** 政策 · 流量 · 黑名單 · 事件。KPI 條。即時連線、最近請求、自動封鎖事件、熱門 IP、**運行時防護策略**（寬鬆／均衡／嚴格／自訂）、反向代理 IP |
+| **安全設定** | 全域 safe、工具／turns／timeout、預設模型、精簡預設方案、關閉 Admin 面板（只能用 CLI 重開） |
+| **API 能力** | **分 tab：** 協議 · 媒體 · 能力 · 模擬。KPI 啟用計數。預設：開放／鎖定／開發 |
+| **PM2** | **分 tab：** 運行方式 · 連接埠 · 設定 · 日誌。KPI 進程條。Runner 切換（gctoac ↔ PM2）、監聽 port（預設 3847）、設定、清除日誌 + 自動裁剪 |
+| **系統狀態** | **分 tab：** 軟件 · 套件 · 環境。KPI 運行條（DB／Grok CLI／併發／加密）。一鍵更新並重啟 |
+
+Admin 共用 UX：分段 tab + 頂部 KPI 卡片、精簡正式 EN／繁中文案、table 操作按鈕置中；僅需運維刷新的頁面保留右上角 **重新整理**（儀表板／用量／DDoS／PM2）。
 
 ### DDoS／防濫用（運行時）
 

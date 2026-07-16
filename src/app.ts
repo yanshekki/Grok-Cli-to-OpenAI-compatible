@@ -116,6 +116,10 @@ export function createApp() {
           ],
           'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com'],
           'img-src': ["'self'", 'data:', 'blob:'],
+          // Media library lightbox uses blob: object URLs for <video>/<audio>
+          'media-src': ["'self'", 'blob:'],
+          // PDF preview iframe also uses blob:
+          'frame-src': ["'self'", 'blob:'],
           'connect-src': ["'self'"],
           'object-src': ["'none'"],
           'base-uri': ["'self'"],

@@ -1,6 +1,6 @@
 {
   "name": "grok-cli-to-openai-compatible",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "OpenAI-compatible API gateway for Grok CLI — with Admin panel, safe mode, and gctoac CLI",
   "keywords": [
     "grok",
@@ -49,6 +49,9 @@
     "test:admin:l2": "vitest run --project admin-node tests/admin/unit/l2",
     "test:admin:l3": "vitest run --project admin-dom",
     "test:admin:watch": "vitest --project admin-node --project admin-dom",
+    "test:api": "vitest run --project server tests/integration/admin tests/integration/v1 tests/integration/admin.routes.test.ts tests/integration/admin.routes.full.test.ts tests/integration/v1.*.test.ts tests/integration/health.routes.test.ts",
+    "test:cli": "vitest run --project server tests/unit/cli tests/unit/cli-*.test.ts tests/integration/cli.smoke.test.ts",
+    "test:registry": "vitest run --project server tests/integration/admin/routes.registry.test.ts tests/integration/v1/routes.registry.test.ts tests/unit/cli/registry.test.ts && vitest run --project admin-node tests/admin/contract",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -78,14 +78,28 @@ export const ExceptionFactory = {
     return new HttpException(409, message, ErrorCodes.QUEUE_CANCELLED);
   },
 
-  mediaNotSupported(message = 'Media API is disabled'): HttpException {
-    return new HttpException(501, message, ErrorCodes.MEDIA_NOT_SUPPORTED);
+  mediaNotSupported(
+    message = 'Media API is disabled',
+    details?: unknown,
+  ): HttpException {
+    return new HttpException(
+      501,
+      message,
+      ErrorCodes.MEDIA_NOT_SUPPORTED,
+      details,
+    );
   },
 
   mediaProviderUnavailable(
     message = 'Media provider is not available',
+    details?: unknown,
   ): HttpException {
-    return new HttpException(503, message, ErrorCodes.MEDIA_PROVIDER_UNAVAILABLE);
+    return new HttpException(
+      503,
+      message,
+      ErrorCodes.MEDIA_PROVIDER_UNAVAILABLE,
+      details,
+    );
   },
 
   mediaGenerationFailed(
@@ -102,7 +116,24 @@ export const ExceptionFactory = {
 
   mediaForbidden(
     message = 'Media generation is not allowed for this API key',
+    details?: unknown,
   ): HttpException {
-    return new HttpException(403, message, ErrorCodes.MEDIA_FORBIDDEN);
+    return new HttpException(403, message, ErrorCodes.MEDIA_FORBIDDEN, details);
+  },
+
+  /**
+   * Admin API feature flag is off.
+   * `feature` is a stable id for Admin i18n (imagesApi, videoApi, audioApi, tools, …).
+   */
+  featureDisabled(
+    feature: string,
+    message?: string,
+  ): HttpException {
+    return new HttpException(
+      501,
+      message || `Feature is disabled: ${feature}`,
+      ErrorCodes.FEATURE_DISABLED,
+      { feature },
+    );
   },
 };

@@ -1,8 +1,15 @@
-import { AUDIT_ACTIONS, KEY_MODES, ROLES } from '../../config/constants';
+import {
+  AUDIT_ACTIONS,
+  KEY_MODES,
+  ROLES,
+  resolveGrokAspectRatio,
+} from '../../config/constants';
 import type { AuthenticatedApiKey } from '../../interfaces';
 import { ExceptionFactory } from '../../exceptions/exception.factory';
 import { apiFeaturesService } from '../api-features.service';
 import { auditService } from '../audit.service';
+import { policyService } from '../policy.service';
+import { settingsService } from '../settings.service';
 import { mediaStoreService } from './media-store.service';
 import type {
   ImageEditRequest,
@@ -52,6 +59,7 @@ function assertImageAccess(apiKey: AuthenticatedApiKey): void {
   if (!isAdmin && !isAgent) {
     throw ExceptionFactory.mediaForbidden(
       'Image generation requires an agent-mode API key (or admin). Safe keys cannot use image tools.',
+      { reason: 'agent_or_admin_required' },
     );
   }
 }
@@ -59,12 +67,14 @@ function assertImageAccess(apiKey: AuthenticatedApiKey): void {
 async function assertImagesEnabled(): Promise<void> {
   const features = await apiFeaturesService.get();
   if (!features.imagesApi) {
-    throw ExceptionFactory.mediaNotSupported(
+    throw ExceptionFactory.featureDisabled(
+      'imagesApi',
       'Images API is disabled (Admin → API features → imagesApi)',
     );
   }
   if (!features.tools) {
-    throw ExceptionFactory.forbidden(
+    throw ExceptionFactory.featureDisabled(
+      'tools',
       'Tools are disabled; image generation requires tools (image_gen / image_edit)',
     );
   }
@@ -133,6 +143,54 @@ async function persistArtifacts(input: {
   };
 }
 
+/**
+ * Map system policy + settings → image provider run options.
+ *
+ * **Limits (must match chat):**
+ * - `maxTurns` / `timeoutMs` from `policyService.resolve` (key override →
+ *   Safety settings when global/key safe, else env `GROK_TIMEOUT_MS` / unlimited turns)
+ * - `model` from request or `settings.defaultModel`
+ *
+ * **Tools (media-specific):** callers already passed `assertImageAccess`
+ * (admin or agent key). Image gen needs write/Imagine tools, so we do **not**
+ * apply safe-mode denylist/allowlist here — that would strip Write/bash and
+ * break headless Imagine. Limits still follow Safety / key settings.
+ */
+async function policyToImageRun(
+  apiKey: AuthenticatedApiKey,
+  partial: Omit<
+    ImageGenRequest,
+    | 'apiKeyId'
+    | 'timeoutMs'
+    | 'maxTurns'
+    | 'alwaysApprove'
+    | 'toolsAllowlist'
+    | 'toolsDenylist'
+    | 'permissionMode'
+    | 'model'
+  > & {
+    model?: string;
+  },
+): Promise<ImageGenRequest> {
+  const [policy, settings] = await Promise.all([
+    policyService.resolve(apiKey),
+    settingsService.getAll(),
+  ]);
+  // Headless media: auto-approve so permission prompts do not stall the run.
+  // Limits (maxTurns / timeout) still come from policy → system Safety settings.
+  return {
+    ...partial,
+    apiKeyId: apiKey.id,
+    model: partial.model || settings.defaultModel || undefined,
+    timeoutMs: policy.timeoutMs,
+    maxTurns: policy.maxTurns,
+    alwaysApprove: true,
+    toolsAllowlist: null,
+    toolsDenylist: null,
+    permissionMode: 'bypassPermissions',
+  };
+}
+
 export class MediaOrchestratorService {
   async generateImages(input: {
     apiKey: AuthenticatedApiKey;
@@ -140,6 +198,7 @@ export class MediaOrchestratorService {
     model?: string;
     n?: number;
     size?: string;
+    aspectRatio?: string;
     responseFormat?: 'b64_json' | 'url';
     baseUrl?: string;
     ip?: string;
@@ -147,14 +206,15 @@ export class MediaOrchestratorService {
     await assertImagesEnabled();
     assertImageAccess(input.apiKey);
 
+    const aspectRatio = resolveGrokAspectRatio(input.size, input.aspectRatio);
     const provider = resolveMediaProvider();
-    const req: ImageGenRequest = {
+    const req = await policyToImageRun(input.apiKey, {
       prompt: input.prompt,
       model: input.model,
       n: input.n ?? 1,
       size: input.size,
-      apiKeyId: input.apiKey.id,
-    };
+      aspectRatio,
+    });
 
     const artifacts = await provider.generateImage(req);
     if (!artifacts.length) {
@@ -165,12 +225,13 @@ export class MediaOrchestratorService {
       apiKey: input.apiKey,
       artifacts,
       prompt: input.prompt,
-      size: input.size,
+      size: aspectRatio,
       responseFormat: input.responseFormat,
       baseUrl: input.baseUrl,
       source: 'generation',
       providerId: provider.id,
       ip: input.ip,
+      metaExtra: { aspect_ratio: aspectRatio, size_in: input.size || null },
     });
   }
 
@@ -183,6 +244,7 @@ export class MediaOrchestratorService {
     model?: string;
     n?: number;
     size?: string;
+    aspectRatio?: string;
     responseFormat?: 'b64_json' | 'url';
     baseUrl?: string;
     ip?: string;
@@ -194,15 +256,21 @@ export class MediaOrchestratorService {
     if (!provider.editImage) {
       throw ExceptionFactory.mediaNotSupported(
         `Provider "${provider.id}" does not support image edits`,
+        { reason: 'provider_no_edit', provider: provider.id },
       );
     }
 
-    const req: ImageEditRequest = {
+    const aspectRatio = resolveGrokAspectRatio(input.size, input.aspectRatio);
+    // Same policy source of truth as chat + generateImages (maxTurns/timeout/model)
+    const base = await policyToImageRun(input.apiKey, {
       prompt: input.prompt,
       model: input.model,
       n: input.n ?? 1,
       size: input.size,
-      apiKeyId: input.apiKey.id,
+      aspectRatio,
+    });
+    const req: ImageEditRequest = {
+      ...base,
       imageBytes: input.imageBytes,
       imageMime: input.imageMime,
       maskBytes: input.maskBytes,
@@ -217,12 +285,13 @@ export class MediaOrchestratorService {
       apiKey: input.apiKey,
       artifacts,
       prompt: input.prompt,
-      size: input.size,
+      size: aspectRatio,
       responseFormat: input.responseFormat,
       baseUrl: input.baseUrl,
       source: 'edit',
       providerId: provider.id,
       ip: input.ip,
+      metaExtra: { aspect_ratio: aspectRatio, size_in: input.size || null },
     });
   }
 

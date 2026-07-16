@@ -726,12 +726,16 @@ export class Pm2Service {
     return {
       scheduled: true as const,
       mode,
+      port: env.PORT,
+      /** Admin SPA localizes via this key — do not display English `message` raw */
       messageKey:
         mode === 'pm2' ? 'pm2.msgSwitchPm2' : 'pm2.msgSwitchGctoac',
+      messageParams: { port: env.PORT },
+      // English fallback for CLI / non-i18n clients only
       message:
         mode === 'pm2'
-          ? 'Switching to PM2… server will restart under PM2 in a few seconds. Refresh Admin after ~10s.'
-          : 'Switching to gctoac… server will restart as detached process in a few seconds. Refresh Admin after ~10s.',
+          ? `Switching to PM2… gateway restarts under PM2 shortly (port ${env.PORT}).`
+          : `Switching to gctoac… gateway restarts as a detached process shortly (port ${env.PORT}).`,
     };
   }
 

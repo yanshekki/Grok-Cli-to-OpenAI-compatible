@@ -1,4 +1,4 @@
-import { t, tf, getLocale, setLocale, langSwitchHtml } from './i18n.js';
+import { t, tf, hasT, getLocale, setLocale, langSwitchHtml } from './i18n.js';
 import { CHAT_ALLOWED_EXTENSIONS, CHAT_FILE_ACCEPT } from './allowed-extensions.js';
 
 const API = '/admin/api';
@@ -8,6 +8,107 @@ const KEY_STORAGE = 'gog_admin_session';
 /** @type {ReturnType<typeof setInterval> | null} */
 let ddosTimer = null;
 let ddosPaused = false;
+
+/**
+ * Map OpenAI-style API error envelope → localized Admin message.
+ * Prefers error.code + details.feature / details.reason; falls back to message fingerprints.
+ * @param {any} data  parsed JSON body
+ * @param {string} [statusText]
+ */
+function formatApiError(data, statusText) {
+  const err = data?.error && typeof data.error === 'object' ? data.error : data || {};
+  const code = typeof err.code === 'string' ? err.code : '';
+  const details =
+    err.details && typeof err.details === 'object' ? err.details : {};
+  const feature =
+    typeof details.feature === 'string'
+      ? details.feature
+      : typeof details.flag === 'string'
+        ? details.flag
+        : '';
+  const reason = typeof details.reason === 'string' ? details.reason : '';
+  const rawMsg = String(err.message || data?.message || statusText || '');
+
+  // Feature flags (videoApi / imagesApi / tools / …)
+  if (
+    feature &&
+    (code === 'feature_disabled' ||
+      code === 'media_not_supported' ||
+      code === 'forbidden')
+  ) {
+    const key = `errors.feature.${feature}`;
+    if (hasT(key)) return t(key);
+  }
+  if (code === 'feature_disabled' && hasT('errors.feature_disabled')) {
+    // try fingerprint from message if feature missing
+    const fp = fingerprintFeature(rawMsg);
+    if (fp && hasT(`errors.feature.${fp}`)) return t(`errors.feature.${fp}`);
+    return t('errors.feature_disabled');
+  }
+
+  // Media / validation reason codes
+  if (reason && hasT(`errors.media.${reason}`)) {
+    return t(`errors.media.${reason}`);
+  }
+  if (code === 'media_generation_failed' && reason && hasT(`errors.media.${reason}`)) {
+    return t(`errors.media.${reason}`);
+  }
+  if (code === 'media_forbidden' && hasT('errors.media_forbidden')) {
+    return t('errors.media_forbidden');
+  }
+
+  // Legacy English bodies often use media_not_supported without details.feature
+  const fpEarly = fingerprintFeature(rawMsg);
+  if (fpEarly && hasT(`errors.feature.${fpEarly}`)) {
+    return t(`errors.feature.${fpEarly}`);
+  }
+
+  // Generic error.code map
+  if (code) {
+    const key = `errors.${code}`;
+    if (hasT(key)) return t(key);
+  }
+
+  // Legacy English server messages (before code/details were standardized)
+  const fp = fingerprintFeature(rawMsg);
+  if (fp && hasT(`errors.feature.${fp}`)) return t(`errors.feature.${fp}`);
+  if (/agent-mode|agent mode|Safe keys cannot/i.test(rawMsg)) {
+    return t('errors.media.agent_or_admin_required');
+  }
+  if (/no image file was found/i.test(rawMsg)) {
+    return t('errors.media.no_image_in_sandbox');
+  }
+  if (/no video file was found/i.test(rawMsg)) {
+    return t('errors.media.no_video_in_sandbox');
+  }
+  if (/does not support image edits/i.test(rawMsg)) {
+    return t('errors.media.provider_no_edit');
+  }
+  if (/Provide an image file|sourceAssetId|sourceDocumentId/i.test(rawMsg)) {
+    return t('errors.media.source_required');
+  }
+  if (/must be an image/i.test(rawMsg)) {
+    return t('errors.media.source_must_be_image');
+  }
+
+  return rawMsg || t('common.requestFailed');
+}
+
+function fingerprintFeature(msg) {
+  const m = String(msg || '');
+  if (/videoApi/i.test(m) || /Video API is disabled/i.test(m)) return 'videoApi';
+  if (/imagesApi/i.test(m) || /Images API is disabled/i.test(m)) return 'imagesApi';
+  if (/audioApi/i.test(m) || /Audio API is disabled/i.test(m)) return 'audioApi';
+  if (/filesOpenAiAlias/i.test(m) || /Files API alias/i.test(m))
+    return 'filesOpenAiAlias';
+  if (
+    /Tools are disabled/i.test(m) ||
+    (/\btools\b/i.test(m) && /disabled/i.test(m) && /image/i.test(m))
+  ) {
+    return 'tools';
+  }
+  return '';
+}
 
 const state = {
   key: sessionStorage.getItem(KEY_STORAGE) || '',
@@ -63,6 +164,8 @@ const state = {
     pageSize: 10,
   },
   ddosFilter: {
+    /** 'policy' | 'live' | 'blacklist' | 'events' */
+    tab: 'policy',
     liveQ: '',
     banQ: '',
     banSource: '',
@@ -71,6 +174,8 @@ const state = {
     pageSize: 15,
   },
   mediaFilter: {
+    /** 'studio' | 'assets' | 'jobs' — same tab pattern as chat queue */
+    tab: 'studio',
     q: '',
     kind: '',
     provider: '',
@@ -79,6 +184,12 @@ const state = {
     limit: 20,
     offset: 0,
   },
+  /** System page tab: 'software' | 'package' | 'env' */
+  systemTab: 'software',
+  /** PM2 page tab: 'runner' | 'port' | 'config' | 'logs' */
+  pm2Tab: 'runner',
+  /** API features tab: 'protocols' | 'media' | 'caps' | 'emu' */
+  apiFeaturesTab: 'protocols',
   models: [],
   keys: [],
 };
@@ -147,11 +258,45 @@ async function api(path, options = {}) {
     data = { error: { message: text } };
   }
   if (!res.ok) {
-    const msg = data?.error?.message || res.statusText || t('common.requestFailed');
-    if (res.status === 401 || res.status === 403) {
+    const msg = formatApiError(data, res.statusText);
+    const code = data?.error?.code || '';
+    if (res.status === 401) {
       if (state.page !== 'login') logout(false);
+    } else if (res.status === 403) {
+      // Keep session for permission / feature errors (not bad credentials)
+      const keepSession = [
+        'media_forbidden',
+        'feature_disabled',
+        'forbidden',
+        'media_not_supported',
+      ].includes(code);
+      if (!keepSession && state.page !== 'login') logout(false);
     }
-    throw new Error(msg);
+    const e = new Error(msg);
+    e.status = res.status;
+    e.code = code;
+    e.details = data?.error?.details;
+    throw e;
+  }
+  return data;
+}
+
+/** Parse fetch Response as JSON and throw localized Error if !ok */
+async function parseApiResponse(res) {
+  const text = await res.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { error: { message: text } };
+  }
+  if (!res.ok) {
+    const msg = formatApiError(data, res.statusText);
+    const e = new Error(msg);
+    e.status = res.status;
+    e.code = data?.error?.code;
+    e.details = data?.error?.details;
+    throw e;
   }
   return data;
 }
@@ -615,6 +760,203 @@ function isImageMime(m) {
   return String(m || '').toLowerCase().startsWith('image/');
 }
 
+/**
+ * Browser-native preview kinds for Media library.
+ * @returns {'image'|'video'|'audio'|'pdf'|'text'|null}
+ */
+function mediaPreviewKind(mime, filename = '') {
+  const m = String(mime || '').toLowerCase().trim();
+  const name = String(filename || '').toLowerCase();
+  const ext = (name.match(/\.([a-z0-9]+)$/) || [])[1] || '';
+
+  if (m.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif', 'ico'].includes(ext)) {
+    return 'image';
+  }
+  if (
+    m.startsWith('video/') ||
+    ['mp4', 'webm', 'ogg', 'ogv', 'mov', 'm4v'].includes(ext)
+  ) {
+    // browsers typically play mp4/webm/ogg; still offer <video> for others
+    return 'video';
+  }
+  if (
+    m.startsWith('audio/') ||
+    ['mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus'].includes(ext)
+  ) {
+    return 'audio';
+  }
+  if (m === 'application/pdf' || ext === 'pdf') return 'pdf';
+  if (
+    m.startsWith('text/') ||
+    m === 'application/json' ||
+    m === 'application/xml' ||
+    m === 'application/javascript' ||
+    ['txt', 'md', 'csv', 'json', 'xml', 'html', 'htm', 'css', 'js', 'log', 'svg'].includes(ext)
+  ) {
+    // svg already image; skip if image handled
+    if (ext === 'svg') return 'image';
+    return 'text';
+  }
+  return null;
+}
+
+function isBrowserPreviewable(mime, filename = '') {
+  return mediaPreviewKind(mime, filename) != null;
+}
+
+/** @type {string | null} */
+let mediaPreviewObjectUrl = null;
+
+function revokeMediaPreviewUrl() {
+  if (mediaPreviewObjectUrl) {
+    try {
+      URL.revokeObjectURL(mediaPreviewObjectUrl);
+    } catch {
+      /* ignore */
+    }
+    mediaPreviewObjectUrl = null;
+  }
+}
+
+/**
+ * Build lightbox stage HTML for a blob: object URL.
+ * @param {'image'|'video'|'audio'|'pdf'|'text'|string} kind
+ * @param {string} url
+ * @param {string} filename
+ */
+function mediaLightboxStageHtml(kind, url, filename) {
+  if (kind === 'image') {
+    return `<img class="media-lb-media media-lb-img" src="${url}" alt="${escapeHtml(filename)}" />`;
+  }
+  if (kind === 'video') {
+    return `<video class="media-lb-media media-lb-video" src="${url}" controls playsinline preload="metadata"></video>`;
+  }
+  if (kind === 'audio') {
+    return `
+      <div class="media-lb-audio-wrap">
+        <div class="media-lb-audio-icon" aria-hidden="true">♪</div>
+        <audio class="media-lb-media media-lb-audio" src="${url}" controls preload="metadata"></audio>
+      </div>`;
+  }
+  if (kind === 'pdf') {
+    return `<iframe class="media-lb-media media-lb-pdf" src="${url}#toolbar=1" title="${escapeHtml(filename)}"></iframe>`;
+  }
+  if (kind === 'text') {
+    return `<div class="media-lb-text-loading muted">${escapeHtml(t('common.loading') || '…')}</div>`;
+  }
+  return `<div class="data-empty"><strong>${escapeHtml(t('media.previewUnsupported'))}</strong></div>`;
+}
+
+/**
+ * Professional lightbox modal for media assets (image / video / audio / pdf / text).
+ *
+ * IMPORTANT: create the blob: object URL *after* openAppModal().
+ * openAppModal → closeAppModal → revokeMediaPreviewUrl would otherwise
+ * kill the URL immediately (empty / broken preview for every kind).
+ *
+ * @param {{ id: string, mime?: string, filename?: string, prompt?: string, kind?: string, bytes?: number }} meta
+ * @param {Blob} blob
+ */
+function openMediaPreviewLightbox(meta, blob) {
+  const mime = meta.mime || blob.type || '';
+  const filename = meta.filename || meta.id || 'asset';
+  const kind = mediaPreviewKind(mime, filename) || 'image';
+  const title = t('media.preview');
+  const subParts = [
+    filename,
+    mime || '—',
+    meta.bytes != null ? fmtBytes(meta.bytes) : '',
+    meta.kind || '',
+  ].filter(Boolean);
+  const subtitle = escapeHtml(subParts.join(' · '));
+
+  const promptHtml = meta.prompt
+    ? `<div class="media-lb-prompt"><span class="muted">${escapeHtml(t('media.prompt'))}</span><p>${escapeHtml(meta.prompt)}</p></div>`
+    : '';
+
+  // Open shell first (this revokes any previous preview URL via closeAppModal)
+  openAppModal({
+    title,
+    subtitle,
+    size: 'xl',
+    bodyHtml: `
+      <div class="media-lightbox" data-preview-kind="${escapeHtml(kind)}">
+        <div class="media-lb-stage">
+          <div class="media-lb-text-loading muted">${escapeHtml(t('common.loading') || '…')}</div>
+        </div>
+        ${promptHtml}
+      </div>`,
+    footerHtml: `
+      <button type="button" class="btn secondary sm" id="media-lb-download">${escapeHtml(t('media.download'))}</button>
+      <button type="button" class="btn sm" id="media-lb-close">${escapeHtml(t('common.cancel'))}</button>`,
+  });
+
+  // Mark modal shell for lightbox styling
+  const modal = document.querySelector('#modal-back .modal');
+  if (modal) modal.classList.add('modal--media-preview');
+
+  // Create object URL only after modal open — never before openAppModal
+  const url = URL.createObjectURL(blob);
+  mediaPreviewObjectUrl = url;
+
+  const stage = document.querySelector('#modal-back .media-lb-stage');
+  if (stage) {
+    stage.innerHTML = mediaLightboxStageHtml(kind, url, filename);
+  }
+
+  const close = () => {
+    document.querySelectorAll('#modal-back video, #modal-back audio').forEach((el) => {
+      try {
+        el.pause();
+      } catch {
+        /* ignore */
+      }
+    });
+    revokeMediaPreviewUrl();
+    closeAppModal();
+  };
+
+  // Bind close / download (openAppModal already wires modal-x + backdrop; re-bind to revoke)
+  document.getElementById('modal-close')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    close();
+  });
+  document.getElementById('media-lb-close')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    close();
+  });
+  document.getElementById('modal-back')?.addEventListener('click', (e) => {
+    if (e.target?.id === 'modal-back') close();
+  });
+  document.getElementById('media-lb-download')?.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || `media-${String(meta.id || '').slice(0, 8)}`;
+    a.click();
+  });
+
+  if (kind === 'text') {
+    blob
+      .text()
+      .then((text) => {
+        const el = document.querySelector('#modal-back .media-lb-stage');
+        if (!el) return;
+        const max = 400_000;
+        const clipped =
+          text.length > max
+            ? text.slice(0, max) + `\n… (${t('media.previewTruncated')})`
+            : text;
+        el.innerHTML = `<pre class="media-lb-text">${escapeHtml(clipped)}</pre>`;
+      })
+      .catch(() => {
+        const el = document.querySelector('#modal-back .media-lb-stage');
+        if (el) {
+          el.innerHTML = `<div class="error-box">${escapeHtml(t('media.previewFail'))}</div>`;
+        }
+      });
+  }
+}
+
 function poweredByFooter() {
   return `
   <footer class="site-footer">
@@ -869,6 +1211,14 @@ function bindPager(idPrefix, filterRef, reload) {
 }
 
 function closeAppModal() {
+  document.querySelectorAll('#modal-back video, #modal-back audio').forEach((el) => {
+    try {
+      el.pause();
+    } catch {
+      /* ignore */
+    }
+  });
+  revokeMediaPreviewUrl();
   document.getElementById('modal-back')?.remove();
   state.modal = null;
 }
@@ -2159,7 +2509,7 @@ async function renderDocuments() {
     <div class="topbar">
       <h2>${escapeHtml(t('docs.title'))}</h2>
     </div>
-    <p class="page-hint">${escapeHtml(storageHint)}</p>
+    ${pageMetaHtml([storageHint])}
     ${filter}
     ${table}
   `);
@@ -2713,10 +3063,9 @@ async function renderSettings() {
       <strong>${escapeHtml(t('common.featureOff'))}</strong>
       <span>${escapeHtml(t('settings.disabledBanner'))}</span>
     </div>
+    ${pageMetaHtml([t('settings.globalSafeHint')])}
     <div class="panel">
       <div class="modal-b">
-        <p class="page-hint">${escapeHtml(t('settings.hint'))}</p>
-        <p class="field-hint">${escapeHtml(t('settings.globalSafeHint'))}</p>
         <div class="form-grid settings-safe-fields">
           <label>${escapeHtml(t('settings.tools'))}
             <select id="s-tools">
@@ -2735,7 +3084,7 @@ async function renderSettings() {
           </label>
           <label class="full">${escapeHtml(t('settings.defaultModel'))}
             <select id="s-model">${modelOpts || `<option value="${escapeHtml(data.defaultModel)}">${escapeHtml(data.defaultModel)}</option>`}</select>
-            <span class="hint">${escapeHtml(t('settings.defaultModelHint'))} · ${escapeHtml(t('settings.modelSource'))}${catalog.source ? ` · ${escapeHtml(catalog.source)}` : ''}</span>
+            <span class="hint">${escapeHtml(t('settings.defaultModelHint'))}${catalog.source ? ` · ${escapeHtml(catalog.source)}` : ''}</span>
           </label>
         </div>
         <div class="toolbar settings-save-bar">
@@ -2746,16 +3095,15 @@ async function renderSettings() {
     <div class="panel settings-guide">
       <div class="panel-h">
         <strong>${escapeHtml(t('settings.guideTitle'))}</strong>
+        <span class="muted panel-h-sub">${escapeHtml(t('settings.guideIntro'))}</span>
       </div>
       <div class="modal-b">
-        <p class="page-hint">${escapeHtml(t('settings.guideIntro'))}</p>
         <div class="settings-guide-grid">${guideCards}</div>
       </div>
     </div>
     <div class="danger-zone">
       <h3>${escapeHtml(t('settings.dangerTitle'))}</h3>
-      <p>${escapeHtml(t('settings.panelOffHint'))}</p>
-      <p class="muted">${escapeHtml(t('settings.panelStatus'))}: <strong>${data.adminPanelEnabled ? t('settings.panelOn') : t('settings.panelOff')}</strong></p>
+      <p class="muted">${escapeHtml(t('settings.panelOffHint'))} · ${escapeHtml(t('settings.panelStatus'))}: <strong>${data.adminPanelEnabled ? t('settings.panelOn') : t('settings.panelOff')}</strong></p>
       <button class="btn danger sm" id="s-disable-panel" ${!data.adminPanelEnabled ? 'disabled' : ''}>${escapeHtml(t('settings.disablePanel'))}</button>
     </div>
     </div>
@@ -2873,21 +3221,29 @@ async function renderSettings() {
   };
 }
 
-/** Admin: Grok CLI capability + protocol feature flags */
+/** Admin: Grok CLI capability + protocol feature flags — tab layout matches other pages */
 async function renderApiFeatures() {
   const res = await api('/api-features');
+  if (state.page !== 'apiFeatures') return;
   const data = res.data || {};
+
   const groups = [
     {
+      id: 'protocols',
       title: t('apiFeatures.groupProtocols'),
+      tabLabel: t('apiFeatures.tabProtocols'),
       keys: ['openaiChat', 'openaiResponses', 'anthropicMessages'],
     },
     {
+      id: 'media',
       title: t('apiFeatures.groupMedia'),
+      tabLabel: t('apiFeatures.tabMedia'),
       keys: ['imagesApi', 'filesOpenAiAlias', 'videoApi', 'audioApi'],
     },
     {
+      id: 'caps',
       title: t('apiFeatures.groupCaps'),
+      tabLabel: t('apiFeatures.tabCaps'),
       keys: [
         'tools',
         'structuredOutput',
@@ -2907,7 +3263,9 @@ async function renderApiFeatures() {
       ],
     },
     {
+      id: 'emu',
       title: t('apiFeatures.groupEmu'),
+      tabLabel: t('apiFeatures.tabEmu'),
       keys: [
         'usageEstimate',
         'assistantsEmulation',
@@ -2917,31 +3275,85 @@ async function renderApiFeatures() {
     },
   ];
 
+  const tab =
+    state.apiFeaturesTab === 'media' ||
+    state.apiFeaturesTab === 'caps' ||
+    state.apiFeaturesTab === 'emu' ||
+    state.apiFeaturesTab === 'protocols'
+      ? state.apiFeaturesTab
+      : 'protocols';
+  state.apiFeaturesTab = tab;
+
   const flagLabel = (k) => t(`apiFeatures.flag.${k}`) || k;
   const flagHint = (k) => t(`apiFeatures.hint.${k}`) || '';
 
-  const sections = groups
-    .map((g) => {
-      const rows = g.keys
-        .map((k) => {
-          const on = Boolean(data[k]);
-          return `
+  const groupOnCount = (keys) => keys.filter((k) => Boolean(data[k])).length;
+
+  const flagRowsHtml = (keys) =>
+    keys
+      .map((k) => {
+        const on = Boolean(data[k]);
+        return `
           <div class="dash-prot-row api-feat-row" data-feat="${escapeHtml(k)}">
             <div>
               <strong>${escapeHtml(flagLabel(k))}</strong>
-              <div class="muted" style="font-size:0.78rem;font-weight:500">${escapeHtml(flagHint(k))}</div>
+              <div class="muted api-feat-hint">${escapeHtml(flagHint(k))}</div>
             </div>
             <button type="button" class="master-toggle ${on ? 'is-on' : 'is-off'}" data-feat-toggle="${escapeHtml(k)}" aria-pressed="${on ? 'true' : 'false'}">
               <span class="master-toggle-track" aria-hidden="true"><span class="master-toggle-knob"></span></span>
               <span class="master-toggle-label">${escapeHtml(on ? t('dash.on') : t('dash.off'))}</span>
             </button>
           </div>`;
+      })
+      .join('');
+
+  const totalKeys = groups.reduce((n, g) => n + g.keys.length, 0);
+  const totalOn = groups.reduce((n, g) => n + groupOnCount(g.keys), 0);
+
+  const kpiGrid = `
+    <div class="grid api-feat-kpi-grid">
+      <div class="card">
+        <div class="label">${escapeHtml(t('apiFeatures.kpiEnabled'))}</div>
+        <div class="value value-sm">${totalOn}<span class="dash-kpi-den">/${totalKeys}</span></div>
+        <div class="muted card-sub">${escapeHtml(t('apiFeatures.kpiEnabledSub'))}</div>
+      </div>
+      ${groups
+        .map((g) => {
+          const on = groupOnCount(g.keys);
+          return `
+        <div class="card">
+          <div class="label">${escapeHtml(g.tabLabel)}</div>
+          <div class="value value-sm">${on}<span class="dash-kpi-den">/${g.keys.length}</span></div>
+          <div class="muted card-sub">${escapeHtml(g.title)}</div>
+        </div>`;
         })
-        .join('');
+        .join('')}
+    </div>`;
+
+  const tabButtons = groups
+    .map((g) => {
+      const on = groupOnCount(g.keys);
       return `
-        <div class="panel dash-panel">
-          <div class="panel-h"><strong>${escapeHtml(g.title)}</strong></div>
-          <div class="panel-pad">${rows}</div>
+        <button type="button" role="tab" class="seg-tab ${tab === g.id ? 'is-active' : ''}" data-feat-tab="${escapeHtml(g.id)}" aria-selected="${tab === g.id}">
+          ${escapeHtml(g.tabLabel)}
+          <span class="seg-tab-count">${on}/${g.keys.length}</span>
+        </button>`;
+    })
+    .join('');
+
+  const tabPanes = groups
+    .map((g) => {
+      return `
+        <div class="usage-tab-pane api-feat-tab-pane" id="api-feat-tab-${escapeHtml(g.id)}" ${tab === g.id ? '' : 'hidden'}>
+          <div class="panel data-table-panel api-feat-panel">
+            <div class="panel-h">
+              <div class="panel-h-text">
+                <strong>${escapeHtml(g.title)}</strong>
+                <span class="muted panel-h-sub">${escapeHtml(tf('apiFeatures.groupMeta', { on: groupOnCount(g.keys), n: g.keys.length }))}</span>
+              </div>
+            </div>
+            <div class="panel-pad api-feat-list">${flagRowsHtml(g.keys)}</div>
+          </div>
         </div>`;
     })
     .join('');
@@ -2953,19 +3365,34 @@ async function renderApiFeatures() {
         <button type="button" class="btn secondary sm" data-feat-preset="open">${escapeHtml(t('apiFeatures.presetOpen'))}</button>
         <button type="button" class="btn secondary sm" data-feat-preset="locked">${escapeHtml(t('apiFeatures.presetLocked'))}</button>
         <button type="button" class="btn secondary sm" data-feat-preset="dev">${escapeHtml(t('apiFeatures.presetDev'))}</button>
-        <button type="button" class="btn secondary sm" id="feat-refresh">${escapeHtml(t('dash.refresh'))}</button>
       </div>
     </div>
-    <p class="page-hint">${escapeHtml(t('apiFeatures.intro'))}</p>
-    <div class="dash-layout" style="grid-template-columns:1fr">
-      <div class="dash-main">${sections}</div>
+    ${pageMetaHtml([t('apiFeatures.intro')])}
+    ${kpiGrid}
+
+    <div class="usage-tabs-panel panel api-feat-tabs-panel">
+      <div class="seg-tabs" role="tablist" aria-label="${escapeHtml(t('apiFeatures.title'))}">
+        ${tabButtons}
+      </div>
+      <div class="usage-tab-body">
+        ${tabPanes}
+      </div>
     </div>
   `);
   bindShell();
 
-  document.getElementById('feat-refresh')?.addEventListener('click', () =>
-    renderApiFeatures().catch(onErr),
-  );
+  document.querySelectorAll('[data-feat-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const raw = btn.getAttribute('data-feat-tab') || 'protocols';
+      const next =
+        raw === 'media' || raw === 'caps' || raw === 'emu' || raw === 'protocols'
+          ? raw
+          : 'protocols';
+      if (state.apiFeaturesTab === next) return;
+      state.apiFeaturesTab = next;
+      renderApiFeatures().catch(onErr);
+    });
+  });
 
   document.querySelectorAll('[data-feat-toggle]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -3007,10 +3434,11 @@ async function renderApiFeatures() {
   });
 }
 
-/** Admin: generated media assets + video jobs — same list UX as keys/docs */
+/** Admin: media studio + assets + jobs — tab layout matches chat queue */
 async function renderMedia() {
   if (!state.mediaFilter) {
     state.mediaFilter = {
+      tab: 'studio',
       q: '',
       kind: '',
       provider: '',
@@ -3020,7 +3448,14 @@ async function renderMedia() {
       offset: 0,
     };
   }
+  if (!state.mediaFilter.tab) state.mediaFilter.tab = 'studio';
   const f = state.mediaFilter;
+  const tab =
+    f.tab === 'assets' || f.tab === 'jobs' || f.tab === 'studio'
+      ? f.tab
+      : 'studio';
+  f.tab = tab;
+
   const params = new URLSearchParams({
     limit: String(f.limit),
     offset: String(f.offset),
@@ -3035,35 +3470,87 @@ async function renderMedia() {
     params.set('to', end.toISOString());
   }
 
-  const [assetsRes, jobsRes] = await Promise.all([
+  // Keys + full model catalog (all Grok models + system default) + assets/jobs
+  const [catalog, , assetsRes, jobsRes] = await Promise.all([
+    loadModels(false).catch(() => ({
+      models: state.models || [],
+      defaultModel: '',
+    })),
+    loadKeys().catch(() => {}),
     api(`/media/assets?${params}`),
-    api('/media/jobs?limit=30').catch(() => ({ data: [], total: 0 })),
+    api('/media/jobs?limit=50').catch(() => ({ data: [], total: 0 })),
   ]);
   const assets = assetsRes.data || [];
-  const total = assetsRes.total ?? assets.length;
+  const assetsTotal = assetsRes.total ?? assets.length;
   const jobs = jobsRes.data || [];
+  const jobsTotal = jobsRes.total ?? jobs.length;
+
+  const agentKeys = (state.keys || []).filter(
+    (k) => k.isActive !== false && (k.mode === 'agent' || k.role === 'admin'),
+  );
+  const genKeyOpts = [
+    `<option value="">${escapeHtml(t('media.generateKeySession'))}</option>`,
+    ...agentKeys.map(
+      (k) =>
+        `<option value="${escapeHtml(k.id)}">${escapeHtml(k.name || k.id)} · ${escapeHtml(k.keyPrefix || '')}… · ${escapeHtml(k.mode || '')}</option>`,
+    ),
+  ].join('');
+  const modelList = catalog.models?.length
+    ? catalog.models
+    : state.models || [];
+  const defaultModel =
+    catalog.defaultModel || modelList[0] || '';
+  // All Grok CLI models; system default selected
+  const genModelOpts = modelList.length
+    ? modelList
+        .map(
+          (m) =>
+            `<option value="${escapeHtml(m)}" ${m === defaultModel ? 'selected' : ''}>${escapeHtml(m)}${m === defaultModel ? ` · ${escapeHtml(t('media.modelDefault'))}` : ''}</option>`,
+        )
+        .join('')
+    : `<option value="">${escapeHtml(defaultModel || t('media.modelEmpty'))}</option>`;
+
+  // Grok Imagine aspect_ratio (not OpenAI pixel sizes)
+  const aspectOpts = [
+    ['1:1', '1:1 · square'],
+    ['16:9', '16:9 · landscape'],
+    ['9:16', '9:16 · portrait / story'],
+    ['4:3', '4:3'],
+    ['3:4', '3:4'],
+    ['3:2', '3:2'],
+    ['2:3', '2:3'],
+    ['auto', 'auto'],
+  ]
+    .map(
+      ([v, label], i) =>
+        `<option value="${v}" ${i === 0 ? 'selected' : ''}>${escapeHtml(label)}</option>`,
+    )
+    .join('');
 
   const bodyHtml = assets
     .map((a) => {
-      const isImg = String(a.mime || '').startsWith('image/');
-      const preview = isImg
-        ? `<button type="button" class="btn ghost sm" data-media-preview="${escapeHtml(a.id)}">${escapeHtml(t('media.preview'))}</button>`
+      const mime = a.mime || '';
+      const fname = a.filename || a.originalName || '';
+      const canPreview = isBrowserPreviewable(mime, fname);
+      const pKind = mediaPreviewKind(mime, fname) || '';
+      const preview = canPreview
+        ? `<button type="button" class="btn ghost sm" data-media-preview="${escapeHtml(a.id)}" data-media-mime="${escapeHtml(mime)}" data-media-name="${escapeHtml(fname)}" data-media-kind="${escapeHtml(a.kind || '')}" data-media-bytes="${escapeHtml(String(a.bytes ?? ''))}" data-media-prompt="${escapeHtml(a.prompt || '')}" data-preview-kind="${escapeHtml(pKind)}" title="${escapeHtml(t('media.preview'))}">${escapeHtml(t('media.preview'))}</button>`
         : '';
       return `
     <tr>
       <td>
         <div class="cell-primary mono" title="${escapeHtml(a.id)}">${escapeHtml(String(a.id).slice(0, 8))}…</div>
-        <div class="cell-sub">${escapeHtml(a.filename || a.source || '—')}</div>
+        <div class="cell-sub">${escapeHtml(fname || a.source || '—')}</div>
       </td>
       <td>${escapeHtml(a.kind || '—')}</td>
-      <td class="muted">${escapeHtml(a.mime || '—')}</td>
+      <td class="muted">${escapeHtml(mime || '—')}</td>
       <td>${fmtBytes(a.bytes)}</td>
       <td>${escapeHtml(a.provider || '—')}</td>
       <td class="muted" title="${escapeHtml(a.prompt || '')}">${escapeHtml((a.prompt || '—').slice(0, 48))}</td>
       <td>${fmtTime(a.created_at)}</td>
       <td><div class="row-actions">
         ${preview}
-        <button type="button" class="btn ghost sm" data-media-dl="${escapeHtml(a.id)}">${escapeHtml(t('media.download'))}</button>
+        <button type="button" class="btn ghost sm" data-media-dl="${escapeHtml(a.id)}" data-media-name="${escapeHtml(fname)}">${escapeHtml(t('media.download'))}</button>
         <button type="button" class="btn danger sm" data-media-del="${escapeHtml(a.id)}">${escapeHtml(t('media.delete'))}</button>
       </div></td>
     </tr>`;
@@ -3073,7 +3560,7 @@ async function renderMedia() {
   const filter = filterPanelHtml({
     title: t('common.filterTitle'),
     hint: t('common.filterHint'),
-    meta: tf('common.pagerTotal', { n: total }),
+    meta: tf('common.pagerTotal', { n: assetsTotal }),
     searchHtml: `
       <div class="data-filter-search">
         <label for="mf-q">${escapeHtml(t('common.search'))}</label>
@@ -3091,15 +3578,15 @@ async function renderMedia() {
       <label>${escapeHtml(t('media.provider'))}
         <input type="text" id="mf-provider" value="${escapeHtml(f.provider)}" placeholder="${escapeHtml(t('media.providerPh'))}" />
       </label>
-      <label>${escapeHtml(t('media.from') || t('chats.from') || 'From')}
+      <label>${escapeHtml(t('media.from'))}
         <input type="date" id="mf-from" value="${escapeHtml(f.from)}" />
       </label>
-      <label>${escapeHtml(t('media.to') || t('chats.to') || 'To')}
+      <label>${escapeHtml(t('media.to'))}
         <input type="date" id="mf-to" value="${escapeHtml(f.to)}" />
       </label>`,
   });
 
-  const table = dataTablePanelHtml({
+  const assetsTable = dataTablePanelHtml({
     headHtml: `
       <th>ID</th>
       <th>${escapeHtml(t('media.kind'))}</th>
@@ -3113,27 +3600,27 @@ async function renderMedia() {
     colSpan: 8,
     emptyText: t('media.empty'),
     pagerHtml: pagerHtml({
-      total,
+      total: assetsTotal,
       limit: f.limit,
       offset: f.offset,
       idPrefix: 'media',
     }),
   });
 
-  const jobRows = jobs.length
-    ? jobs
-        .map(
-          (j) => `
+  const jobRows = jobs
+    .map(
+      (j) => `
     <tr>
-      <td class="mono">${escapeHtml(String(j.id).slice(0, 8))}…</td>
-      <td>${escapeHtml(j.status || '')}</td>
-      <td class="muted" title="${escapeHtml(j.prompt || '')}">${escapeHtml((j.prompt || '—').slice(0, 48))}</td>
+      <td>
+        <div class="cell-primary mono" title="${escapeHtml(j.id)}">${escapeHtml(String(j.id).slice(0, 8))}…</div>
+      </td>
+      <td>${escapeHtml(j.status || '—')}</td>
+      <td class="muted" title="${escapeHtml(j.prompt || '')}">${escapeHtml((j.prompt || '—').slice(0, 64))}</td>
       <td class="mono">${escapeHtml(j.result_asset_id ? String(j.result_asset_id).slice(0, 8) + '…' : '—')}</td>
       <td>${fmtTime(j.created_at)}</td>
     </tr>`,
-        )
-        .join('')
-    : '';
+    )
+    .join('');
 
   const jobsTable = dataTablePanelHtml({
     headHtml: `
@@ -3147,53 +3634,142 @@ async function renderMedia() {
     emptyText: t('media.jobsEmpty'),
   });
 
+  const studioPane = `
+    <div class="panel media-studio-panel data-table-panel">
+      <div class="panel-h">
+        <div class="panel-h-text">
+          <strong>${escapeHtml(t('media.studioTitle'))}</strong>
+          <span class="muted panel-h-sub">${escapeHtml(t('media.studioHint'))}</span>
+        </div>
+      </div>
+      <div class="panel-pad">
+        <div class="seg-tabs media-mode-tabs" role="tablist" aria-label="${escapeHtml(t('media.studioTitle'))}">
+          <button type="button" class="seg-tab is-active" data-mg-mode="generate" role="tab" aria-selected="true">${escapeHtml(t('media.modeGenerate'))}</button>
+          <button type="button" class="seg-tab" data-mg-mode="edit" role="tab" aria-selected="false">${escapeHtml(t('media.modeEdit'))}</button>
+          <button type="button" class="seg-tab" data-mg-mode="video" role="tab" aria-selected="false">${escapeHtml(t('media.modeVideo'))}</button>
+        </div>
+        <div class="form-grid">
+          <label class="full">${escapeHtml(t('media.generatePrompt'))}
+            <textarea id="mg-prompt" rows="3" placeholder="${escapeHtml(t('media.generatePromptPh'))}"></textarea>
+          </label>
+          <label>${escapeHtml(t('media.generateKey'))}
+            <select id="mg-key">${genKeyOpts}</select>
+          </label>
+          <label>${escapeHtml(t('chats.model'))}
+            <select id="mg-model">${genModelOpts}</select>
+            <span class="hint">${escapeHtml(t('media.modelHint'))}</span>
+          </label>
+          <label id="mg-aspect-wrap">${escapeHtml(t('media.aspectRatio'))}
+            <select id="mg-aspect">${aspectOpts}</select>
+            <span class="hint">${escapeHtml(t('media.aspectHint'))}</span>
+          </label>
+          <label id="mg-n-wrap">${escapeHtml(t('media.generateN'))}
+            <input type="number" id="mg-n" min="1" max="4" value="1" />
+            <span class="hint">${escapeHtml(t('media.nHint'))}</span>
+          </label>
+          <label id="mg-duration-wrap" hidden>${escapeHtml(t('media.videoDuration'))}
+            <select id="mg-duration">
+              <option value="6" selected>6s</option>
+              <option value="10">10s</option>
+            </select>
+            <span class="hint">${escapeHtml(t('media.videoDurationHint'))}</span>
+          </label>
+        </div>
+        <div id="mg-source-section" class="media-source-section" hidden>
+          <div class="media-source-head">
+            <strong>${escapeHtml(t('media.sourceTitle'))}</strong>
+            <span class="muted hint">${escapeHtml(t('media.sourceHint'))}</span>
+          </div>
+          <div class="media-dropzone" id="mg-dropzone" tabindex="0" role="button" aria-label="${escapeHtml(t('media.dropzoneAria'))}">
+            <input type="file" id="mg-file" accept="image/*" hidden />
+            <div class="media-dropzone-inner" id="mg-drop-inner">
+              <div class="media-dropzone-icon" aria-hidden="true">📎</div>
+              <strong id="mg-drop-title">${escapeHtml(t('media.dropTitle'))}</strong>
+              <span class="muted" id="mg-drop-hint">${escapeHtml(t('media.dropHint'))}</span>
+              <div class="media-dropzone-actions">
+                <button type="button" class="btn secondary sm" id="mg-pick-file">${escapeHtml(t('media.pickFile'))}</button>
+                <button type="button" class="btn secondary sm" id="mg-pick-lib">${escapeHtml(t('media.pickLibrary'))}</button>
+                <button type="button" class="btn ghost sm" id="mg-clear-source" hidden>${escapeHtml(t('media.clearSource'))}</button>
+              </div>
+              <div class="media-source-chip" id="mg-source-chip" hidden></div>
+            </div>
+          </div>
+        </div>
+        <div class="media-gen-actions toolbar">
+          <button type="button" class="btn" id="mg-submit">${escapeHtml(t('media.generateSubmit'))}</button>
+          <span id="mg-status" class="muted" hidden></span>
+        </div>
+      </div>
+    </div>`;
+
+  // KPI strip (always visible) — same pattern as queue / usage / ddos
+  const kpiGrid = `
+    <div class="grid media-kpi-grid" id="media-kpi-grid">
+      <div class="card">
+        <div class="label">${escapeHtml(t('media.assets'))}</div>
+        <div class="value value-sm">${assetsTotal}</div>
+        <div class="muted card-sub">${escapeHtml(t('media.kpiAssetsSub'))}</div>
+      </div>
+      <div class="card">
+        <div class="label">${escapeHtml(t('media.jobs'))}</div>
+        <div class="value value-sm">${jobsTotal}</div>
+        <div class="muted card-sub">${escapeHtml(t('media.kpiJobsSub'))}</div>
+      </div>
+      <div class="card">
+        <div class="label">${escapeHtml(t('media.tabStudio'))}</div>
+        <div class="value value-sm">${escapeHtml(t('media.modeGenerate'))} / ${escapeHtml(t('media.modeEdit'))} / ${escapeHtml(t('media.modeVideo'))}</div>
+        <div class="muted card-sub">${escapeHtml(t('media.kpiStudioSub'))}</div>
+      </div>
+    </div>`;
+
   document.getElementById('app').innerHTML = shell(`
     <div class="topbar">
       <h2>${escapeHtml(t('media.title'))}</h2>
-      <div class="toolbar">
-        <button type="button" class="btn secondary sm" id="media-refresh">${escapeHtml(t('dash.refresh'))}</button>
-      </div>
     </div>
-    ${pageMetaHtml([t('media.intro'), tf('common.pagerTotal', { n: total })])}
-    ${filter}
-    <div class="panel-h" style="margin:0.5rem 0 0"><strong>${escapeHtml(t('media.assets'))}</strong></div>
-    ${table}
-    <div class="panel-h" style="margin:1.25rem 0 0"><strong>${escapeHtml(t('media.jobs'))}</strong></div>
-    ${jobsTable}
-    <div id="media-preview-box" class="panel" style="margin-top:1rem;display:none">
-      <div class="panel-h"><strong>${escapeHtml(t('media.preview'))}</strong></div>
-      <div class="panel-pad" id="media-preview-pad"></div>
+    ${pageMetaHtml([t('media.intro')])}
+    ${kpiGrid}
+    <div class="usage-tabs-panel panel media-tabs-panel queue-tabs-panel">
+      <div class="seg-tabs" role="tablist" aria-label="${escapeHtml(t('media.title'))}">
+        <button type="button" role="tab" class="seg-tab ${tab === 'studio' ? 'is-active' : ''}" data-media-tab="studio" aria-selected="${tab === 'studio'}">
+          ${escapeHtml(t('media.tabStudio'))}
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'assets' ? 'is-active' : ''}" data-media-tab="assets" aria-selected="${tab === 'assets'}">
+          ${escapeHtml(t('media.tabAssets'))}
+          <span class="seg-tab-count">${assetsTotal}</span>
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'jobs' ? 'is-active' : ''}" data-media-tab="jobs" aria-selected="${tab === 'jobs'}">
+          ${escapeHtml(t('media.tabJobs'))}
+          <span class="seg-tab-count">${jobsTotal}</span>
+        </button>
+      </div>
+      <div class="usage-tab-body">
+        <div class="usage-tab-pane media-tab-pane-studio" id="media-tab-studio" ${tab === 'studio' ? '' : 'hidden'}>
+          ${studioPane}
+        </div>
+        <div class="usage-tab-pane media-tab-pane-assets" id="media-tab-assets" ${tab === 'assets' ? '' : 'hidden'}>
+          ${filter}
+          ${assetsTable}
+        </div>
+        <div class="usage-tab-pane media-tab-pane-jobs" id="media-tab-jobs" ${tab === 'jobs' ? '' : 'hidden'}>
+          ${jobsTable}
+        </div>
+      </div>
     </div>
   `);
   bindShell();
-  bindPager('media', state.mediaFilter, () => renderMedia().catch(onErr));
 
-  document.getElementById('media-refresh')?.addEventListener('click', () =>
-    renderMedia().catch(onErr),
-  );
-  document.querySelector('[data-filter-apply]')?.addEventListener('click', () => {
-    state.mediaFilter.q = document.getElementById('mf-q')?.value.trim() || '';
-    state.mediaFilter.kind = document.getElementById('mf-kind')?.value || '';
-    state.mediaFilter.provider =
-      document.getElementById('mf-provider')?.value.trim() || '';
-    state.mediaFilter.from = document.getElementById('mf-from')?.value || '';
-    state.mediaFilter.to = document.getElementById('mf-to')?.value || '';
-    state.mediaFilter.offset = 0;
-    renderMedia().catch(onErr);
-  });
-  document.querySelector('[data-filter-reset]')?.addEventListener('click', () => {
-    state.mediaFilter = {
-      q: '',
-      kind: '',
-      provider: '',
-      from: '',
-      to: '',
-      limit: 20,
-      offset: 0,
-    };
-    renderMedia().catch(onErr);
+  document.querySelectorAll('[data-media-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const raw = btn.getAttribute('data-media-tab') || 'studio';
+      const next =
+        raw === 'assets' || raw === 'jobs' || raw === 'studio' ? raw : 'studio';
+      if (state.mediaFilter.tab === next) return;
+      state.mediaFilter.tab = next;
+      renderMedia().catch(onErr);
+    });
   });
 
+  // ——— Studio: mode, source (drop / library), submit ———
   async function fetchMediaBlob(id) {
     const r = await fetch(`/admin/api/media/assets/${id}/download`, {
       headers: { Authorization: `Bearer ${state.key}` },
@@ -3202,58 +3778,659 @@ async function renderMedia() {
     return r.blob();
   }
 
-  document.querySelectorAll('[data-media-preview]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+  {
+    let mediaMode = 'generate';
+    /** @type {{ kind: 'file'|'asset'|'document', file?: File, id?: string, name?: string, mime?: string } | null} */
+    let mediaSource = null;
+
+    const paintSourceChip = () => {
+      const chip = document.getElementById('mg-source-chip');
+      const clearBtn = document.getElementById('mg-clear-source');
+      if (!chip) return;
+      if (!mediaSource) {
+        chip.hidden = true;
+        chip.innerHTML = '';
+        if (clearBtn) clearBtn.hidden = true;
+        return;
+      }
+      const kindLabel =
+        mediaSource.kind === 'file'
+          ? t('media.sourceKindUpload')
+          : mediaSource.kind === 'asset'
+            ? t('media.sourceKindAsset')
+            : t('media.sourceKindDocument');
+      chip.hidden = false;
+      chip.innerHTML = `<span class="chip">${escapeHtml(kindLabel)}</span> <span class="mono">${escapeHtml(mediaSource.name || mediaSource.id || '')}</span>`;
+      if (clearBtn) clearBtn.hidden = false;
+    };
+
+    const setMediaSource = (src) => {
+      mediaSource = src;
+      const input = document.getElementById('mg-file');
+      if (input && src?.kind !== 'file') input.value = '';
+      paintSourceChip();
+    };
+
+    const setMediaMode = (mode) => {
+      mediaMode = mode === 'edit' || mode === 'video' ? mode : 'generate';
+      document.querySelectorAll('[data-mg-mode]').forEach((b) => {
+        const on = b.getAttribute('data-mg-mode') === mediaMode;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      const srcSec = document.getElementById('mg-source-section');
+      const nWrap = document.getElementById('mg-n-wrap');
+      const durWrap = document.getElementById('mg-duration-wrap');
+      const submit = document.getElementById('mg-submit');
+      if (srcSec) srcSec.hidden = mediaMode === 'generate';
+      if (nWrap) nWrap.hidden = mediaMode === 'video';
+      if (durWrap) durWrap.hidden = mediaMode !== 'video';
+      if (submit) {
+        submit.textContent =
+          mediaMode === 'edit'
+            ? t('media.editSubmit')
+            : mediaMode === 'video'
+              ? t('media.videoSubmit')
+              : t('media.generateSubmit');
+      }
+      const ta = document.getElementById('mg-prompt');
+      if (ta) {
+        ta.placeholder =
+          mediaMode === 'edit'
+            ? t('media.editPromptPh')
+            : mediaMode === 'video'
+              ? t('media.videoPromptPh')
+              : t('media.generatePromptPh');
+      }
+      const dropTitle = document.getElementById('mg-drop-title');
+      const dropHint = document.getElementById('mg-drop-hint');
+      if (dropTitle) {
+        dropTitle.textContent =
+          mediaMode === 'video' ? t('media.dropTitleVideo') : t('media.dropTitle');
+      }
+      if (dropHint) {
+        dropHint.textContent =
+          mediaMode === 'video' ? t('media.dropHintVideo') : t('media.dropHint');
+      }
+    };
+
+    document.querySelectorAll('[data-mg-mode]').forEach((btn) => {
+      btn.addEventListener('click', () =>
+        setMediaMode(btn.getAttribute('data-mg-mode') || 'generate'),
+      );
+    });
+    setMediaMode('generate');
+
+    const zone = document.getElementById('mg-dropzone');
+    const fileInput = document.getElementById('mg-file');
+    const acceptImageFile = (file) => {
+      if (!file) return false;
+      if (file.type && file.type.startsWith('image/')) return true;
+      return /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(file.name || '');
+    };
+    const takeFiles = (fileList) => {
+      const file = [...(fileList || [])].find(acceptImageFile);
+      if (!file) {
+        showError(t('media.sourceNeedImage'));
+        return;
+      }
+      setMediaSource({
+        kind: 'file',
+        file,
+        name: file.name,
+        mime: file.type || 'image/*',
+      });
+      showError('');
+    };
+
+    document.getElementById('mg-pick-file')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      fileInput?.click();
+    });
+    fileInput?.addEventListener('change', () => {
+      if (fileInput.files?.length) takeFiles(fileInput.files);
+    });
+    document.getElementById('mg-clear-source')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setMediaSource(null);
+    });
+    document.getElementById('mg-pick-lib')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openMediaSourceLibraryPicker({
+        imagesOnly: true,
+        onPick: (item) => {
+          setMediaSource({
+            kind: item.kind,
+            id: item.id,
+            name: item.name,
+            mime: item.mime,
+          });
+          showError('');
+        },
+      }).catch((err) => showError(err.message || t('media.libraryLoadFail')));
+    });
+
+    if (zone) {
+      zone.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        fileInput?.click();
+      });
+      zone.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          fileInput?.click();
+        }
+      });
+      ;['dragenter', 'dragover'].forEach((ev) => {
+        zone.addEventListener(ev, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          zone.classList.add('is-dragover');
+        });
+      });
+      ;['dragleave', 'drop'].forEach((ev) => {
+        zone.addEventListener(ev, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          zone.classList.remove('is-dragover');
+        });
+      });
+      zone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        if (dt?.files?.length) takeFiles(dt.files);
+      });
+    }
+
+    // Page-level drag highlight (abort previous listeners on re-render)
+    if (state._mediaDragAbort) {
       try {
-        const id = btn.getAttribute('data-media-preview');
-        const blob = await fetchMediaBlob(id);
-        const url = URL.createObjectURL(blob);
-        const box = document.getElementById('media-preview-box');
-        const pad = document.getElementById('media-preview-pad');
-        if (box && pad) {
-          box.style.display = '';
-          pad.innerHTML = `<img src="${url}" alt="preview" style="max-width:100%;max-height:420px;border-radius:8px" />`;
+        state._mediaDragAbort.abort();
+      } catch {
+        /* ignore */
+      }
+    }
+    state._mediaDragAbort = new AbortController();
+    const dragSig = { signal: state._mediaDragAbort.signal };
+    const mediaPage = document.getElementById('app');
+    let dragDepth = 0;
+    window.addEventListener(
+      'dragenter',
+      (e) => {
+        if (mediaMode === 'generate') return;
+        if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+        dragDepth += 1;
+        mediaPage?.classList.add('is-media-file-drag');
+      },
+      dragSig,
+    );
+    window.addEventListener(
+      'dragleave',
+      () => {
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) mediaPage?.classList.remove('is-media-file-drag');
+      },
+      dragSig,
+    );
+    window.addEventListener(
+      'drop',
+      (e) => {
+        dragDepth = 0;
+        mediaPage?.classList.remove('is-media-file-drag');
+        if (mediaMode === 'generate') return;
+        if (e.dataTransfer?.files?.length) {
+          e.preventDefault();
+          takeFiles(e.dataTransfer.files);
+        }
+      },
+      dragSig,
+    );
+    window.addEventListener(
+      'dragover',
+      (e) => {
+        if (mediaMode === 'generate') return;
+        if ([...(e.dataTransfer?.types || [])].includes('Files')) {
+          e.preventDefault();
+        }
+      },
+      dragSig,
+    );
+
+    document.getElementById('mg-submit')?.addEventListener('click', async () => {
+      const prompt = document.getElementById('mg-prompt')?.value?.trim() || '';
+      if (!prompt) {
+        showError(t('media.generateNeedPrompt'));
+        return;
+      }
+      const apiKeyId = document.getElementById('mg-key')?.value || '';
+      const model = document.getElementById('mg-model')?.value || undefined;
+      const aspect = document.getElementById('mg-aspect')?.value || '1:1';
+      const n = Math.min(
+        4,
+        Math.max(1, Number(document.getElementById('mg-n')?.value) || 1),
+      );
+      const btn = document.getElementById('mg-submit');
+      const st = document.getElementById('mg-status');
+      const busyLabel =
+        mediaMode === 'video'
+          ? t('media.videoBusy')
+          : mediaMode === 'edit'
+            ? t('media.editBusy')
+            : t('media.generateBusy');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = busyLabel;
+      }
+      if (st) {
+        st.hidden = false;
+        st.textContent = busyLabel;
+      }
+      showError('');
+      try {
+        if (mediaMode === 'edit') {
+          if (!mediaSource) {
+            throw new Error(t('media.editNeedImage'));
+          }
+          const fd = new FormData();
+          fd.append('prompt', prompt);
+          fd.append('aspect_ratio', aspect);
+          fd.append('n', String(n));
+          fd.append('response_format', 'url');
+          if (model) fd.append('model', model);
+          if (apiKeyId) fd.append('apiKeyId', apiKeyId);
+          if (mediaSource.kind === 'file' && mediaSource.file) {
+            fd.append('image', mediaSource.file);
+          } else if (mediaSource.kind === 'asset' && mediaSource.id) {
+            fd.append('sourceAssetId', mediaSource.id);
+          } else if (mediaSource.kind === 'document' && mediaSource.id) {
+            fd.append('sourceDocumentId', mediaSource.id);
+          }
+          await parseApiResponse(
+            await fetch('/admin/api/media/edit', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${state.key}` },
+              body: fd,
+            }),
+          );
+          if (st) st.textContent = t('media.editOk');
+          state.mediaFilter.tab = 'assets';
+          state.mediaFilter.offset = 0;
+          await renderMedia();
+          return;
+        }
+
+        if (mediaMode === 'video') {
+          const fd = new FormData();
+          fd.append('prompt', prompt);
+          fd.append('aspect_ratio', aspect);
+          fd.append(
+            'seconds',
+            String(document.getElementById('mg-duration')?.value || 6),
+          );
+          if (model) fd.append('model', model);
+          if (apiKeyId) fd.append('apiKeyId', apiKeyId);
+          if (mediaSource?.kind === 'file' && mediaSource.file) {
+            fd.append('image', mediaSource.file);
+          } else if (mediaSource?.kind === 'asset' && mediaSource.id) {
+            fd.append('source_asset_id', mediaSource.id);
+          } else if (mediaSource?.kind === 'document' && mediaSource.id) {
+            fd.append('source_document_id', mediaSource.id);
+          }
+          await parseApiResponse(
+            await fetch('/admin/api/media/videos', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${state.key}` },
+              body: fd,
+            }),
+          );
+          if (st) st.textContent = t('media.videoOk');
+          state.mediaFilter.tab = 'jobs';
+          await renderMedia();
+          return;
+        }
+
+        const body = {
+          prompt,
+          aspect_ratio: aspect,
+          n,
+          response_format: 'url',
+        };
+        if (model) body.model = model;
+        if (apiKeyId) body.apiKeyId = apiKeyId;
+        const res = await api('/media/generate', {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+        const ids = res?.data?.grok?.asset_ids || [];
+        if (st) st.textContent = t('media.generateOk');
+        state.mediaFilter.tab = 'assets';
+        state.mediaFilter.offset = 0;
+        await renderMedia();
+        if (ids[0]) {
+          try {
+            const blob = await fetchMediaBlob(ids[0]);
+            openMediaPreviewLightbox(
+              {
+                id: ids[0],
+                mime: blob.type || 'image/png',
+                filename: `generated-${String(ids[0]).slice(0, 8)}`,
+                kind: 'image',
+                bytes: blob.size,
+                prompt,
+              },
+              blob,
+            );
+          } catch {
+            /* ignore */
+          }
         }
       } catch (e) {
         onErr(e);
+        if (st) st.textContent = e.message || t('media.generateFail');
+        if (btn) {
+          btn.disabled = false;
+          setMediaMode(mediaMode);
+        }
       }
+    });
+  }
+
+  if (tab === 'assets') {
+    bindPager('media', state.mediaFilter, () => renderMedia().catch(onErr));
+
+    document
+      .querySelector('#media-tab-assets [data-filter-apply]')
+      ?.addEventListener('click', () => {
+        state.mediaFilter.q =
+          document.getElementById('mf-q')?.value.trim() || '';
+        state.mediaFilter.kind =
+          document.getElementById('mf-kind')?.value || '';
+        state.mediaFilter.provider =
+          document.getElementById('mf-provider')?.value.trim() || '';
+        state.mediaFilter.from =
+          document.getElementById('mf-from')?.value || '';
+        state.mediaFilter.to = document.getElementById('mf-to')?.value || '';
+        state.mediaFilter.offset = 0;
+        renderMedia().catch(onErr);
+      });
+    document
+      .querySelector('#media-tab-assets [data-filter-reset]')
+      ?.addEventListener('click', () => {
+        const keepTab = state.mediaFilter.tab;
+        state.mediaFilter = {
+          tab: keepTab,
+          q: '',
+          kind: '',
+          provider: '',
+          from: '',
+          to: '',
+          limit: 20,
+          offset: 0,
+        };
+        renderMedia().catch(onErr);
+      });
+
+    document.querySelectorAll('[data-media-preview]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try {
+          const id = btn.getAttribute('data-media-preview');
+          if (!id) return;
+          const mime = btn.getAttribute('data-media-mime') || '';
+          const filename = btn.getAttribute('data-media-name') || '';
+          const kind = btn.getAttribute('data-media-kind') || '';
+          const bytesRaw = btn.getAttribute('data-media-bytes') || '';
+          const prompt = btn.getAttribute('data-media-prompt') || '';
+          const blob = await fetchMediaBlob(id);
+          // Prefer server mime; fall back to blob.type
+          openMediaPreviewLightbox(
+            {
+              id,
+              mime: mime || blob.type || '',
+              filename,
+              kind,
+              bytes: bytesRaw ? Number(bytesRaw) : blob.size,
+              prompt,
+            },
+            blob,
+          );
+        } catch (e) {
+          onErr(e);
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-media-dl]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try {
+          const id = btn.getAttribute('data-media-dl');
+          const name = btn.getAttribute('data-media-name') || '';
+          const blob = await fetchMediaBlob(id);
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = name || `media-${String(id).slice(0, 8)}`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
+        } catch (e) {
+          onErr(e);
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-media-del]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-media-del');
+        if (
+          !(await uiConfirm({
+            message: t('media.deleteConfirm'),
+            variant: 'danger',
+            confirmText: t('media.delete'),
+          }))
+        )
+          return;
+        try {
+          await api(`/media/assets/${id}`, { method: 'DELETE' });
+          await renderMedia();
+        } catch (e) {
+          onErr(e);
+        }
+      });
+    });
+  }
+}
+
+/**
+ * Pick a source image from Documents library or Media assets (admin-wide).
+ * @param {{ imagesOnly?: boolean, onPick: (item: { kind: 'asset'|'document', id: string, name: string, mime: string }) => void }} opts
+ */
+async function openMediaSourceLibraryPicker(opts) {
+  const imagesOnly = opts.imagesOnly !== false;
+  let libTab = 'documents'; // 'documents' | 'assets'
+  let loadSeq = 0;
+  /** @type {{ kind: 'asset'|'document', id: string, name: string, mime: string } | null} */
+  let selected = null;
+
+  openAppModal({
+    title: t('media.libraryTitle'),
+    subtitle: escapeHtml(t('media.librarySubtitle')),
+    size: 'md',
+    bodyHtml: `
+      <div class="chat-lib media-lib">
+        <div class="seg-tabs" role="tablist" style="margin-bottom:0.75rem">
+          <button type="button" class="seg-tab is-active" data-mlib-tab="documents">${escapeHtml(t('media.libraryTabDocs'))}</button>
+          <button type="button" class="seg-tab" data-mlib-tab="assets">${escapeHtml(t('media.libraryTabAssets'))}</button>
+        </div>
+        <div class="chat-lib-toolbar">
+          <input type="search" id="mlib-q" class="chat-lib-search" placeholder="${escapeHtml(t('media.librarySearch'))}" autocomplete="off" />
+          <span class="muted chat-lib-count" id="mlib-count"></span>
+        </div>
+        <div class="muted chat-lib-formats">${escapeHtml(t('media.libraryFormats'))}</div>
+        <div id="mlib-list" class="chat-lib-list" role="listbox">
+          <div class="muted chat-lib-status">${escapeHtml(t('common.loading') || '…')}</div>
+        </div>
+      </div>`,
+    footerHtml: `
+      <button type="button" class="btn secondary sm" id="mlib-cancel">${escapeHtml(t('common.cancel'))}</button>
+      <button type="button" class="btn sm" id="mlib-add" disabled>${escapeHtml(t('media.librarySelect'))}</button>`,
+  });
+
+  const listEl = document.getElementById('mlib-list');
+  const qEl = document.getElementById('mlib-q');
+  const addBtn = document.getElementById('mlib-add');
+  document.getElementById('mlib-cancel')?.addEventListener('click', () => closeAppModal());
+
+  const paintSelection = () => {
+    if (addBtn) {
+      addBtn.disabled = !selected;
+      addBtn.textContent = selected
+        ? `${t('media.librarySelect')} · ${selected.name.slice(0, 24)}`
+        : t('media.librarySelect');
+    }
+  };
+
+  const isImageMime = (m) => String(m || '').startsWith('image/');
+  const isImageName = (n) =>
+    /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(String(n || ''));
+
+  const renderRows = (items) => {
+    if (!listEl) return;
+    if (!items.length) {
+      listEl.innerHTML = `<div class="data-empty chat-lib-empty"><strong>${escapeHtml(t('media.libraryEmpty'))}</strong></div>`;
+      return;
+    }
+    listEl.innerHTML = items
+      .map((it) => {
+        const checked = selected?.id === it.id && selected?.kind === it.kind;
+        return `
+          <label class="chat-lib-row ${checked ? 'is-selected' : ''}" data-kind="${escapeHtml(it.kind)}" data-id="${escapeHtml(it.id)}">
+            <input type="radio" name="mlib-pick" ${checked ? 'checked' : ''} />
+            <span class="chat-lib-meta">
+              <span class="chat-lib-name" title="${escapeHtml(it.name)}">${escapeHtml(it.name)}</span>
+              <span class="muted">${escapeHtml(it.kindLabel)} · ${escapeHtml(it.mime || '—')}${it.size != null ? ` · ${fmtBytes(it.size)}` : ''}</span>
+            </span>
+          </label>`;
+      })
+      .join('');
+
+    listEl.querySelectorAll('.chat-lib-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        const kind = row.getAttribute('data-kind');
+        const id = row.getAttribute('data-id');
+        const it = items.find((x) => x.id === id && x.kind === kind);
+        if (!it) return;
+        selected = {
+          kind: it.kind,
+          id: it.id,
+          name: it.name,
+          mime: it.mime,
+        };
+        listEl.querySelectorAll('.chat-lib-row').forEach((r) => {
+          r.classList.toggle(
+            'is-selected',
+            r.getAttribute('data-id') === id &&
+              r.getAttribute('data-kind') === kind,
+          );
+          const inp = r.querySelector('input');
+          if (inp) {
+            inp.checked =
+              r.getAttribute('data-id') === id &&
+              r.getAttribute('data-kind') === kind;
+          }
+        });
+        paintSelection();
+      });
+    });
+  };
+
+  const load = async () => {
+    const seq = ++loadSeq;
+    if (listEl) {
+      listEl.innerHTML = `<div class="muted chat-lib-status">${escapeHtml(t('common.loading') || '…')}</div>`;
+    }
+    try {
+      const q = (qEl?.value || '').trim();
+      let items = [];
+      if (libTab === 'assets') {
+        const params = new URLSearchParams({ limit: '80', offset: '0' });
+        if (q) params.set('q', q);
+        if (imagesOnly) params.set('kind', 'image');
+        const res = await api(`/media/assets?${params}`);
+        items = (res.data || [])
+          .filter(
+            (a) =>
+              !imagesOnly ||
+              isImageMime(a.mime) ||
+              isImageName(a.filename),
+          )
+          .map((a) => ({
+            kind: 'asset',
+            kindLabel: t('media.sourceKindAsset'),
+            id: a.id,
+            name: a.filename || a.prompt || a.id,
+            mime: a.mime || '',
+            size: a.bytes,
+          }));
+      } else {
+        const params = new URLSearchParams({ limit: '80', offset: '0' });
+        if (q) params.set('q', q);
+        const res = await api(`/documents?${params}`);
+        items = (res.data || [])
+          .filter(
+            (d) =>
+              !imagesOnly ||
+              isImageMime(d.mimeType) ||
+              isImageName(d.originalName),
+          )
+          .map((d) => ({
+            kind: 'document',
+            kindLabel: t('media.sourceKindDocument'),
+            id: d.id,
+            name: d.originalName || d.id,
+            mime: d.mimeType || '',
+            size: d.sizeBytes,
+          }));
+      }
+      if (seq !== loadSeq) return;
+      renderRows(items);
+    } catch (e) {
+      if (seq !== loadSeq) return;
+      if (listEl) {
+        listEl.innerHTML = `<div class="error-box">${escapeHtml(e.message || t('media.libraryLoadFail'))}</div>`;
+      }
+    }
+  };
+
+  document.querySelectorAll('[data-mlib-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      libTab =
+        btn.getAttribute('data-mlib-tab') === 'assets' ? 'assets' : 'documents';
+      document.querySelectorAll('[data-mlib-tab]').forEach((b) => {
+        b.classList.toggle(
+          'is-active',
+          b.getAttribute('data-mlib-tab') === libTab,
+        );
+      });
+      selected = null;
+      paintSelection();
+      load();
     });
   });
 
-  document.querySelectorAll('[data-media-dl]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      try {
-        const id = btn.getAttribute('data-media-dl');
-        const blob = await fetchMediaBlob(id);
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `media-${id.slice(0, 8)}`;
-        a.click();
-      } catch (e) {
-        onErr(e);
-      }
-    });
+  let searchTimer = null;
+  qEl?.addEventListener('input', () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => load(), 280);
   });
 
-  document.querySelectorAll('[data-media-del]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const id = btn.getAttribute('data-media-del');
-      if (
-        !(await uiConfirm({
-          message: t('media.deleteConfirm'),
-          variant: 'danger',
-          confirmText: t('media.delete'),
-        }))
-      )
-        return;
-      try {
-        await api(`/media/assets/${id}`, { method: 'DELETE' });
-        await renderMedia();
-      } catch (e) {
-        onErr(e);
-      }
-    });
+  addBtn?.addEventListener('click', () => {
+    if (!selected) return;
+    opts.onPick(selected);
+    closeAppModal();
   });
+
+  paintSelection();
+  await load();
 }
 
 async function renderUsage() {
@@ -3363,7 +4540,9 @@ async function renderUsage() {
       <h2>${escapeHtml(t('usage.title'))}</h2>
       <button class="btn secondary sm" id="btn-usage-refresh">${escapeHtml(t('usage.refresh'))}</button>
     </div>
-    <p class="page-hint">${escapeHtml(t('usage.window'))}: ${fmtTime(data.from)} → ${fmtTime(data.to)} (${tf('common.minutes', { n: data.windowMinutes })})</p>
+    ${pageMetaHtml([
+      `${t('usage.window')}: ${fmtTime(data.from)} → ${fmtTime(data.to)} (${tf('common.minutes', { n: data.windowMinutes })})`,
+    ])}
     <div class="grid">
       <div class="card"><div class="label">${escapeHtml(t('usage.requests'))}</div><div class="value">${tot.requests ?? 0}</div></div>
       <div class="card"><div class="label">${escapeHtml(t('usage.success'))}</div><div class="value">${tot.success ?? 0}</div></div>
@@ -3546,10 +4725,17 @@ function runtimeBadge(state) {
 
 async function renderSystem() {
   const { data } = await api('/system');
+  if (state.page !== 'system') return;
+
   const v = data.version || {};
   const vs = versionStatusMeta(v);
   const soft = data.software || { checks: [], allRequiredOk: true };
   const checks = soft.checks || [];
+  const tab =
+    state.systemTab === 'package' || state.systemTab === 'env'
+      ? state.systemTab
+      : 'software';
+  state.systemTab = tab;
 
   const softBody = checks
     .map(
@@ -3588,44 +4774,52 @@ async function renderSystem() {
     emptyText: t('common.empty'),
   });
 
-  document.getElementById('app').innerHTML = shell(`
-    <div class="topbar">
-      <h2>${escapeHtml(t('system.title'))}</h2>
-      <div class="toolbar">
-        <button class="btn secondary sm" id="btn-check-update" title="${escapeHtml(t('system.selfHint'))}">${escapeHtml(t('system.checkUpdate'))}</button>
-        <button class="btn sm" id="btn-one-click-update" title="${escapeHtml(t('system.confirmUpdate'))}">${escapeHtml(t('system.oneClick'))}</button>
+  // KPI strip — same pattern as queue / media
+  const kpiGrid = `
+    <div class="grid system-kpi-grid" id="system-kpi-grid">
+      <div class="card">
+        <div class="label">${escapeHtml(t('system.database'))}</div>
+        <div class="value value-sm">${runtimeBadge(data.database)}</div>
+        <div class="muted card-sub">${escapeHtml(t('system.runtime'))}</div>
       </div>
-    </div>
-    <p class="page-hint">${escapeHtml(t('system.selfHint'))}</p>
+      <div class="card">
+        <div class="label">${escapeHtml(t('system.grokCli'))}</div>
+        <div class="value value-sm">${runtimeBadge(data.grokCli)}</div>
+        <div class="muted card-sub">${escapeHtml(t('system.runtime'))}</div>
+      </div>
+      <div class="card">
+        <div class="label">${escapeHtml(t('system.concurrency'))}</div>
+        <div class="value value-sm">${data.concurrency?.active ?? 0}<span class="dash-kpi-den">/${data.concurrency?.max ?? '—'}</span></div>
+        <div class="muted card-sub">${escapeHtml(t('system.concurrency'))}</div>
+      </div>
+      <div class="card">
+        <div class="label">${escapeHtml(t('system.encryption'))}</div>
+        <div class="value value-sm">${
+          encReady
+            ? `<span class="badge success">${escapeHtml(t('system.ready'))}</span>`
+            : `<span class="badge error">${escapeHtml(t('system.notReady'))}</span>`
+        }</div>
+        <div class="muted card-sub">${escapeHtml(t('system.runtime'))}</div>
+      </div>
+    </div>`;
 
-    <div class="panel data-table-panel" style="margin-bottom:14px">
-      <div class="panel-h"><strong>${escapeHtml(t('system.runtime'))}</strong></div>
-      <div class="panel-pad">
-        <div class="grid">
-          <div class="card"><div class="label">${escapeHtml(t('system.database'))}</div><div class="value value-sm">${runtimeBadge(data.database)}</div></div>
-          <div class="card"><div class="label">${escapeHtml(t('system.grokCli'))}</div><div class="value value-sm">${runtimeBadge(data.grokCli)}</div></div>
-          <div class="card"><div class="label">${escapeHtml(t('system.concurrency'))}</div><div class="value value-sm">${data.concurrency.active}/${data.concurrency.max}</div></div>
-          <div class="card"><div class="label">${escapeHtml(t('system.encryption'))}</div><div class="value value-sm">${encReady ? `<span class="badge success">${escapeHtml(t('system.ready'))}</span>` : `<span class="badge error">${escapeHtml(t('system.notReady'))}</span>`}</div></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="panel-section-head">
-      <div>
-        <strong>${escapeHtml(t('system.software'))}</strong>
-        <span class="muted">${escapeHtml(t('system.softwareHint'))}</span>
-      </div>
+  const softwarePane = `
+    <div class="system-tab-toolbar">
+      <span class="muted">${escapeHtml(t('system.softwareHint'))}</span>
       ${softSummary}
     </div>
-    ${softTable}
+    ${softTable}`;
 
-    <div class="panel data-table-panel" style="margin-bottom:14px">
+  const packagePane = `
+    <div class="panel data-table-panel system-package-panel">
       <div class="panel-h">
-        <strong>${escapeHtml(t('system.selfUpdate'))}</strong>
+        <div class="panel-h-text">
+          <strong>${escapeHtml(t('system.selfUpdate'))}</strong>
+          <span class="muted panel-h-sub">${escapeHtml(vs.hint)}</span>
+        </div>
         ${vs.badge}
       </div>
       <div class="panel-pad">
-        <p class="muted" style="margin:0 0 12px">${escapeHtml(vs.hint)}</p>
         <div class="grid">
           <div class="card"><div class="label">${escapeHtml(t('system.current'))}</div><div class="value value-sm">${escapeHtml(v.current || '-')} ${vs.badge}</div></div>
           <div class="card"><div class="label">${escapeHtml(t('system.npm'))}</div><div class="value value-sm">${escapeHtml(v.latestNpm || 'n/a')}</div></div>
@@ -3634,14 +4828,71 @@ async function renderSystem() {
         </div>
         <pre id="update-log" class="pre" style="display:none;margin-top:12px"></pre>
       </div>
-    </div>
+    </div>`;
 
-    <div class="panel data-table-panel">
-      <div class="panel-h"><strong>${escapeHtml(t('system.envTitle'))}</strong></div>
-      <div class="panel-pad"><pre class="pre">${escapeHtml(JSON.stringify({ env: data.env, version: v }, null, 2))}</pre></div>
+  const envPane = `
+    <div class="panel data-table-panel system-env-panel">
+      <div class="panel-h">
+        <div class="panel-h-text">
+          <strong>${escapeHtml(t('system.envTitle'))}</strong>
+          <span class="muted panel-h-sub">${escapeHtml(t('system.envHint'))}</span>
+        </div>
+      </div>
+      <div class="panel-pad">
+        <pre class="pre system-env-pre">${escapeHtml(JSON.stringify({ env: data.env, version: v }, null, 2))}</pre>
+      </div>
+    </div>`;
+
+  document.getElementById('app').innerHTML = shell(`
+    <div class="topbar">
+      <h2>${escapeHtml(t('system.title'))}</h2>
+      <div class="toolbar">
+        <button class="btn secondary sm" id="btn-check-update" title="${escapeHtml(t('system.selfHint'))}">${escapeHtml(t('system.checkUpdate'))}</button>
+        <button class="btn sm" id="btn-one-click-update" title="${escapeHtml(t('system.confirmUpdate'))}">${escapeHtml(t('system.oneClick'))}</button>
+      </div>
+    </div>
+    ${pageMetaHtml([t('system.selfHint')])}
+    ${kpiGrid}
+
+    <div class="usage-tabs-panel panel system-tabs-panel">
+      <div class="seg-tabs" role="tablist" aria-label="${escapeHtml(t('system.title'))}">
+        <button type="button" role="tab" class="seg-tab ${tab === 'software' ? 'is-active' : ''}" data-system-tab="software" aria-selected="${tab === 'software'}">
+          ${escapeHtml(t('system.tabSoftware'))}
+          <span class="seg-tab-count">${checks.length}</span>
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'package' ? 'is-active' : ''}" data-system-tab="package" aria-selected="${tab === 'package'}">
+          ${escapeHtml(t('system.tabPackage'))}
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'env' ? 'is-active' : ''}" data-system-tab="env" aria-selected="${tab === 'env'}">
+          ${escapeHtml(t('system.tabEnv'))}
+        </button>
+      </div>
+      <div class="usage-tab-body">
+        <div class="usage-tab-pane system-tab-pane-software" id="system-tab-software" ${tab === 'software' ? '' : 'hidden'}>
+          ${softwarePane}
+        </div>
+        <div class="usage-tab-pane system-tab-pane-package" id="system-tab-package" ${tab === 'package' ? '' : 'hidden'}>
+          ${packagePane}
+        </div>
+        <div class="usage-tab-pane system-tab-pane-env" id="system-tab-env" ${tab === 'env' ? '' : 'hidden'}>
+          ${envPane}
+        </div>
+      </div>
     </div>
   `);
   bindShell();
+
+  document.querySelectorAll('[data-system-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const raw = btn.getAttribute('data-system-tab') || 'software';
+      const next =
+        raw === 'package' || raw === 'env' || raw === 'software' ? raw : 'software';
+      if (state.systemTab === next) return;
+      state.systemTab = next;
+      renderSystem().catch(onErr);
+    });
+  });
+
   document.getElementById('btn-check-update').onclick = async () => {
     try {
       const res = await api('/system/update-check');
@@ -3655,6 +4906,7 @@ async function renderSystem() {
           `${t('system.github')}: ${d.latestGithub || 'n/a'}\n` +
           `${meta.hint}`,
       });
+      state.systemTab = 'package';
       renderSystem().catch(onErr);
     } catch (e) {
       onErr(e);
@@ -3669,6 +4921,11 @@ async function renderSystem() {
       }))
     )
       return;
+    // Ensure package tab is visible so update-log is on screen
+    if (state.systemTab !== 'package') {
+      state.systemTab = 'package';
+      await renderSystem();
+    }
     const logEl = document.getElementById('update-log');
     try {
       const btn = document.getElementById('btn-one-click-update');
@@ -4266,11 +5523,18 @@ async function renderDdos(opts = {}) {
       const el = document.getElementById(id);
       if (el) el.innerHTML = html;
     };
-    set('ddos-stat-active', String(stats.activeConnections ?? active.length));
-    set('ddos-stat-rate', String(stats.rateLimitedHits ?? 0));
-    set('ddos-stat-blocked', String(stats.blockedHits ?? 0));
-    set('ddos-stat-ban', String(bans.length));
-    set('ddos-stat-auto', String(stats.autoBanTotal ?? 0));
+    const setText = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    };
+    setText('ddos-stat-active', String(stats.activeConnections ?? active.length));
+    setText('ddos-stat-rate', String(stats.rateLimitedHits ?? 0));
+    setText('ddos-stat-blocked', String(stats.blockedHits ?? 0));
+    setText('ddos-stat-ban', String(bans.length));
+    setText('ddos-stat-auto', String(stats.autoBanTotal ?? 0));
+    setText('ddos-tab-count-live', String(active.length));
+    setText('ddos-tab-count-ban', String(bans.length));
+    setText('ddos-tab-count-events', String(events.length));
     set('ddos-live-body', liveRows || emptyLive);
     set('ddos-recent-body', recentRows || emptyRecent);
     set('ddos-ban-body', banRows || emptyBan);
@@ -4314,76 +5578,42 @@ async function renderDdos(opts = {}) {
     };
 
     const autoBanOn = Boolean(pol.autoBanEnabled);
+    const tab =
+      df.tab === 'live' ||
+      df.tab === 'blacklist' ||
+      df.tab === 'events' ||
+      df.tab === 'policy'
+        ? df.tab
+        : 'policy';
+    state.ddosFilter.tab = tab;
 
-    document.getElementById('app').innerHTML = shell(`
-    <div id="ddos-root" class="${autoBanOn ? '' : 'is-feature-off'}">
-    <div class="topbar">
-      <h2>${escapeHtml(t('ddos.title'))}</h2>
-      <div class="toolbar">
-        ${masterToggleBtnHtml({
-          id: 'ddos-master-autoban',
-          on: autoBanOn,
-          onLabel: t('ddos.masterOn'),
-          offLabel: t('ddos.masterOff'),
-          title: t('ddos.autoBanMasterHint'),
-        })}
-        <button class="btn secondary sm" id="ddos-refresh">${escapeHtml(t('ddos.refresh'))}</button>
-        <button class="btn secondary sm" id="ddos-pause">${escapeHtml(ddosPaused ? t('ddos.resume') : t('ddos.pause'))}</button>
-      </div>
-    </div>
-    <div class="feature-off-banner" id="ddos-disabled-banner" ${autoBanOn ? 'hidden' : ''} role="status">
-      <strong>${escapeHtml(t('common.featureOff'))}</strong>
-      <span>${escapeHtml(t('ddos.disabledBanner'))}</span>
-    </div>
-    <div class="grid">
-      <div class="card"><div class="label">${escapeHtml(t('ddos.activeConn'))}</div><div class="value" id="ddos-stat-active">${stats.activeConnections ?? active.length}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('ddos.rateHits'))}</div><div class="value" id="ddos-stat-rate">${stats.rateLimitedHits ?? 0}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('ddos.blockedHits'))}</div><div class="value" id="ddos-stat-blocked">${stats.blockedHits ?? 0}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('ddos.blacklist'))}</div><div class="value" id="ddos-stat-ban">${bans.length}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('ddos.autoBans'))}</div><div class="value" id="ddos-stat-auto">${stats.autoBanTotal ?? 0}</div></div>
-    </div>
+    const kpiGrid = `
+    <div class="grid ddos-kpi-grid">
+      <div class="card"><div class="label">${escapeHtml(t('ddos.activeConn'))}</div><div class="value value-sm" id="ddos-stat-active">${stats.activeConnections ?? active.length}</div><div class="muted card-sub">${escapeHtml(t('ddos.live'))}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('ddos.rateHits'))}</div><div class="value value-sm" id="ddos-stat-rate">${stats.rateLimitedHits ?? 0}</div><div class="muted card-sub">${escapeHtml(t('ddos.stats'))}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('ddos.blockedHits'))}</div><div class="value value-sm" id="ddos-stat-blocked">${stats.blockedHits ?? 0}</div><div class="muted card-sub">${escapeHtml(t('ddos.stats'))}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('ddos.blacklist'))}</div><div class="value value-sm" id="ddos-stat-ban">${bans.length}</div><div class="muted card-sub">${escapeHtml(t('ddos.tabBlacklist'))}</div></div>
+      <div class="card"><div class="label">${escapeHtml(t('ddos.autoBans'))}</div><div class="value value-sm" id="ddos-stat-auto">${stats.autoBanTotal ?? 0}</div><div class="muted card-sub">${escapeHtml(t('ddos.tabEvents'))}</div></div>
+    </div>`;
 
-    ${ddosPolicyPanelHtml(pol)}
+    const policyPane = ddosPolicyPanelHtml(pol);
 
-    <div class="panel data-table-panel" style="margin-bottom:14px">
-      <div class="panel-h"><strong>${escapeHtml(t('ddos.eventsTitle'))}</strong>
-        <span class="muted">${escapeHtml(tf('common.pagerTotal', { n: events.length }))}</span>
-      </div>
-      <div class="table-wrap">
-      <table class="data-table">
-        <thead><tr>
-          <th>${escapeHtml(t('ddos.eventTime'))}</th>
-          <th>${escapeHtml(t('ddos.ip'))}</th>
-          <th>${escapeHtml(t('ddos.eventSource'))}</th>
-          <th>${escapeHtml(t('ddos.reason'))}</th>
-          <th>${escapeHtml(t('ddos.eventDuration'))}</th>
-        </tr></thead>
-        <tbody id="ddos-events-body">${eventRows}</tbody>
-      </table>
-      </div>
-    </div>
-
-    <div class="panel data-filter-panel" style="margin-bottom:14px">
+    const livePane = `
+    <div class="panel data-filter-panel ddos-filter-panel">
       <div class="panel-h"><strong>${escapeHtml(t('common.filterTitle'))}</strong></div>
       <div class="data-filter">
         <div class="data-filter-grid">
-          <label>${escapeHtml(t('ddos.live'))} / ${escapeHtml(t('ddos.recent'))}
+          <label class="full">${escapeHtml(t('ddos.live'))} / ${escapeHtml(t('ddos.recent'))}
             <input type="search" id="ddos-live-q" value="${escapeHtml(df.liveQ)}" placeholder="IP / path / key" />
-          </label>
-          <label>${escapeHtml(t('ddos.blacklist'))}
-            <input type="search" id="ddos-ban-q" value="${escapeHtml(df.banQ)}" placeholder="IP / reason" />
-          </label>
-          <label>${escapeHtml(t('ddos.source'))}
-            <select id="ddos-ban-source">${sourceOpts}</select>
           </label>
         </div>
         <div class="data-filter-actions">
-          <button type="button" class="btn secondary sm" id="ddos-filter-reset">${escapeHtml(t('common.reset'))}</button>
-          <button type="button" class="btn sm" id="ddos-filter-apply">${escapeHtml(t('common.apply'))}</button>
+          <button type="button" class="btn secondary sm" id="ddos-live-filter-reset">${escapeHtml(t('common.reset'))}</button>
+          <button type="button" class="btn sm" id="ddos-live-filter-apply">${escapeHtml(t('common.apply'))}</button>
         </div>
       </div>
     </div>
-    <div class="panel data-table-panel" style="margin-bottom:14px">
+    <div class="panel data-table-panel ddos-stack-panel">
       <div class="panel-h"><strong>${escapeHtml(t('ddos.live'))}</strong>
         <span class="muted">${escapeHtml(tf('common.pagerTotal', { n: active.length }))}</span>
       </div>
@@ -4400,7 +5630,7 @@ async function renderDdos(opts = {}) {
       </div>
       ${pagerHtml({ total: active.length, limit: ps, offset: df.livePage * ps, idPrefix: 'ddoslive' })}
     </div>
-    <div class="panel data-table-panel" style="margin-bottom:14px">
+    <div class="panel data-table-panel ddos-stack-panel">
       <div class="panel-h"><strong>${escapeHtml(t('ddos.recent'))}</strong></div>
       <div class="table-wrap">
       <table class="data-table">
@@ -4411,8 +5641,27 @@ async function renderDdos(opts = {}) {
         <tbody id="ddos-recent-body">${recentRows || emptyRecent}</tbody>
       </table>
       </div>
+    </div>`;
+
+    const blacklistPane = `
+    <div class="panel data-filter-panel ddos-filter-panel">
+      <div class="panel-h"><strong>${escapeHtml(t('common.filterTitle'))}</strong></div>
+      <div class="data-filter">
+        <div class="data-filter-grid">
+          <label>${escapeHtml(t('ddos.blacklist'))}
+            <input type="search" id="ddos-ban-q" value="${escapeHtml(df.banQ)}" placeholder="IP / reason" />
+          </label>
+          <label>${escapeHtml(t('ddos.source'))}
+            <select id="ddos-ban-source">${sourceOpts}</select>
+          </label>
+        </div>
+        <div class="data-filter-actions">
+          <button type="button" class="btn secondary sm" id="ddos-ban-filter-reset">${escapeHtml(t('common.reset'))}</button>
+          <button type="button" class="btn sm" id="ddos-ban-filter-apply">${escapeHtml(t('common.apply'))}</button>
+        </div>
+      </div>
     </div>
-    <div class="panel data-table-panel" style="margin-bottom:14px">
+    <div class="panel data-table-panel ddos-stack-panel">
       <div class="panel-h"><strong>${escapeHtml(t('ddos.blacklist'))}</strong>
         <span class="muted">${escapeHtml(tf('common.pagerTotal', { n: bans.length }))}</span>
       </div>
@@ -4439,8 +5688,27 @@ async function renderDdos(opts = {}) {
       </table>
       </div>
       ${pagerHtml({ total: bans.length, limit: ps, offset: df.banPage * ps, idPrefix: 'ddosban' })}
+    </div>`;
+
+    const eventsPane = `
+    <div class="panel data-table-panel ddos-stack-panel">
+      <div class="panel-h"><strong>${escapeHtml(t('ddos.eventsTitle'))}</strong>
+        <span class="muted">${escapeHtml(tf('common.pagerTotal', { n: events.length }))}</span>
+      </div>
+      <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr>
+          <th>${escapeHtml(t('ddos.eventTime'))}</th>
+          <th>${escapeHtml(t('ddos.ip'))}</th>
+          <th>${escapeHtml(t('ddos.eventSource'))}</th>
+          <th>${escapeHtml(t('ddos.reason'))}</th>
+          <th>${escapeHtml(t('ddos.eventDuration'))}</th>
+        </tr></thead>
+        <tbody id="ddos-events-body">${eventRows}</tbody>
+      </table>
+      </div>
     </div>
-    <div class="panel data-table-panel">
+    <div class="panel data-table-panel ddos-stack-panel">
       <div class="panel-h"><strong>${escapeHtml(t('ddos.topIps'))}</strong></div>
       <div class="table-wrap">
       <table class="data-table">
@@ -4448,28 +5716,108 @@ async function renderDdos(opts = {}) {
         <tbody id="ddos-top-body">${topIps || emptyTop}</tbody>
       </table>
       </div>
+    </div>`;
+
+    document.getElementById('app').innerHTML = shell(`
+    <div id="ddos-root" class="${autoBanOn ? '' : 'is-feature-off'}">
+    <div class="topbar">
+      <h2>${escapeHtml(t('ddos.title'))}</h2>
+      <div class="toolbar">
+        ${masterToggleBtnHtml({
+          id: 'ddos-master-autoban',
+          on: autoBanOn,
+          onLabel: t('ddos.masterOn'),
+          offLabel: t('ddos.masterOff'),
+          title: t('ddos.autoBanMasterHint'),
+        })}
+        <button class="btn secondary sm" id="ddos-refresh">${escapeHtml(t('ddos.refresh'))}</button>
+        <button class="btn secondary sm" id="ddos-pause">${escapeHtml(ddosPaused ? t('ddos.resume') : t('ddos.pause'))}</button>
+      </div>
+    </div>
+    ${pageMetaHtml([t('ddos.policyHint')])}
+    <div class="feature-off-banner" id="ddos-disabled-banner" ${autoBanOn ? 'hidden' : ''} role="status">
+      <strong>${escapeHtml(t('common.featureOff'))}</strong>
+      <span>${escapeHtml(t('ddos.disabledBanner'))}</span>
+    </div>
+    ${kpiGrid}
+
+    <div class="usage-tabs-panel panel ddos-tabs-panel">
+      <div class="seg-tabs" role="tablist" aria-label="${escapeHtml(t('ddos.title'))}">
+        <button type="button" role="tab" class="seg-tab ${tab === 'policy' ? 'is-active' : ''}" data-ddos-tab="policy" aria-selected="${tab === 'policy'}">
+          ${escapeHtml(t('ddos.tabPolicy'))}
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'live' ? 'is-active' : ''}" data-ddos-tab="live" aria-selected="${tab === 'live'}">
+          ${escapeHtml(t('ddos.tabLive'))}
+          <span class="seg-tab-count" id="ddos-tab-count-live">${active.length}</span>
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'blacklist' ? 'is-active' : ''}" data-ddos-tab="blacklist" aria-selected="${tab === 'blacklist'}">
+          ${escapeHtml(t('ddos.tabBlacklist'))}
+          <span class="seg-tab-count" id="ddos-tab-count-ban">${bans.length}</span>
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'events' ? 'is-active' : ''}" data-ddos-tab="events" aria-selected="${tab === 'events'}">
+          ${escapeHtml(t('ddos.tabEvents'))}
+          <span class="seg-tab-count" id="ddos-tab-count-events">${events.length}</span>
+        </button>
+      </div>
+      <div class="usage-tab-body">
+        <div class="usage-tab-pane ddos-tab-pane ddos-tab-pane-policy" id="ddos-tab-policy" ${tab === 'policy' ? '' : 'hidden'}>
+          ${policyPane}
+        </div>
+        <div class="usage-tab-pane ddos-tab-pane ddos-tab-pane-stack" id="ddos-tab-live" ${tab === 'live' ? '' : 'hidden'}>
+          ${livePane}
+        </div>
+        <div class="usage-tab-pane ddos-tab-pane ddos-tab-pane-stack" id="ddos-tab-blacklist" ${tab === 'blacklist' ? '' : 'hidden'}>
+          ${blacklistPane}
+        </div>
+        <div class="usage-tab-pane ddos-tab-pane ddos-tab-pane-stack" id="ddos-tab-events" ${tab === 'events' ? '' : 'hidden'}>
+          ${eventsPane}
+        </div>
+      </div>
     </div>
     </div>
   `);
     bindShell();
     bindDdosActions(true, whitelist);
-    document.getElementById('ddos-filter-apply')?.addEventListener('click', () => {
-      state.ddosFilter.liveQ = document.getElementById('ddos-live-q')?.value?.trim() || '';
-      state.ddosFilter.banQ = document.getElementById('ddos-ban-q')?.value?.trim() || '';
-      state.ddosFilter.banSource = document.getElementById('ddos-ban-source')?.value || '';
+
+    document.querySelectorAll('[data-ddos-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const raw = btn.getAttribute('data-ddos-tab') || 'policy';
+        const next =
+          raw === 'live' ||
+          raw === 'blacklist' ||
+          raw === 'events' ||
+          raw === 'policy'
+            ? raw
+            : 'policy';
+        if (state.ddosFilter.tab === next) return;
+        state.ddosFilter.tab = next;
+        renderDdos().catch(onErr);
+      });
+    });
+
+    document.getElementById('ddos-live-filter-apply')?.addEventListener('click', () => {
+      state.ddosFilter.liveQ =
+        document.getElementById('ddos-live-q')?.value?.trim() || '';
       state.ddosFilter.livePage = 0;
+      renderDdos().catch(onErr);
+    });
+    document.getElementById('ddos-live-filter-reset')?.addEventListener('click', () => {
+      state.ddosFilter.liveQ = '';
+      state.ddosFilter.livePage = 0;
+      renderDdos().catch(onErr);
+    });
+    document.getElementById('ddos-ban-filter-apply')?.addEventListener('click', () => {
+      state.ddosFilter.banQ =
+        document.getElementById('ddos-ban-q')?.value?.trim() || '';
+      state.ddosFilter.banSource =
+        document.getElementById('ddos-ban-source')?.value || '';
       state.ddosFilter.banPage = 0;
       renderDdos().catch(onErr);
     });
-    document.getElementById('ddos-filter-reset')?.addEventListener('click', () => {
-      state.ddosFilter = {
-        liveQ: '',
-        banQ: '',
-        banSource: '',
-        livePage: 0,
-        banPage: 0,
-        pageSize: 15,
-      };
+    document.getElementById('ddos-ban-filter-reset')?.addEventListener('click', () => {
+      state.ddosFilter.banQ = '';
+      state.ddosFilter.banSource = '';
+      state.ddosFilter.banPage = 0;
       renderDdos().catch(onErr);
     });
     document.getElementById('ddoslive-prev')?.addEventListener('click', () => {
@@ -4710,6 +6058,52 @@ function formatPm2Message(data) {
   return raw;
 }
 
+/**
+ * After runner switch / restart: show localized notice and auto-reload Admin.
+ * Never rely on backend English `message` — always prefer messageKey / mode.
+ */
+function scheduleAdminReload(seconds = 10) {
+  const ms = Math.max(1, Number(seconds) || 10) * 1000;
+  window.setTimeout(() => {
+    try {
+      window.location.reload();
+    } catch {
+      window.location.href = window.location.href;
+    }
+  }, ms);
+}
+
+/**
+ * @param {'pm2'|'gctoac'} mode
+ * @param {any} data API data from /pm2/switch or scheduled payload
+ */
+function buildPm2SwitchAlertMessage(mode, data) {
+  const keyFromApi =
+    data?.messageKey ||
+    (mode === 'pm2' ? 'pm2.msgSwitchPm2' : 'pm2.msgSwitchGctoac');
+  let body = formatPm2Message({
+    messageKey: keyFromApi,
+    messageParams: data?.messageParams,
+    message: undefined, // never show raw English from API
+  });
+  if (!body) {
+    body =
+      mode === 'pm2' ? t('pm2.msgSwitchPm2') : t('pm2.msgSwitchGctoac');
+  }
+  const port =
+    data?.port ||
+    data?.messageParams?.port ||
+    (typeof location !== 'undefined' && location.port
+      ? location.port
+      : '3847');
+  const lines = [
+    body,
+    tf('pm2.portAfterRestart', { port }),
+    tf('pm2.autoRefreshIn', { n: 10 }),
+  ];
+  return lines.filter(Boolean).join('\n');
+}
+
 function runnerBadge(runner) {
   if (runner === 'pm2') return `<span class="badge success">${escapeHtml(runnerLabel(runner))}</span>`;
   if (runner === 'gctoac') return `<span class="badge agent">${escapeHtml(runnerLabel(runner))}</span>`;
@@ -4832,74 +6226,97 @@ async function renderPm2() {
     d.messageKey !== 'pm2.msgErrored';
 
   const envExtraText = envExtraToText(cfg.env_extra);
+  const tab =
+    state.pm2Tab === 'port' ||
+    state.pm2Tab === 'config' ||
+    state.pm2Tab === 'logs' ||
+    state.pm2Tab === 'runner'
+      ? state.pm2Tab
+      : 'runner';
+  state.pm2Tab = tab;
 
-  document.getElementById('app').innerHTML = shell(`
-    <div class="topbar">
-      <h2>${escapeHtml(t('pm2.title'))}</h2>
-      <div class="toolbar">
-        <button class="btn secondary sm" id="pm2-refresh">${escapeHtml(t('pm2.refresh'))}</button>
-        <button class="btn sm" id="pm2-start" ${!canStart ? 'disabled' : ''}>${escapeHtml(t('pm2.start'))}</button>
-        <button class="btn secondary sm" id="pm2-stop" ${!canControl ? 'disabled' : ''}>${escapeHtml(t('pm2.stop'))}</button>
-        <button class="btn sm" id="pm2-restart" ${!canStart ? 'disabled' : ''}>${escapeHtml(t('pm2.restart'))}</button>
-        <button class="btn secondary sm" id="pm2-reload" ${!canControl || app?.status !== 'online' ? 'disabled' : ''}>${escapeHtml(t('pm2.reload'))}</button>
+  const kpiGrid = `
+    <div class="grid pm2-kpi-grid" id="pm2-kpi-grid">
+      <div class="card">
+        <div class="label">${escapeHtml(t('pm2.app'))}</div>
+        <div class="value value-sm">${escapeHtml(d.appName || cfg.name || 'grok-openai-gateway')}</div>
+        <div class="muted card-sub">${runnerBadge(runner)}</div>
       </div>
-    </div>
-    <p class="muted">${escapeHtml(t('pm2.hint'))}</p>
-    ${
-      msg
-        ? `<div class="error-box${isWarnOnly ? ' warn-box' : ''}">${escapeHtml(msg)}</div>`
-        : !d.available
-          ? `<div class="error-box">${escapeHtml(t('pm2.unavailable'))}</div>`
-          : ''
-    }
+      <div class="card">
+        <div class="label">${escapeHtml(t('pm2.status'))}</div>
+        <div class="value value-sm">${statusBadge}</div>
+        <div class="muted card-sub">${escapeHtml(t('pm2.pid'))}: ${app?.pid && app.pid !== 0 ? app.pid : '—'}</div>
+      </div>
+      <div class="card">
+        <div class="label">${escapeHtml(t('pm2.restarts'))}</div>
+        <div class="value value-sm">${app?.restarts ?? '—'}</div>
+        <div class="muted card-sub">CPU ${app?.cpu != null ? app.cpu + '%' : '—'} · ${
+          app?.memory != null
+            ? tf('common.mb', { n: Math.round(app.memory / 1024 / 1024) })
+            : '—'
+        }</div>
+      </div>
+      <div class="card">
+        <div class="label">${escapeHtml(t('pm2.port'))}</div>
+        <div class="value value-sm">${d.port ?? '—'}</div>
+        <div class="muted card-sub">${escapeHtml(t('pm2.portBusy'))}: ${portBusy ? t('common.yes') : t('common.no')}</div>
+      </div>
+    </div>`;
 
-    <div class="panel" style="margin-bottom:14px">
-      <div class="panel-h"><strong>${escapeHtml(t('pm2.switchTitle'))}</strong>${runnerBadge(runner)}</div>
-      <div class="modal-b">
-        <p class="muted">${escapeHtml(t('pm2.switchHint'))}</p>
-        <div class="grid">
-          <div class="card"><div class="label">${escapeHtml(t('pm2.currentRunner'))}</div><div class="value" style="font-size:1rem">${runnerBadge(runner)}</div></div>
-          <div class="card"><div class="label">${escapeHtml(t('pm2.gctoacPid'))}</div><div class="value" style="font-size:1rem">${d.gctoac?.running && d.gctoac?.pid ? d.gctoac.pid : '—'}</div></div>
-          <div class="card"><div class="label">${escapeHtml(t('pm2.port'))}</div><div class="value" style="font-size:1rem">${d.port ?? '—'}</div></div>
-          <div class="card"><div class="label">${escapeHtml(t('pm2.portBusy'))}</div><div class="value" style="font-size:1rem">${portBusy ? t('common.yes') : t('common.no')}</div></div>
+  const runnerPane = `
+    <div class="panel data-table-panel pm2-section-panel">
+      <div class="panel-h">
+        <div class="panel-h-text">
+          <strong>${escapeHtml(t('pm2.switchTitle'))}</strong>
+          <span class="muted panel-h-sub">${escapeHtml(t('pm2.switchHint'))}</span>
         </div>
-        <div class="toolbar" style="margin-top:12px">
+        ${runnerBadge(runner)}
+      </div>
+      <div class="panel-pad">
+        <div class="grid">
+          <div class="card"><div class="label">${escapeHtml(t('pm2.currentRunner'))}</div><div class="value value-sm">${runnerBadge(runner)}</div></div>
+          <div class="card"><div class="label">${escapeHtml(t('pm2.gctoacPid'))}</div><div class="value value-sm">${d.gctoac?.running && d.gctoac?.pid ? d.gctoac.pid : '—'}</div></div>
+          <div class="card"><div class="label">${escapeHtml(t('pm2.port'))}</div><div class="value value-sm">${d.port ?? '—'}</div></div>
+          <div class="card"><div class="label">${escapeHtml(t('pm2.portBusy'))}</div><div class="value value-sm">${portBusy ? t('common.yes') : t('common.no')}</div></div>
+        </div>
+        <div class="toolbar settings-save-bar">
           <button class="btn sm" id="pm2-switch-pm2" ${!canStart ? 'disabled' : ''}>${escapeHtml(t('pm2.switchToPm2'))}</button>
           <button class="btn secondary sm" id="pm2-switch-gctoac">${escapeHtml(t('pm2.switchToGctoac'))}</button>
         </div>
       </div>
-    </div>
+    </div>`;
 
-    <div class="panel" style="margin-bottom:14px">
-      <div class="panel-h"><strong>${escapeHtml(t('pm2.portTitle'))}</strong></div>
+  const portPane = `
+    <div class="panel data-table-panel pm2-section-panel">
+      <div class="panel-h">
+        <div class="panel-h-text">
+          <strong>${escapeHtml(t('pm2.portTitle'))}</strong>
+          <span class="muted panel-h-sub">${escapeHtml(t('pm2.portHint'))}</span>
+        </div>
+      </div>
       <div class="panel-pad">
-        <p class="muted" style="margin:0 0 12px">${escapeHtml(t('pm2.portHint'))}</p>
         <div class="form-grid">
           <label class="full">${escapeHtml(t('pm2.fieldPort'))}
             <input type="number" id="pm2-cfg-port" min="1" max="65535" step="1" value="${escapeHtml(String(d.port ?? 3847))}" placeholder="3847" />
-            <span class="field-hint">${escapeHtml(t('pm2.portDefaultNote'))}</span>
+            <span class="hint">${escapeHtml(t('pm2.portDefaultNote'))}</span>
           </label>
         </div>
-        <div class="toolbar" style="margin-top:12px">
+        <div class="toolbar settings-save-bar">
           <button type="button" class="btn sm" id="pm2-port-save">${escapeHtml(t('pm2.savePort'))}</button>
           <button type="button" class="btn secondary sm" id="pm2-port-default">${escapeHtml(t('pm2.useDefaultPort'))}</button>
         </div>
       </div>
-    </div>
+    </div>`;
 
-    <div class="grid" style="margin-bottom:14px">
-      <div class="card"><div class="label">${escapeHtml(t('pm2.app'))}</div><div class="value" style="font-size:1rem">${escapeHtml(d.appName || cfg.name || 'grok-openai-gateway')}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('pm2.status'))}</div><div class="value" style="font-size:1rem">${statusBadge}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('pm2.pid'))}</div><div class="value" style="font-size:1rem">${app?.pid && app.pid !== 0 ? app.pid : '—'}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('pm2.restarts'))}</div><div class="value" style="font-size:1rem">${app?.restarts ?? '—'}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('pm2.cpu'))}</div><div class="value" style="font-size:1rem">${app?.cpu != null ? app.cpu + '%' : '—'}</div></div>
-      <div class="card"><div class="label">${escapeHtml(t('pm2.memory'))}</div><div class="value" style="font-size:1rem">${app?.memory != null ? tf('common.mb', { n: Math.round(app.memory / 1024 / 1024) }) : '—'}</div></div>
-    </div>
-
-    <div class="panel" style="margin-bottom:14px">
-      <div class="panel-h"><strong>${escapeHtml(t('pm2.configTitle'))}</strong></div>
-      <div class="modal-b">
-        <p class="muted">${escapeHtml(t('pm2.configHint'))}</p>
+  const configPane = `
+    <div class="panel data-table-panel pm2-section-panel" id="pm2-config-panel">
+      <div class="panel-h">
+        <div class="panel-h-text">
+          <strong>${escapeHtml(t('pm2.configTitle'))}</strong>
+          <span class="muted panel-h-sub">${escapeHtml(t('pm2.configHint'))}</span>
+        </div>
+      </div>
+      <div class="panel-pad">
         <div class="form-grid pm2-config-form">
           <label>${escapeHtml(t('pm2.fieldName'))}<input id="pm2-cfg-name" value="${escapeHtml(cfg.name || '')}" /></label>
           <label>${escapeHtml(t('pm2.fieldScript'))}<input id="pm2-cfg-script" value="${escapeHtml(cfg.script || 'dist/server.js')}" /></label>
@@ -4930,39 +6347,106 @@ async function renderPm2() {
           <label class="check"><input type="checkbox" id="pm2-cfg-time" ${cfg.time !== false ? 'checked' : ''}/> ${escapeHtml(t('pm2.fieldTime'))}</label>
           <label class="full">${escapeHtml(t('pm2.fieldEnvExtra'))}<textarea id="pm2-cfg-envextra" rows="4" placeholder="${escapeHtml(t('pm2.phEnv'))}">${escapeHtml(envExtraText)}</textarea></label>
         </div>
-        <div class="toolbar" style="margin-top:12px">
+        <div class="toolbar settings-save-bar">
           <button class="btn sm" id="pm2-cfg-save">${escapeHtml(t('pm2.saveConfig'))}</button>
           <button class="btn secondary sm" id="pm2-cfg-save-only">${escapeHtml(t('pm2.saveOnly'))}</button>
           <button class="btn secondary sm" id="pm2-cfg-reset">${escapeHtml(t('pm2.resetConfig'))}</button>
         </div>
       </div>
-    </div>
+    </div>`;
 
-    <div class="panel">
+  const logsPane = `
+    <div class="panel data-table-panel pm2-section-panel pm2-logs-panel">
       <div class="panel-h">
-        <div>
+        <div class="panel-h-text">
           <strong>${escapeHtml(t('pm2.logs'))}</strong>
-          <span class="muted">${escapeHtml(t('pm2.logsHint'))}</span>
+          <span class="muted panel-h-sub">${escapeHtml(t('pm2.logsHint'))}</span>
         </div>
         <div class="toolbar">
           <button type="button" class="btn secondary sm" id="pm2-logs-refresh">${escapeHtml(t('pm2.refresh'))}</button>
           <button type="button" class="btn danger sm" id="pm2-logs-clear">${escapeHtml(t('pm2.clearLogs'))}</button>
         </div>
       </div>
-      <div class="modal-b">
+      <div class="panel-pad">
         <p class="muted" style="margin:0 0 8px;font-size:0.82rem">
           ${escapeHtml(tf('pm2.logsAutoTrim', { maxMb, keepKb }))}
           ${logSizeLine ? ` · ${escapeHtml(logSizeLine)}` : ''}
         </p>
         <pre class="pre pre-logs" id="pm2-logs-pre">${escapeHtml(logsText || t('common.empty'))}</pre>
       </div>
+    </div>`;
+
+  document.getElementById('app').innerHTML = shell(`
+    <div class="topbar">
+      <h2>${escapeHtml(t('pm2.title'))}</h2>
+      <div class="toolbar">
+        <button class="btn secondary sm" id="pm2-refresh">${escapeHtml(t('pm2.refresh'))}</button>
+        <button class="btn sm" id="pm2-start" ${!canStart ? 'disabled' : ''}>${escapeHtml(t('pm2.start'))}</button>
+        <button class="btn secondary sm" id="pm2-stop" ${!canControl ? 'disabled' : ''}>${escapeHtml(t('pm2.stop'))}</button>
+        <button class="btn sm" id="pm2-restart" ${!canStart ? 'disabled' : ''}>${escapeHtml(t('pm2.restart'))}</button>
+        <button class="btn secondary sm" id="pm2-reload" ${!canControl || app?.status !== 'online' ? 'disabled' : ''}>${escapeHtml(t('pm2.reload'))}</button>
+      </div>
+    </div>
+    ${pageMetaHtml([t('pm2.hint')])}
+    ${
+      msg
+        ? `<div class="error-box${isWarnOnly ? ' warn-box' : ''}">${escapeHtml(msg)}</div>`
+        : !d.available
+          ? `<div class="error-box">${escapeHtml(t('pm2.unavailable'))}</div>`
+          : ''
+    }
+    ${kpiGrid}
+
+    <div class="usage-tabs-panel panel pm2-tabs-panel">
+      <div class="seg-tabs" role="tablist" aria-label="${escapeHtml(t('pm2.title'))}">
+        <button type="button" role="tab" class="seg-tab ${tab === 'runner' ? 'is-active' : ''}" data-pm2-tab="runner" aria-selected="${tab === 'runner'}">
+          ${escapeHtml(t('pm2.tabRunner'))}
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'port' ? 'is-active' : ''}" data-pm2-tab="port" aria-selected="${tab === 'port'}">
+          ${escapeHtml(t('pm2.tabPort'))}
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'config' ? 'is-active' : ''}" data-pm2-tab="config" aria-selected="${tab === 'config'}">
+          ${escapeHtml(t('pm2.tabConfig'))}
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'logs' ? 'is-active' : ''}" data-pm2-tab="logs" aria-selected="${tab === 'logs'}">
+          ${escapeHtml(t('pm2.tabLogs'))}
+        </button>
+      </div>
+      <div class="usage-tab-body">
+        <div class="usage-tab-pane pm2-tab-pane" id="pm2-tab-runner" ${tab === 'runner' ? '' : 'hidden'}>
+          ${runnerPane}
+        </div>
+        <div class="usage-tab-pane pm2-tab-pane" id="pm2-tab-port" ${tab === 'port' ? '' : 'hidden'}>
+          ${portPane}
+        </div>
+        <div class="usage-tab-pane pm2-tab-pane" id="pm2-tab-config" ${tab === 'config' ? '' : 'hidden'}>
+          ${configPane}
+        </div>
+        <div class="usage-tab-pane pm2-tab-pane" id="pm2-tab-logs" ${tab === 'logs' ? '' : 'hidden'}>
+          ${logsPane}
+        </div>
+      </div>
     </div>
   `);
   bindShell();
 
-  document.getElementById('pm2-logs-refresh')?.addEventListener('click', () =>
-    renderPm2().catch(onErr),
-  );
+  document.querySelectorAll('[data-pm2-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const raw = btn.getAttribute('data-pm2-tab') || 'runner';
+      const next =
+        raw === 'port' || raw === 'config' || raw === 'logs' || raw === 'runner'
+          ? raw
+          : 'runner';
+      if (state.pm2Tab === next) return;
+      state.pm2Tab = next;
+      renderPm2().catch(onErr);
+    });
+  });
+
+  document.getElementById('pm2-logs-refresh')?.addEventListener('click', () => {
+    state.pm2Tab = 'logs';
+    renderPm2().catch(onErr);
+  });
   document.getElementById('pm2-logs-clear')?.addEventListener('click', async () => {
     if (
       !(await uiConfirm({
@@ -5001,11 +6485,24 @@ async function renderPm2() {
         method: 'POST',
         body: JSON.stringify({ mode }),
       });
-      await uiAlert(
-        formatPm2Message(res.data) ||
-          (res.data && res.data.message) ||
-          t('pm2.switchScheduled'),
+      const payload = res?.data || res || {};
+      const alertMsg = buildPm2SwitchAlertMessage(
+        mode === 'pm2' ? 'pm2' : 'gctoac',
+        payload,
       );
+      // Auto F5 after 10s (server restarts under new runner)
+      scheduleAdminReload(10);
+      await uiAlert({
+        title: t('common.notice'),
+        message: alertMsg,
+        confirmText: t('common.ok'),
+      });
+      // If user confirms early, reload immediately
+      try {
+        window.location.reload();
+      } catch {
+        window.location.href = window.location.href;
+      }
     } catch (e) {
       onErr(e);
     }
@@ -5070,9 +6567,22 @@ async function renderPm2() {
         const portMsg = res.data.portChange
           ? `\n${tf('pm2.portChangedMsg', { from: res.data.portChange.previous, to: res.data.portChange.port })}`
           : '';
-        await uiAlert(
-          (res.data.scheduled.message || t('pm2.switchScheduled')) + portMsg,
-        );
+        const scheduledBody =
+          formatPm2Message(res.data.scheduled) ||
+          t('pm2.switchScheduled');
+        scheduleAdminReload(10);
+        await uiAlert({
+          title: t('common.notice'),
+          message:
+            scheduledBody +
+            portMsg +
+            `\n${tf('pm2.autoRefreshIn', { n: 10 })}`,
+        });
+        try {
+          window.location.reload();
+        } catch {
+          window.location.href = window.location.href;
+        }
       } else {
         await uiAlert(
           res.data?.portChange
@@ -6354,7 +7864,7 @@ function applyStreamDelta(assistant, json) {
   if (!json || typeof json !== 'object') return false;
   // Error payload from our server mid-stream
   if (json.error) {
-    const msg = json.error.message || json.error.code || t('common.requestFailed');
+    const msg = formatApiError({ error: json.error });
     assistant.error = true;
     assistant.content = (assistant.content || '') + `\n✗ ${msg}`;
     return true;
@@ -7356,8 +8866,10 @@ async function render() {
 /** @type {ReturnType<typeof setInterval> | null} */
 let queueTimer = null;
 
-/** Queue list filter (mirrors chats / docs filter state) */
+/** Queue list filter + page tabs (mirrors media / usage) */
 const queueFilter = {
+  /** 'overview' | 'jobs' | 'policy' */
+  tab: 'overview',
   status: '',
   limit: 20,
   offset: 0,
@@ -7659,13 +9171,13 @@ function queueJobRowsHtml(jobs) {
             ? Date.now() - new Date(j.queuedAt).getTime()
             : null;
       return `
-    <tr>
+    <tr data-q-row="${escapeHtml(j.id)}">
       <td>
-        <div class="cell-primary mono">${escapeHtml((j.id || '').slice(0, 10))}…</div>
+        <div class="cell-primary mono" title="${escapeHtml(j.id || '')}">${escapeHtml((j.id || '').slice(0, 10))}…</div>
         <div class="cell-sub mono" title="${escapeHtml(j.requestId || '')}">${escapeHtml((j.requestId || '').slice(0, 18))}${(j.requestId || '').length > 18 ? '…' : ''}</div>
         ${
           j.errorMessage
-            ? `<div class="queue-job-err" title="${escapeHtml(j.errorMessage)}">${escapeHtml(String(j.errorMessage).slice(0, 100))}</div>`
+            ? `<div class="queue-job-err" title="${escapeHtml(j.errorMessage)}">${escapeHtml(String(j.errorMessage).slice(0, 80))}</div>`
             : ''
         }
       </td>
@@ -7674,38 +9186,40 @@ function queueJobRowsHtml(jobs) {
         ${badgeQueueStatus(j.status)}
         ${j.cancelRequested ? `<div class="cell-sub">${escapeHtml(t('queue.cancelReq'))}</div>` : ''}
       </td>
-      <td class="mono">${escapeHtml(j.model || '—')}</td>
+      <td class="mono" title="${escapeHtml(j.model || '')}">${escapeHtml(j.model || '—')}</td>
       <td><span class="queue-pri">${j.priority ?? '—'}</span></td>
       <td>
-        <div class="cell-primary mono">${escapeHtml((j.apiKeyId || '').slice(0, 8))}…</div>
+        <div class="cell-primary mono" title="${escapeHtml(j.apiKeyId || '')}">${escapeHtml((j.apiKeyId || '').slice(0, 8))}…</div>
       </td>
       <td class="mono">${j.attempt ?? 0}<span class="muted">/${j.maxAttempts ?? 1}</span></td>
       <td>
         <div class="cell-primary">${fmtTime(j.queuedAt)}</div>
         ${
           waitMs != null && j.status === 'queued'
-            ? `<div class="cell-sub">${escapeHtml(t('queue.wait'))}: ${fmtQueueAge(waitMs)}</div>`
+            ? `<div class="cell-sub" data-q-wait>${escapeHtml(t('queue.wait'))}: ${fmtQueueAge(waitMs)}</div>`
             : j.startedAt
               ? `<div class="cell-sub">${escapeHtml(t('queue.started'))}: ${fmtTime(j.startedAt)}</div>`
               : ''
         }
       </td>
-      <td class="row-actions">
+      <td>
+        <div class="row-actions">
         ${
           activeJob
-            ? `<button type="button" class="btn danger sm" data-q-cancel="${escapeHtml(j.id)}" title="${escapeHtml(t('queue.cancel'))}">${escapeHtml(t('queue.cancel'))}</button>`
+            ? `<button type="button" class="btn danger sm" data-q-cancel="${escapeHtml(j.id)}">${escapeHtml(t('queue.cancel'))}</button>`
             : ''
         }
         ${
           j.status === 'queued'
-            ? `<button type="button" class="btn secondary sm" data-q-pri="${escapeHtml(j.id)}" data-pri="${j.priority}" title="${escapeHtml(t('queue.priorityBtn'))}">${escapeHtml(t('queue.priorityBtn'))}</button>`
+            ? `<button type="button" class="btn secondary sm" data-q-pri="${escapeHtml(j.id)}" data-pri="${j.priority}">${escapeHtml(t('queue.priorityBtn'))}</button>`
             : ''
         }
         ${
           requeueable
-            ? `<button type="button" class="btn secondary sm" data-q-requeue="${escapeHtml(j.id)}" title="${escapeHtml(t('queue.requeue'))}">${escapeHtml(t('queue.requeue'))}</button>`
+            ? `<button type="button" class="btn secondary sm" data-q-requeue="${escapeHtml(j.id)}">${escapeHtml(t('queue.requeue'))}</button>`
             : ''
         }
+        </div>
       </td>
     </tr>`;
     })
@@ -7854,6 +9368,7 @@ function applyQueueSoftUpdate({ s, pol, jobs, total, by }) {
       document.getElementById('q-filter-dead')?.addEventListener('click', () => {
         queueFilter.status = 'dead';
         queueFilter.offset = 0;
+        queueFilter.tab = 'jobs';
         renderQueue().catch(onErr);
       });
       document.getElementById('q-purge-dlq')?.addEventListener('click', () => {
@@ -7864,12 +9379,27 @@ function applyQueueSoftUpdate({ s, pol, jobs, total, by }) {
     }
   }
 
+  // Tab badge counts (overview KPIs live on overview; jobs badge uses list total)
+  const setCount = (id, n) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(n ?? 0);
+  };
+  setCount('q-tab-count-jobs', total);
+  setCount('q-tab-count-dead', deadCount);
+
   const meta = document.getElementById('qk-jobs-meta');
   if (meta) meta.textContent = tf('queue.jobsMeta', { n: total });
 
   const tbody = document.querySelector('#queue-jobs-table tbody');
   if (tbody) {
-    tbody.innerHTML =
+    // Stable soft-refresh: skip DOM rewrite when row identity unchanged (avoids column jump)
+    const sig = jobs
+      .map(
+        (j) =>
+          `${j.id}|${j.status}|${j.priority}|${j.attempt}|${j.cancelRequested ? 1 : 0}|${j.errorMessage || ''}|${j.startedAt || ''}|${j.finishedAt || ''}`,
+      )
+      .join(';');
+    const nextBody =
       queueJobRowsHtml(jobs) ||
       `<tr class="empty-row"><td colspan="9">
         <div class="data-empty">
@@ -7877,7 +9407,29 @@ function applyQueueSoftUpdate({ s, pol, jobs, total, by }) {
           <strong>${escapeHtml(t('queue.empty'))}</strong>
         </div>
       </td></tr>`;
-    bindQueueRowActions();
+    if (tbody.dataset.qsig !== sig) {
+      const wrap = document.querySelector('#queue-jobs-table .table-wrap');
+      const sx = wrap?.scrollLeft || 0;
+      tbody.dataset.qsig = sig;
+      tbody.innerHTML = nextBody;
+      bindQueueRowActions();
+      if (wrap) wrap.scrollLeft = sx;
+    } else {
+      // Only refresh live wait ages in-place (no full reflow)
+      jobs.forEach((j) => {
+        if (j.status !== 'queued' || !j.queuedAt) return;
+        const waitMs = Date.now() - new Date(j.queuedAt).getTime();
+        const id = String(j.id || '');
+        let row = null;
+        tbody.querySelectorAll('[data-q-row]').forEach((el) => {
+          if (el.getAttribute('data-q-row') === id) row = el;
+        });
+        const waitEl = row?.querySelector('[data-q-wait]');
+        if (waitEl) {
+          waitEl.textContent = `${t('queue.wait')}: ${fmtQueueAge(waitMs)}`;
+        }
+      });
+    }
   }
 
   // Pager meta only (avoid rebuilding selects and resetting focus)
@@ -7969,7 +9521,6 @@ async function renderQueue(opts = {}) {
   const queued = s.queued ?? by.queued ?? 0;
   const depth = s.depth ?? queued + leased + running;
   const modeLabel = queueModeLabel(pol);
-  const modeTone = !pol.enabled || pol.paused || pol.drainMode ? 'warn' : 'ok';
 
   // Cache saved policy for preset matching (soft + full)
   state._queuePolicyCache = { ...pol };
@@ -7980,11 +9531,19 @@ async function renderQueue(opts = {}) {
     return;
   }
 
+  if (!queueFilter.tab) queueFilter.tab = 'overview';
+  const tab =
+    queueFilter.tab === 'jobs' || queueFilter.tab === 'policy'
+      ? queueFilter.tab
+      : 'overview';
+  queueFilter.tab = tab;
+
   const bodyHtml = queueJobRowsHtml(jobs);
 
   const filter = filterPanelHtml({
     title: t('queue.filterTitle'),
     hint: t('queue.filterHint'),
+    meta: tf('queue.jobsMeta', { n: total }),
     gridHtml: `
       <label>${escapeHtml(t('queue.filterStatus'))}
         <select id="qf-status">
@@ -8009,7 +9568,7 @@ async function renderQueue(opts = {}) {
       <th>${escapeHtml(t('queue.colKey'))}</th>
       <th>${escapeHtml(t('queue.colTry'))}</th>
       <th>${escapeHtml(t('queue.colTime'))}</th>
-      <th></th>`,
+      <th>${escapeHtml(t('common.actions'))}</th>`,
     bodyHtml,
     colSpan: 9,
     emptyText: t('queue.empty'),
@@ -8026,80 +9585,72 @@ async function renderQueue(opts = {}) {
 
   const queueOn = pol.enabled !== false;
 
-  document.getElementById('app').innerHTML = shell(`
-  <div id="queue-root" class="${queueOn ? '' : 'is-feature-off'}">
-    <div class="topbar">
-      <h2>${escapeHtml(t('queue.title'))}</h2>
-      <div class="toolbar">
-        ${masterToggleBtnHtml({
-          id: 'q-master-enabled',
-          on: queueOn,
-          onLabel: t('queue.masterOn'),
-          offLabel: t('queue.masterOff'),
-          title: t('queue.masterHint'),
-        })}
-        <button type="button" class="btn secondary sm" id="q-refresh">${escapeHtml(t('queue.refresh'))}</button>
-        <button type="button" class="btn secondary sm" id="q-pause">${escapeHtml(pol.paused ? t('queue.resume') : t('queue.pause'))}</button>
-        <button type="button" class="btn secondary sm" id="q-drain">${escapeHtml(pol.drainMode ? t('queue.undrain') : t('queue.drainBtn'))}</button>
-        <button type="button" class="btn danger sm" id="q-purge">${escapeHtml(t('queue.purgeDead'))}</button>
-      </div>
-    </div>
-    <p class="page-hint">${escapeHtml(t('queue.subtitle'))}</p>
-    <div class="feature-off-banner" id="queue-disabled-banner" ${queueOn ? 'hidden' : ''} role="status">
-      <strong>${escapeHtml(t('common.featureOff'))}</strong>
-      <span>${escapeHtml(t('queue.disabledBanner'))}</span>
-    </div>
+  /** Standard page KPI card (.grid > .card) — same as Usage / DDoS */
+  const kpiCard = (label, valueHtml, subText, valueId, subId) => `
+    <div class="card">
+      <div class="label">${escapeHtml(label)}</div>
+      <div class="value value-sm" id="${escapeHtml(valueId)}">${valueHtml}</div>
+      ${
+        subText != null && subText !== ''
+          ? `<div class="muted card-sub"${subId ? ` id="${escapeHtml(subId)}"` : ''}>${escapeHtml(String(subText))}</div>`
+          : ''
+      }
+    </div>`;
 
-    <div class="dash-kpi-grid queue-kpi-grid">
-      ${dashKpiCard({
-        label: t('queue.depth'),
-        value: String(depth),
-        valueId: 'qk-depth',
-        sub: tf('queue.kpiDepthSub', { q: queued, l: leased }),
-        subId: 'qk-depth-sub',
-        tone: depth > 20 ? 'warn' : depth > 0 ? 'primary' : '',
-      })}
-      ${dashKpiCard({
-        label: t('queue.activeJobs'),
-        value: `${running}<span class="dash-kpi-den">/${pol.globalConcurrency ?? '—'}</span>`,
-        valueId: 'qk-running',
-        sub: tf('queue.kpiActiveSub', { n: s.workerActive ?? 0 }),
-        subId: 'qk-running-sub',
-        tone: running >= (pol.globalConcurrency || 1) ? 'warn' : '',
-      })}
-      ${dashKpiCard({
-        label: t('queue.queued'),
-        value: String(queued),
-        valueId: 'qk-queued',
-        sub: t('queue.kpiQueuedSub'),
-      })}
-      ${dashKpiCard({
-        label: t('queue.dead'),
-        value: String(deadCount),
-        valueId: 'qk-dead',
-        sub: t('queue.kpiDeadSub'),
-        tone: deadCount > 0 ? 'danger' : 'ok',
-      })}
-      ${dashKpiCard({
-        label: t('queue.oldest'),
-        value: s.oldestQueuedAgeMs ? fmtQueueAge(s.oldestQueuedAgeMs) : '—',
-        valueId: 'qk-oldest',
-        sub: t('queue.kpiOldestSub'),
-        tone: (s.oldestQueuedAgeMs || 0) > 60_000 ? 'warn' : '',
-      })}
-      ${dashKpiCard({
-        label: t('queue.mode'),
-        value: modeLabel,
-        valueId: 'qk-mode',
-        sub: fairnessLabel,
-        subId: 'qk-mode-sub',
-        tone: modeTone === 'ok' ? 'ok' : 'warn',
-      })}
-    </div>
+  // Always-visible KPI strip (same .grid/.card pattern as Usage & DDoS)
+  const kpiGrid = `
+    <div class="grid queue-kpi-grid" id="queue-kpi-grid">
+      ${kpiCard(
+        t('queue.depth'),
+        escapeHtml(String(depth)),
+        tf('queue.kpiDepthSub', { q: queued, l: leased }),
+        'qk-depth',
+        'qk-depth-sub',
+      )}
+      ${kpiCard(
+        t('queue.activeJobs'),
+        `${running}<span class="dash-kpi-den">/${pol.globalConcurrency ?? '—'}</span>`,
+        tf('queue.kpiActiveSub', { n: s.workerActive ?? 0 }),
+        'qk-running',
+        'qk-running-sub',
+      )}
+      ${kpiCard(
+        t('queue.queued'),
+        escapeHtml(String(queued)),
+        t('queue.kpiQueuedSub'),
+        'qk-queued',
+        'qk-queued-sub',
+      )}
+      ${kpiCard(
+        t('queue.dead'),
+        escapeHtml(String(deadCount)),
+        t('queue.kpiDeadSub'),
+        'qk-dead',
+        'qk-dead-sub',
+      )}
+      ${kpiCard(
+        t('queue.oldest'),
+        escapeHtml(s.oldestQueuedAgeMs ? fmtQueueAge(s.oldestQueuedAgeMs) : '—'),
+        t('queue.kpiOldestSub'),
+        'qk-oldest',
+        'qk-oldest-sub',
+      )}
+      ${kpiCard(
+        t('queue.mode'),
+        escapeHtml(modeLabel),
+        fairnessLabel,
+        'qk-mode',
+        'qk-mode-sub',
+      )}
+    </div>`;
 
+  const overviewPane = `
     <div class="panel data-table-panel queue-status-panel">
       <div class="panel-h">
-        <strong>${escapeHtml(t('queue.statusPanel'))}</strong>
+        <div class="panel-h-text">
+          <strong>${escapeHtml(t('queue.statusPanel'))}</strong>
+          <span class="muted panel-h-sub">${escapeHtml(t('queue.statusPanelHint'))}</span>
+        </div>
       </div>
       <div class="panel-pad">
         <div class="queue-status-row queue-status-row--6">
@@ -8148,13 +9699,18 @@ async function renderQueue(opts = {}) {
     </div>`
         : ''
     }
-    </div>
+    </div>`;
 
-    <div class="panel data-table-panel" id="queue-policy-panel" style="margin-bottom:14px">
+  const jobsPane = `
+    ${filter}
+    <div id="queue-jobs-table" class="queue-jobs-table-host">${table}</div>`;
+
+  const policyPane = `
+    <div class="panel data-table-panel queue-policy-panel" id="queue-policy-panel">
       <div class="panel-h">
-        <div>
+        <div class="panel-h-text">
           <strong>${escapeHtml(t('queue.policyTitle'))}</strong>
-          <span class="muted">${escapeHtml(t('queue.policyHint'))}</span>
+          <span class="muted panel-h-sub">${escapeHtml(t('queue.policyHint'))}</span>
         </div>
         ${queuePresetBadgeHtml(matchQueuePreset(pol))}
       </div>
@@ -8211,23 +9767,80 @@ async function renderQueue(opts = {}) {
             <span class="hint">${escapeHtml(t('queue.hintMaxWait'))}</span>
           </label>
         </div>
-        <div class="toolbar settings-save-bar" style="margin-top:14px">
+        <div class="toolbar settings-save-bar">
           <button type="button" class="btn sm" id="qp-save">${escapeHtml(t('queue.savePolicy'))}</button>
         </div>
       </div>
-    </div>
+    </div>`;
 
-    <div class="panel-section-head">
-      <div>
-        <strong>${escapeHtml(t('queue.jobs'))}</strong>
-        <span class="muted" id="qk-jobs-meta">${escapeHtml(tf('queue.jobsMeta', { n: total }))}</span>
+  document.getElementById('app').innerHTML = shell(`
+  <div id="queue-root" class="${queueOn ? '' : 'is-feature-off'}">
+    <div class="topbar">
+      <h2>${escapeHtml(t('queue.title'))}</h2>
+      <div class="toolbar">
+        ${masterToggleBtnHtml({
+          id: 'q-master-enabled',
+          on: queueOn,
+          onLabel: t('queue.masterOn'),
+          offLabel: t('queue.masterOff'),
+          title: t('queue.masterHint'),
+        })}
+        <button type="button" class="btn secondary sm" id="q-pause">${escapeHtml(pol.paused ? t('queue.resume') : t('queue.pause'))}</button>
+        <button type="button" class="btn secondary sm" id="q-drain">${escapeHtml(pol.drainMode ? t('queue.undrain') : t('queue.drainBtn'))}</button>
+        <button type="button" class="btn danger sm" id="q-purge">${escapeHtml(t('queue.purgeDead'))}</button>
       </div>
     </div>
-    ${filter}
-    <div id="queue-jobs-table">${table}</div>
+    ${pageMetaHtml([t('queue.subtitle')])}
+    <div class="feature-off-banner" id="queue-disabled-banner" ${queueOn ? 'hidden' : ''} role="status">
+      <strong>${escapeHtml(t('common.featureOff'))}</strong>
+      <span>${escapeHtml(t('queue.disabledBanner'))}</span>
+    </div>
+
+    ${kpiGrid}
+
+    <div class="usage-tabs-panel panel queue-tabs-panel">
+      <div class="seg-tabs" role="tablist" aria-label="${escapeHtml(t('queue.title'))}">
+        <button type="button" role="tab" class="seg-tab ${tab === 'overview' ? 'is-active' : ''}" data-queue-tab="overview" aria-selected="${tab === 'overview'}">
+          ${escapeHtml(t('queue.tabOverview'))}
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'jobs' ? 'is-active' : ''}" data-queue-tab="jobs" aria-selected="${tab === 'jobs'}">
+          ${escapeHtml(t('queue.tabJobs'))}
+          <span class="seg-tab-count" id="q-tab-count-jobs">${total}</span>
+        </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'policy' ? 'is-active' : ''}" data-queue-tab="policy" aria-selected="${tab === 'policy'}">
+          ${escapeHtml(t('queue.tabPolicy'))}
+        </button>
+      </div>
+      <div class="usage-tab-body">
+        <div class="usage-tab-pane queue-tab-pane-overview" id="queue-tab-overview" ${tab === 'overview' ? '' : 'hidden'}>
+          ${overviewPane}
+        </div>
+        <div class="usage-tab-pane queue-tab-pane-jobs" id="queue-tab-jobs" ${tab === 'jobs' ? '' : 'hidden'}>
+          ${jobsPane}
+        </div>
+        <div class="usage-tab-pane queue-tab-pane-policy" id="queue-tab-policy" ${tab === 'policy' ? '' : 'hidden'}>
+          ${policyPane}
+        </div>
+      </div>
+    </div>
   </div>
   `);
   bindShell();
+
+  document.querySelectorAll('[data-queue-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const next = btn.getAttribute('data-queue-tab') || 'overview';
+      if (next !== 'overview' && next !== 'jobs' && next !== 'policy') return;
+      if (queueFilter.tab === next) return;
+      queueFilter.tab = next;
+      if (next === 'jobs') {
+        /* keep filters */
+      } else {
+        /* policy/overview: no offset change */
+      }
+      renderQueue().catch(onErr);
+    });
+  });
 
   // Restore scroll after full rebuild (filter / save / navigation)
   if (savedScroll > 0) {
@@ -8259,7 +9872,6 @@ async function renderQueue(opts = {}) {
     }
   };
 
-  document.getElementById('q-refresh').onclick = () => renderQueue().catch(onErr);
   document.getElementById('q-pause').onclick = async () => {
     await api(pol.paused ? '/queue/resume' : '/queue/pause', {
       method: 'POST',
@@ -8294,6 +9906,7 @@ async function renderQueue(opts = {}) {
   document.getElementById('q-filter-dead')?.addEventListener('click', () => {
     queueFilter.status = 'dead';
     queueFilter.offset = 0;
+    queueFilter.tab = 'jobs';
     renderQueue().catch(onErr);
   });
 

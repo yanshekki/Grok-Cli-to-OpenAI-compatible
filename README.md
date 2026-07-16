@@ -23,11 +23,12 @@ Production OpenAI-compatible HTTP gateway for local **[Grok CLI](https://x.ai)**
 - Thinking / `reasoning_content` (DeepSeek-style + Grok `thought`)
 - Per-key **safe** / **agent** policy + global safety overrides
 - AES-256-GCM encryption + full chat audit
-- **Admin Panel** — OTP login (`gctoac admin otp`), dashboard, chats, keys, documents, audit, usage, **chat queue**, **DDoS center**, Safety settings, PM2, system update
-- **Durable chat queue** — every conversation is enqueued with leases, then consumed by an in-process worker; Admin pause / drain / cancel / DLQ; optional `Idempotency-Key`
+- **Admin Panel** — OTP login (`gctoac admin otp`), dashboard, chats, keys, documents, audit, usage, **media library**, **chat queue**, **DDoS center**, Safety settings, **API features**, PM2, system update — pages use a consistent **KPI + segmented tabs** layout
+- **Media library** — studio (generate / edit / image-to-video), assets & jobs tabs, browser preview lightbox (image / video / audio / PDF / text)
+- **Durable chat queue** — every conversation is enqueued with leases, then consumed by an in-process worker; Admin pause / drain / cancel / DLQ; optional `Idempotency-Key`; offline stream collect when no live Response
 - **DDoS / abuse protection** — configurable rate limits, multi-rule auto-ban, reverse-proxy client IP (nginx / Cloudflare)
 - Control CLI: lifecycle + **settings / api features / queue / ddos / keys / docs / chats / stats / models / admin sessions**
-- **API features** (Admin page + `gctoac api features`): protocol + Grok CLI capability gates (tools, vision, json-schema, effort, …)
+- **API features** (Admin tabs + `gctoac api features`): protocol + Grok CLI capability gates (tools, vision, json-schema, effort, …)
 
 ### Capability parity (Grok CLI–backed “100%”)
 
@@ -309,9 +310,10 @@ gctoac logs clear
 | Safe / Agent | Per-key policy; optional global force-safe |
 | Encryption | AES-256-GCM for prompts, responses, files |
 | Chat history | Multi-turn conversations, context modes (full / summary / recent) |
-| Admin Panel | OTP session login, dashboard, chats, keys, docs, audit, usage, **queue**, DDoS, Safety settings, PM2, system |
-| Chat queue | Durable SQLite jobs, fair RR, pause/drain, DLQ, Idempotency-Key, `QUEUE_BACKEND` |
-| DDoS center | Live connections, blacklist, auto-ban rules, presets, runtime policy |
+| Admin Panel | OTP session login; **tabbed** pages (queue / media / system / PM2 / DDoS / API features); compact EN/ZH copy |
+| Media library | Studio (gen/edit/video), assets & jobs, multi-format preview lightbox (`blob:` CSP-safe) |
+| Chat queue | Durable SQLite jobs, fair RR, pause/drain, DLQ, Idempotency-Key, `QUEUE_BACKEND`, offline stream fallback |
+| DDoS center | Live connections, blacklist, auto-ban rules, presets, runtime policy (tabbed) |
 | Reverse proxy | Trust hops + CF / nginx / X-Forwarded-For client IP |
 | Auth | API keys: **scrypt** hashes (legacy SHA-256 auto-migrates); Admin SPA: OTP → session token |
 | CLI | Full control plane: lifecycle, settings, queue, DDoS, keys, docs, chats, stats, `admin otp` |
@@ -555,11 +557,15 @@ Admin **JSON API** (`/admin/api/*`) accepts either:
 | **Documents** | Search / filter / pager; preview, download, delete; storage DB vs filesystem |
 | **Audit Logs** | Search / filter / pager; human-readable actions |
 | **Usage & limits** | 24h stats, by-model / by-key tabs, gateway limit summary |
-| **Queue** | Durable job list, DLQ / status filter, pause/drain, concurrency & fairness policy, cancel/requeue/priority/purge |
-| **DDoS center** | Live connections, blacklist, auto-ban events, **runtime protection policy** (presets: relaxed / balanced / strict / custom), reverse-proxy IP settings |
-| **Safety settings** | Global safe mode, safe tools / turns / timeout, default model, disable Admin panel (re-enable only via CLI) |
-| **PM2** | Runner switch (gctoac ↔ PM2), **listen port** (default 3847), config, **clear logs** + auto-trim |
-| **System** | Health, software checks, one-click update & restart |
+| **Media** | **Tabs:** Studio · Assets · Jobs. KPI strip. Studio modes: generate / edit / image-to-video (Grok aspect ratios). Library picker + drag-drop source. Preview lightbox (image/video/audio/PDF/text) |
+| **Queue** | **Tabs:** Overview · Jobs · Policy. KPI strip (auto soft-refresh). Pause/drain, DLQ filter, cancel/requeue/priority/purge, concurrency & fairness presets |
+| **DDoS center** | **Tabs:** Policy · Traffic · Blacklist · Events. KPI strip. Live connections, recent requests, auto-ban events, top IPs, **runtime protection policy** (relaxed / balanced / strict / custom), reverse-proxy IP |
+| **Safety settings** | Global safe mode, tools / turns / timeout, default model, concise presets, disable Admin panel (re-enable only via CLI) |
+| **API features** | **Tabs:** Protocols · Media · Capabilities · Emulation. KPI enabled counts. Presets: open / locked / dev |
+| **PM2** | **Tabs:** Runner · Port · Config · Logs. KPI process strip. Runner switch (gctoac ↔ PM2), listen port (default 3847), config, clear logs + auto-trim |
+| **System** | **Tabs:** Software · Package · Environment. KPI runtime strip (DB / Grok CLI / concurrency / encryption). One-click update & restart |
+
+Shared Admin UX: segmented tabs + top KPI cards, compact formal EN/ZH strings, table action buttons centered; only operational pages keep a top-right **Refresh** (dashboard / usage / DDoS / PM2).
 
 ### DDoS / abuse (runtime)
 

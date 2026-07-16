@@ -1,7 +1,8 @@
 import { API_BASE } from '../config/constants';
 import { getToken, logout } from '../state/store';
 import type { ApiErrorBody } from '../types/api/common';
-import { t } from '../i18n';
+import { hasT, t } from '../i18n';
+import { formatApiError } from './api-error';
 
 export class HttpError extends Error {
   readonly status: number;
@@ -76,13 +77,19 @@ export async function apiSend<T = unknown>(
 
   if (!res.ok) {
     const errBody = data as ApiErrorBody;
-    const msg =
-      errBody?.error?.message ||
-      errBody?.message ||
-      res.statusText ||
-      t('common.requestFailed');
-    if (res.status === 401 || res.status === 403) {
+    const msg = formatApiError(data, res.statusText, t, hasT);
+    const code = errBody?.error?.code || '';
+    if (res.status === 401) {
       logout(false);
+    } else if (res.status === 403) {
+      // Keep session for permission / feature errors
+      const keepSession = [
+        'media_forbidden',
+        'feature_disabled',
+        'forbidden',
+        'media_not_supported',
+      ].includes(code);
+      if (!keepSession) logout(false);
     }
     throw new HttpError(msg, res.status, data);
   }

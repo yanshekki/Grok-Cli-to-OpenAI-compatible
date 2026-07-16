@@ -13,6 +13,8 @@ export class VideosController {
       prompt: dto.prompt,
       model: dto.model,
       seconds: dto.seconds,
+      aspectRatio: dto.aspect_ratio,
+      sourceAssetId: dto.source_asset_id,
     });
     res.status(200).json(job);
   });

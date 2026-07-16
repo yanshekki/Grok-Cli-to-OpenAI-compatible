@@ -10,7 +10,8 @@ import { requestIp } from '../utils/client-ip';
 function assertFilesAlias() {
   return apiFeaturesService.get().then((f) => {
     if (!f.filesOpenAiAlias) {
-      throw ExceptionFactory.mediaNotSupported(
+      throw ExceptionFactory.featureDisabled(
+        'filesOpenAiAlias',
         'OpenAI /v1/files alias is disabled (Admin → API features → filesOpenAiAlias)',
       );
     }

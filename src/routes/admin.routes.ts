@@ -10,6 +10,8 @@ import {
 } from '../dto/admin.dto';
 import { ddosPolicyUpdateSchema } from '../dto/ddos.dto';
 import { adminPlaygroundChatSchema } from '../dto/chat.dto';
+import { createImageGenerationSchema } from '../dto/images.dto';
+import { z } from 'zod';
 import {
   conversationListQuerySchema,
   createConversationSchema,
@@ -18,6 +20,7 @@ import {
 import { requireAdminAuth } from '../middlewares/auth.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import { uploadSingle } from '../middlewares/upload.middleware';
+import { uploadImageEdit } from '../middlewares/upload-images.middleware';
 import { env } from '../config/env';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { settingsService } from '../services/settings.service';
@@ -179,6 +182,27 @@ router.delete(
   adminController.deleteAsset,
 );
 router.get('/media/jobs', adminController.listJobs);
+router.post(
+  '/media/generate',
+  validate(
+    createImageGenerationSchema.extend({
+      apiKeyId: z.string().uuid().optional(),
+    }),
+    'body',
+  ),
+  adminController.generateImage,
+);
+router.post(
+  '/media/edit',
+  uploadImageEdit,
+  adminController.editImage,
+);
+router.post(
+  '/media/videos',
+  // Optional source frame upload (field `image`) + form fields, or pure JSON body
+  uploadImageEdit,
+  adminController.createVideo,
+);
 
 // DDoS control center
 router.get('/ddos/connections', adminController.ddosConnections);
