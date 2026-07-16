@@ -569,21 +569,31 @@ export class ChatQueueService implements ChatQueueBackend {
     };
   }
 
+  /**
+   * Purge terminal jobs:
+   * - DEAD (DLQ): always deletable (any age) — user expects banner purge to clear them
+   * - succeeded / failed / cancelled: only if finishedAt older than 24h
+   */
   async purgeDead(): Promise<number> {
-    const r = await prisma.chatJob.deleteMany({
-      where: {
-        status: {
-          in: [
-            CHAT_JOB_STATUS.DEAD,
-            CHAT_JOB_STATUS.FAILED,
-            CHAT_JOB_STATUS.CANCELLED,
-            CHAT_JOB_STATUS.SUCCEEDED,
-          ],
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [dead, aged] = await Promise.all([
+      prisma.chatJob.deleteMany({
+        where: { status: CHAT_JOB_STATUS.DEAD },
+      }),
+      prisma.chatJob.deleteMany({
+        where: {
+          status: {
+            in: [
+              CHAT_JOB_STATUS.FAILED,
+              CHAT_JOB_STATUS.CANCELLED,
+              CHAT_JOB_STATUS.SUCCEEDED,
+            ],
+          },
+          finishedAt: { lt: cutoff },
         },
-        finishedAt: { lt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-      },
-    });
-    return r.count;
+      }),
+    ]);
+    return dead.count + aged.count;
   }
 }
 
