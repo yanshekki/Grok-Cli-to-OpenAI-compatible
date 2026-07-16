@@ -14,9 +14,20 @@ export interface OpenAiChatCompletionChunk {
       reasoning_content?: string;
       /** Grok alias of reasoning_content */
       thought?: string;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: { name?: string; arguments?: string };
+      }>;
     };
-    finish_reason: 'stop' | 'length' | 'content_filter' | null;
+    finish_reason: 'stop' | 'length' | 'content_filter' | 'tool_calls' | null;
   }>;
   /** Present on final chunk when available */
   grok?: GrokResponseMeta;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }

@@ -3,8 +3,6 @@ import { env } from '../config/env';
 import { SETTING_KEYS, SAFE_TOOLS_MODES } from '../config/constants';
 import type { AppSettings } from '../interfaces/app-settings.type';
 
-export type { AppSettings } from '../interfaces/app-settings.type';
-
 const DEFAULTS: AppSettings = {
   globalSafeMode: false,
   safeMaxTurns: 4,

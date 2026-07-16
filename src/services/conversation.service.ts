@@ -8,6 +8,10 @@ import type {
   UpdateConversationDto,
 } from '../dto/conversation.dto';
 import { toBytes } from '../utils/prisma-bytes';
+import {
+  isSyntheticApiKeyId,
+  toPersistentApiKeyId,
+} from '../utils/api-key-id';
 import { encryptionService } from './encryption.service';
 
 const PREVIEW_MAX = 80;
@@ -185,12 +189,24 @@ export class ConversationService {
     const enc = encryptMessages(messages);
     const preview = firstUserPreview(messages);
 
+    // Nullable FK — never store OTP session synthetic ids
+    let apiKeyId: string | null = null;
+    if (dto.apiKeyId && !isSyntheticApiKeyId(dto.apiKeyId)) {
+      apiKeyId = dto.apiKeyId;
+    } else if (dto.apiKeyId && isSyntheticApiKeyId(dto.apiKeyId)) {
+      try {
+        apiKeyId = await toPersistentApiKeyId(dto.apiKeyId);
+      } catch {
+        apiKeyId = null;
+      }
+    }
+
     const row = await prisma.chatConversation.create({
       data: {
         title: (dto.title ?? '').trim(),
         model: dto.model ?? null,
         systemPrompt: dto.systemPrompt ?? '',
-        apiKeyId: dto.apiKeyId ?? null,
+        apiKeyId,
         messagesCiphertext: toBytes(enc.ciphertext),
         messagesIv: toBytes(enc.iv),
         messagesTag: toBytes(enc.tag),
@@ -223,9 +239,18 @@ export class ConversationService {
       data.systemPrompt = dto.systemPrompt;
     }
     if (dto.apiKeyId !== undefined) {
-      data.apiKey = dto.apiKeyId
-        ? { connect: { id: dto.apiKeyId } }
-        : { disconnect: true };
+      if (!dto.apiKeyId || isSyntheticApiKeyId(dto.apiKeyId)) {
+        try {
+          const id = dto.apiKeyId
+            ? await toPersistentApiKeyId(dto.apiKeyId)
+            : null;
+          data.apiKey = id ? { connect: { id } } : { disconnect: true };
+        } catch {
+          data.apiKey = { disconnect: true };
+        }
+      } else {
+        data.apiKey = { connect: { id: dto.apiKeyId } };
+      }
     }
     if (dto.messages !== undefined) {
       const cleaned = dto.messages.filter((m) => !m.compressed);

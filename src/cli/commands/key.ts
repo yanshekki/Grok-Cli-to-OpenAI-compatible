@@ -7,10 +7,14 @@ import {
   createKey,
   listKeys,
   revokeKey,
-  normalizeKeyRole,
-  type KeyMode,
+  getKey,
+  updateKey,
+  activateKey,
 } from '../lib/db-keys';
+import type { ApiKeyMode } from '../../interfaces';
+import { normalizeApiKeyRole } from '../../utils/role-normalize';
 import { fail, info, ok, warn } from '../lib/print';
+import { emitJson, parseOnOff } from '../lib/runtime-context';
 
 function printCreatedKey(
   key: {
@@ -55,8 +59,8 @@ export async function cmdKeyCreate(opts: {
   const env = ensureEnvFile(paths);
   loadEnvIntoProcess(paths.envFile);
 
-  const role = normalizeKeyRole(opts.role);
-  const mode: KeyMode = opts.mode === 'agent' ? 'agent' : 'safe';
+  const role = normalizeApiKeyRole(opts.role);
+  const mode: ApiKeyMode = opts.mode === 'agent' ? 'agent' : 'safe';
   const databaseUrl = env.DATABASE_URL || paths.databaseUrl;
   const port = env.PORT || DEFAULT_PORT;
 
@@ -121,4 +125,127 @@ export async function cmdKeyRevoke(opts: {
     return;
   }
   ok(`Revoked key ${opts.id}`);
+}
+
+export async function cmdKeyShow(opts: {
+  home?: string;
+  forceHome?: boolean;
+  id: string;
+  json?: boolean;
+}): Promise<void> {
+  const paths = resolveRuntimePaths({
+    home: opts.home,
+    forceHome: opts.forceHome ?? Boolean(opts.home),
+  });
+  const env = ensureEnvFile(paths);
+  loadEnvIntoProcess(paths.envFile);
+  const databaseUrl = env.DATABASE_URL || paths.databaseUrl;
+  const key = await getKey(databaseUrl, opts.id);
+  if (!key) {
+    fail(`Key not found: ${opts.id}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (opts.json) {
+    emitJson(key);
+    return;
+  }
+  info(`API key ${key.id}`);
+  info(`  name:       ${key.name}`);
+  info(`  role:       ${key.role}`);
+  info(`  mode:       ${key.mode}`);
+  info(`  active:     ${key.isActive}`);
+  info(`  rateLimit:  ${key.rateLimit}`);
+  info(`  prefix:     ${key.keyPrefix}`);
+  info(`  createdAt:  ${key.createdAt.toISOString()}`);
+  info(`  lastUsedAt: ${key.lastUsedAt?.toISOString() ?? '—'}`);
+}
+
+export async function cmdKeyUpdate(opts: {
+  home?: string;
+  forceHome?: boolean;
+  id: string;
+  name?: string;
+  role?: string;
+  mode?: string;
+  rateLimit?: number;
+  active?: string;
+  json?: boolean;
+}): Promise<void> {
+  const paths = resolveRuntimePaths({
+    home: opts.home,
+    forceHome: opts.forceHome ?? Boolean(opts.home),
+  });
+  const env = ensureEnvFile(paths);
+  loadEnvIntoProcess(paths.envFile);
+  const databaseUrl = env.DATABASE_URL || paths.databaseUrl;
+
+  let isActive: boolean | undefined;
+  try {
+    if (opts.active !== undefined) isActive = parseOnOff(opts.active);
+  } catch (e) {
+    fail(e instanceof Error ? e.message : String(e));
+    process.exitCode = 1;
+    return;
+  }
+
+  const mode: ApiKeyMode | undefined =
+    opts.mode === undefined
+      ? undefined
+      : opts.mode === 'agent'
+        ? 'agent'
+        : 'safe';
+
+  if (
+    opts.name === undefined &&
+    opts.role === undefined &&
+    mode === undefined &&
+    opts.rateLimit === undefined &&
+    isActive === undefined
+  ) {
+    fail('No fields to update. Use --name/--role/--mode/--rate-limit/--active');
+    process.exitCode = 1;
+    return;
+  }
+
+  const key = await updateKey(databaseUrl, opts.id, {
+    name: opts.name,
+    role: opts.role,
+    mode,
+    rateLimit: opts.rateLimit,
+    isActive,
+  });
+  if (!key) {
+    fail(`Key not found: ${opts.id}`);
+    process.exitCode = 1;
+    return;
+  }
+  ok(`Updated key ${key.id}`);
+  if (opts.json) emitJson(key);
+  else {
+    info(
+      `  ${key.name} · ${key.role}/${key.mode} · active=${key.isActive} · rate=${key.rateLimit}`,
+    );
+  }
+}
+
+export async function cmdKeyActivate(opts: {
+  home?: string;
+  forceHome?: boolean;
+  id: string;
+}): Promise<void> {
+  const paths = resolveRuntimePaths({
+    home: opts.home,
+    forceHome: opts.forceHome ?? Boolean(opts.home),
+  });
+  const env = ensureEnvFile(paths);
+  loadEnvIntoProcess(paths.envFile);
+  const databaseUrl = env.DATABASE_URL || paths.databaseUrl;
+  const okAct = await activateKey(databaseUrl, opts.id);
+  if (!okAct) {
+    fail(`Key not found: ${opts.id}`);
+    process.exitCode = 1;
+    return;
+  }
+  ok(`Activated key ${opts.id}`);
 }

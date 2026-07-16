@@ -3,4 +3,5 @@ export interface GrokResponseMeta {
   sessionId?: string;
   stopReason?: string;
   requestId?: string;
+  numTurns?: number;
 }

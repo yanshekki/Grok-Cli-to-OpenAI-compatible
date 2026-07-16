@@ -1,5 +1,8 @@
 import type { CreateChatCompletionDto } from '../dto/chat.dto';
 
+/** SSE wire format for multi-protocol streaming */
+export type StreamWireFormat = 'openai' | 'anthropic' | 'responses';
+
 /** Encrypted payload stored on ChatJob */
 export interface ChatJobPayload {
   dto: CreateChatCompletionDto;
@@ -20,4 +23,6 @@ export interface ChatJobPayload {
   ip?: string;
   userAgent?: string;
   source: 'v1' | 'playground';
+  /** How to format SSE when streaming (default openai) */
+  wireFormat?: StreamWireFormat;
 }

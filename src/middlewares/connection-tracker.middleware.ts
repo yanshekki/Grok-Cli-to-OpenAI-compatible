@@ -5,8 +5,6 @@ import { getClientIp } from '../utils/client-ip';
 import { abuseGuardService } from '../services/abuse-guard.service';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 
-export type { TrackedConnection } from '../interfaces/tracked-connection.interface';
-
 const MAX_RECENT = 200;
 const active = new Map<string, TrackedConnection>();
 const recent: TrackedConnection[] = [];

@@ -1,17 +1,10 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
-
-function createApiKeySecret(): string {
-  return `gk_live_${randomBytes(24).toString('base64url')}`;
-}
-
-function hashApiKey(rawKey: string): string {
-  return createHash('sha256').update(rawKey, 'utf8').digest('hex');
-}
-
-function apiKeyPrefix(rawKey: string): string {
-  return rawKey.slice(0, 16);
-}
+import {
+  apiKeyPrefix,
+  createApiKeySecret,
+  hashApiKey,
+} from '../../utils/api-key-crypto';
 
 export interface SeedAdminResult {
   created: boolean;
@@ -86,7 +79,9 @@ export async function seedAdmin(options?: {
     });
 
     const port = String(options?.port ?? process.env.PORT ?? '3847');
-    console.log('Created bootstrap admin API key (store it securely — shown once):');
+    console.log(
+      'Created bootstrap admin API key (store it securely — shown once):',
+    );
     console.log(`  id:   ${created.id}`);
     console.log(`  key:  ${rawKey}`);
     console.log('');

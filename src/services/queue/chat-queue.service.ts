@@ -42,6 +42,7 @@ export class ChatQueueService implements ChatQueueBackend {
     ctx: ChatContext;
     source: 'v1' | 'playground';
     idempotencyKey?: string;
+    wireFormat?: import('../../interfaces/chat-job-payload.interface').StreamWireFormat;
   }): Promise<EnqueueResult> {
     const policy = await queuePolicyService.get();
     if (!policy.enabled) {
@@ -103,9 +104,13 @@ export class ChatQueueService implements ChatQueueBackend {
       );
     }
 
+    // OTP sessions use synthetic ids — index / fair-share on a real key row
+    const { toPersistentApiKeyId } = await import('../../utils/api-key-id');
+    const ownerApiKeyId = await toPersistentApiKeyId(input.ctx.apiKey.id);
+
     const perKey = await prisma.chatJob.count({
       where: {
-        apiKeyId: input.ctx.apiKey.id,
+        apiKeyId: ownerApiKeyId,
         status: {
           in: [
             CHAT_JOB_STATUS.QUEUED,
@@ -129,8 +134,10 @@ export class ChatQueueService implements ChatQueueBackend {
     const payload: ChatJobPayload = {
       dto: input.dto,
       requestId: input.ctx.requestId,
-      apiKeyId: input.ctx.apiKey.id,
+      apiKeyId: ownerApiKeyId,
       apiKeySnapshot: {
+        // Keep live actor identity (incl. OTP session) for policy/mode;
+        // column apiKeyId is the persistent owner for fair-share & filters.
         id: input.ctx.apiKey.id,
         name: input.ctx.apiKey.name,
         keyPrefix: input.ctx.apiKey.keyPrefix,
@@ -145,6 +152,7 @@ export class ChatQueueService implements ChatQueueBackend {
       ip: input.ctx.ip,
       userAgent: input.ctx.userAgent,
       source: input.source,
+      wireFormat: input.wireFormat || 'openai',
     };
 
     const enc = encryptionService.encrypt(JSON.stringify(payload));
@@ -154,7 +162,7 @@ export class ChatQueueService implements ChatQueueBackend {
       data: {
         id,
         requestId: input.ctx.requestId,
-        apiKeyId: input.ctx.apiKey.id,
+        apiKeyId: ownerApiKeyId,
         source: input.source,
         status: CHAT_JOB_STATUS.QUEUED,
         priority,
@@ -172,7 +180,8 @@ export class ChatQueueService implements ChatQueueBackend {
     logger.info(
       {
         jobId: id,
-        apiKeyId: input.ctx.apiKey.id,
+        apiKeyId: ownerApiKeyId,
+        actorApiKeyId: input.ctx.apiKey.id,
         source: input.source,
         position,
         priority,

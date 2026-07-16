@@ -7,8 +7,6 @@ import type { OpenAiModel } from '../interfaces/open-ai-model.interface';
 import type { OpenAiModelList } from '../interfaces/open-ai-model-list.interface';
 import { createChatCompletionId } from './id';
 
-export type { MapCompletionOptions } from '../interfaces/map-completion-options.interface';
-
 export function mapGrokToChatCompletion(
   model: string,
   result: GrokJsonResult,
@@ -21,9 +19,10 @@ export function mapGrokToChatCompletion(
       ? options.reasoningContent
       : null;
 
+  const toolCalls = options.toolCalls?.length ? options.toolCalls : undefined;
   const message: OpenAiChatCompletion['choices'][0]['message'] = {
     role: 'assistant',
-    content: result.text ?? '',
+    content: toolCalls?.length && !(result.text ?? '').trim() ? null : (result.text ?? ''),
   };
 
   if (includeReasoning && reasoning) {
@@ -33,8 +32,20 @@ export function mapGrokToChatCompletion(
     message.reasoning_content = null;
     message.thought = null;
   }
+  if (toolCalls?.length) {
+    message.tool_calls = toolCalls;
+  }
 
-  const finishReason = mapStopReason(result.stopReason ?? options.grok?.stopReason);
+  let finishReason = mapStopReason(result.stopReason ?? options.grok?.stopReason);
+  if (toolCalls?.length && !(result.text ?? '').trim()) {
+    finishReason = 'tool_calls';
+  }
+
+  const usage = options.usage || {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  };
 
   const response: OpenAiChatCompletion = {
     id: completionId,
@@ -49,11 +60,7 @@ export function mapGrokToChatCompletion(
         logprobs: null,
       },
     ],
-    usage: {
-      prompt_tokens: 0,
-      completion_tokens: 0,
-      total_tokens: 0,
-    },
+    usage,
   };
 
   const grok = buildGrokMeta(result, options.grok);
@@ -144,6 +151,10 @@ export function mapFinishChunk(
   stopReason?: string,
   grok?: GrokResponseMeta,
 ): OpenAiChatCompletionChunk {
+  const fr =
+    stopReason === 'tool_calls'
+      ? ('tool_calls' as const)
+      : mapStopReason(stopReason);
   const chunk: OpenAiChatCompletionChunk = {
     id: completionId,
     object: 'chat.completion.chunk',
@@ -153,11 +164,11 @@ export function mapFinishChunk(
       {
         index: 0,
         delta: {},
-        finish_reason: mapStopReason(stopReason),
+        finish_reason: fr,
       },
     ],
   };
-  if (grok && (grok.sessionId || grok.stopReason || grok.requestId)) {
+  if (grok && (grok.sessionId || grok.stopReason || grok.requestId || grok.numTurns)) {
     chunk.grok = grok;
   }
   return chunk;
@@ -173,9 +184,12 @@ export function mapModelsList(models: string[]): OpenAiModelList {
   return { object: 'list', data };
 }
 
-function mapStopReason(stopReason?: string): 'stop' | 'length' | 'content_filter' {
+function mapStopReason(
+  stopReason?: string,
+): 'stop' | 'length' | 'content_filter' | 'tool_calls' {
   if (!stopReason) return 'stop';
   const lower = stopReason.toLowerCase();
+  if (lower.includes('tool')) return 'tool_calls';
   if (lower.includes('length') || lower.includes('max')) return 'length';
   if (lower.includes('filter') || lower.includes('content')) return 'content_filter';
   return 'stop';
@@ -196,22 +210,5 @@ function buildGrokMeta(
   return meta;
 }
 
-/**
- * Build prompt from messages.
- * Multi-turn: uses role + content only (DeepSeek-style: prior reasoning_content not required).
- * If an assistant message only has reasoning_content, it is ignored unless content is empty
- * and we fall back (should not normally happen).
- */
-export function messagesToPrompt(
-  messages: Array<{ role: string; content: string; reasoning_content?: string | null }>,
-): string {
-  if (messages.length === 1) {
-    return messages[0]?.content ?? '';
-  }
-  return messages
-    .map((m) => {
-      // Mainstream: only final answer content participates in context
-      return `${m.role}: ${m.content}`;
-    })
-    .join('\n');
-}
+/** @deprecated Import from `utils/message-content` */
+export { messagesToPrompt } from './message-content';

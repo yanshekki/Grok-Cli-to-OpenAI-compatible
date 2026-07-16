@@ -1,5 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 
+export { createApiKeySecret, apiKeyPrefix } from './api-key-crypto';
+
 export function createId(): string {
   return randomUUID();
 }
@@ -12,10 +14,10 @@ export function createChatCompletionId(): string {
   return `chatcmpl_${randomBytes(12).toString('hex')}`;
 }
 
-export function createApiKeySecret(): string {
-  return `gk_live_${randomBytes(24).toString('base64url')}`;
+export function createMessageId(): string {
+  return `msg_${randomBytes(12).toString('hex')}`;
 }
 
-export function apiKeyPrefix(rawKey: string): string {
-  return rawKey.slice(0, 16);
+export function createResponseId(): string {
+  return `resp_${randomBytes(12).toString('hex')}`;
 }

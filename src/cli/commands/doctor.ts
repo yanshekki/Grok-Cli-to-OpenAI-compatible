@@ -41,7 +41,9 @@ export async function cmdDoctor(opts: {
   }
 
   if (!fs.existsSync(paths.envFile)) {
-    warn(`.env missing — run: gctoac setup`);
+    // Missing setup is a real issue for production, but report as warn-level
+    // diagnostic (still increments issues so doctor exits non-zero).
+    fail(`.env missing — run: gctoac setup`);
     issues += 1;
   } else {
     ok(`.env found: ${paths.envFile}`);

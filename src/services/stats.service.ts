@@ -4,15 +4,17 @@ import { grokCliService } from './grok-cli.service';
 import { ipBlacklistService } from './ip-blacklist.service';
 import { ddosPolicyService } from './ddos-policy.service';
 import { abuseGuardService } from './abuse-guard.service';
+import { settingsService } from './settings.service';
 import {
   getAbuseCounters,
   getConnectionsSnapshot,
-} from '../middlewares/connection-tracker';
+} from '../middlewares/connection-tracker.middleware';
 import { DEFAULT_PORT } from '../cli/lib/paths';
 
 export class StatsService {
   async getDashboard() {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const now = new Date();
 
     const [
       totalChats,
@@ -24,10 +26,17 @@ export class StatsService {
       activeKeys,
       totalKeys,
       totalDocs,
+      totalConversations,
+      conversations24h,
+      adminSessionsActive,
+      mediaAssets,
+      mediaAssets24h,
+      mediaJobs,
       recentChats,
       statusGroups,
       model24h,
       banList,
+      settings,
     ] = await Promise.all([
       prisma.chatRequest.count(),
       prisma.chatRequest.count({ where: { status: 'success' } }),
@@ -47,6 +56,16 @@ export class StatsService {
       prisma.apiKey.count({ where: { isActive: true } }),
       prisma.apiKey.count(),
       prisma.document.count({ where: { deletedAt: null } }),
+      prisma.chatConversation.count(),
+      prisma.chatConversation.count({
+        where: { updatedAt: { gte: since24h } },
+      }),
+      prisma.adminSession.count({ where: { expiresAt: { gt: now } } }),
+      prisma.mediaAsset.count({ where: { deletedAt: null } }).catch(() => 0),
+      prisma.mediaAsset
+        .count({ where: { deletedAt: null, createdAt: { gte: since24h } } })
+        .catch(() => 0),
+      prisma.mediaJob.count().catch(() => 0),
       prisma.chatRequest.findMany({
         orderBy: { createdAt: 'desc' },
         take: 12,
@@ -74,6 +93,7 @@ export class StatsService {
         take: 6,
       }),
       ipBlacklistService.list().catch(() => []),
+      settingsService.getAll().catch(() => null),
     ]);
 
     const policy = await ddosPolicyService.get().catch(() =>
@@ -103,6 +123,12 @@ export class StatsService {
         activeKeys,
         totalKeys,
         documents: totalDocs,
+        conversations: totalConversations,
+        conversations24h,
+        adminSessions: adminSessionsActive,
+        mediaAssets,
+        mediaAssets24h,
+        mediaJobs,
         bans: Array.isArray(banList) ? banList.length : 0,
         autoBanTotal: abuseGuardService.getAutoBanTotal(),
       },
@@ -118,6 +144,15 @@ export class StatsService {
         max: grokCliService.maxConcurrent,
       },
       queue: await this.getQueueSnapshot(),
+      safety: settings
+        ? {
+            globalSafeMode: settings.globalSafeMode,
+            safeToolsMode: settings.safeToolsMode,
+            safeMaxTurns: settings.safeMaxTurns,
+            safeTimeoutMs: settings.safeTimeoutMs,
+            defaultModel: settings.defaultModel,
+          }
+        : null,
       protection: {
         autoBanEnabled: policy.autoBanEnabled,
         autoAuthEnabled: policy.autoAuthEnabled,
@@ -141,6 +176,8 @@ export class StatsService {
         defaultPort: DEFAULT_PORT,
         encryptionReady,
         adminPanelEnabled: env.ADMIN_PANEL_ENABLED,
+        adminSessions: adminSessionsActive,
+        authMode: 'otp_session',
       },
       recentChats,
     };
@@ -153,17 +190,23 @@ export class StatsService {
       const { queuePolicyService } = await import('./queue/queue-policy.service');
       const s = await chatQueueService.stats();
       const pol = await queuePolicyService.get();
+      const by = s.byStatus || {};
       return {
         enabled: pol.enabled,
         paused: pol.paused,
         drainMode: pol.drainMode,
         depth: s.depth,
         queued: s.queued,
+        leased: s.leased,
         running: s.running,
         dead: s.dead,
+        succeeded: by.succeeded ?? 0,
+        failed: by.failed ?? 0,
+        cancelled: by.cancelled ?? 0,
         oldestQueuedAgeMs: s.oldestQueuedAgeMs,
         globalConcurrency: pol.globalConcurrency,
         workerActive: chatWorkerService.getActiveCount(),
+        workerId: s.workerId || chatQueueService.workerId,
       };
     } catch {
       return null;

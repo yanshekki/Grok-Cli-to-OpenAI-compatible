@@ -17,7 +17,7 @@ import {
   applyExpressTrustProxy,
   clientIpMiddleware,
 } from './middlewares/client-ip.middleware';
-import { connectionTrackerMiddleware } from './middlewares/connection-tracker';
+import { connectionTrackerMiddleware } from './middlewares/connection-tracker.middleware';
 import { errorMiddleware, notFoundHandler } from './middlewares/error.middleware';
 import { logger } from './utils/logger';
 import { ipBlacklistService } from './services/ip-blacklist.service';
@@ -28,15 +28,16 @@ import {
 } from './utils/client-ip';
 import './interfaces/express.interface';
 
-/** Bust browser cache when any admin SPA asset changes */
+/** Bust browser cache when any production admin SPA asset changes */
 function adminAssetVersion(adminDir: string): string {
   try {
+    // Production still serves full app.js via boot.js until TS migration is complete.
     const files = [
+      'boot.js',
       'app.js',
       'i18n.js',
       'styles.css',
       'index.html',
-      'boot.js',
       'allowed-extensions.js',
     ];
     let max = 0;

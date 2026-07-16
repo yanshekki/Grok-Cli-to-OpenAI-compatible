@@ -2,18 +2,8 @@ import { prisma } from '../config/database';
 import { ROLES } from '../config/constants';
 import { logger } from '../utils/logger';
 
-/**
- * Normalize legacy / CLI role aliases to canonical ROLES values.
- * Historically CLI wrote `user` while API uses `client`.
- */
-export function normalizeApiKeyRole(role: string | null | undefined): string {
-  const r = String(role || '')
-    .trim()
-    .toLowerCase();
-  if (r === 'user' || r === 'client') return ROLES.CLIENT;
-  if (r === 'admin') return ROLES.ADMIN;
-  return r || ROLES.CLIENT;
-}
+/** Pure normalize lives in utils/role-normalize — re-export for service callers. */
+export { normalizeApiKeyRole } from '../utils/role-normalize';
 
 /** One-shot DB fix: role=user → client */
 export async function backfillApiKeyRoles(): Promise<number> {
@@ -22,7 +12,10 @@ export async function backfillApiKeyRoles(): Promise<number> {
     data: { role: ROLES.CLIENT },
   });
   if (result.count > 0) {
-    logger.info({ count: result.count }, 'Backfilled api_keys.role user → client');
+    logger.info(
+      { count: result.count },
+      'Backfilled api_keys.role user → client',
+    );
   }
   return result.count;
 }

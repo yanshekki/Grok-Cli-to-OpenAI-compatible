@@ -76,9 +76,67 @@ const state = {
     banPage: 0,
     pageSize: 15,
   },
+  mediaFilter: {
+    q: '',
+    kind: '',
+    provider: '',
+    from: '',
+    to: '',
+    limit: 20,
+    offset: 0,
+  },
   models: [],
   keys: [],
 };
+
+/** Hash routes: #/dashboard, #/media, #/api-features … */
+const PAGE_FROM_HASH = {
+  login: 'login',
+  dashboard: 'dashboard',
+  chat: 'chat',
+  chats: 'chats',
+  keys: 'keys',
+  documents: 'documents',
+  media: 'media',
+  audit: 'audit',
+  settings: 'settings',
+  'api-features': 'apiFeatures',
+  apifeatures: 'apiFeatures',
+  usage: 'usage',
+  ddos: 'ddos',
+  queue: 'queue',
+  pm2: 'pm2',
+  system: 'system',
+};
+
+function pageToHash(page) {
+  if (page === 'apiFeatures') return 'api-features';
+  return page || 'dashboard';
+}
+
+function hashToPage(hash) {
+  const raw = String(hash || '')
+    .replace(/^#\/?/, '')
+    .split('?')[0]
+    .split('/')[0]
+    .toLowerCase();
+  if (!raw) return null;
+  return PAGE_FROM_HASH[raw] || null;
+}
+
+function writePageHash(page) {
+  const h = `#/${pageToHash(page)}`;
+  if (location.hash !== h) {
+    // push so browser Back works between admin pages
+    history.pushState(null, '', h);
+  }
+}
+
+function readInitialPage() {
+  const fromHash = hashToPage(location.hash);
+  if (fromHash) return fromHash;
+  return state.key ? 'dashboard' : 'login';
+}
 
 async function api(path, options = {}) {
   const headers = {
@@ -116,25 +174,37 @@ function logout(clear = true) {
   state.key = '';
   state.me = null;
   state.page = 'login';
+  writePageHash('login');
   render();
 }
 
 function setPage(page) {
-  state.page = page;
+  applyPageChange(page, { writeHash: true });
+}
+
+/**
+ * @param {string} page
+ * @param {{ writeHash?: boolean }} [opts]
+ */
+function applyPageChange(page, opts = {}) {
+  const next = page || 'dashboard';
+  state.page = next;
   state.modal = null;
   state.error = '';
-  if (page === 'chats') state.chatFilter.offset = 0;
-  if (page === 'documents') state.docFilter.offset = 0;
-  if (page === 'keys') state.keyFilter.offset = 0;
-  if (page === 'audit') state.auditFilter.offset = 0;
-  if (page !== 'ddos' && ddosTimer) {
+  if (next === 'chats') state.chatFilter.offset = 0;
+  if (next === 'documents') state.docFilter.offset = 0;
+  if (next === 'keys') state.keyFilter.offset = 0;
+  if (next === 'audit') state.auditFilter.offset = 0;
+  if (next === 'media') state.mediaFilter.offset = 0;
+  if (next !== 'ddos' && ddosTimer) {
     clearInterval(ddosTimer);
     ddosTimer = null;
   }
   // leave chat → close mobile history drawer
-  if (page !== 'chat') {
+  if (next !== 'chat') {
     document.body.classList.remove('chat-history-open');
   }
+  if (opts.writeHash !== false) writePageHash(next);
   render();
 }
 
@@ -500,6 +570,31 @@ function badgeStatus(s) {
   return `<span class="badge ${c}">${escapeHtml(label)}</span>`;
 }
 
+/** Job status badges for durable chat queue */
+function badgeQueueStatus(s) {
+  const map = {
+    queued: { cls: 'pending', label: t('queue.stQueued') },
+    leased: { cls: 'info', label: t('queue.stLeased') },
+    running: { cls: 'success', label: t('queue.stRunning') },
+    succeeded: { cls: 'success', label: t('queue.stSucceeded') },
+    failed: { cls: 'error', label: t('queue.stFailed') },
+    dead: { cls: 'error', label: t('queue.stDead') },
+    cancelled: { cls: 'muted', label: t('queue.stCancelled') },
+  };
+  const m = map[s] || { cls: 'pending', label: s || '—' };
+  return `<span class="badge ${m.cls}">${escapeHtml(m.label)}</span>`;
+}
+
+function badgeQueueSource(src) {
+  const label =
+    src === 'playground'
+      ? t('queue.srcPlayground')
+      : src === 'v1'
+        ? t('queue.srcV1')
+        : src || '—';
+  return `<span class="badge muted">${escapeHtml(label)}</span>`;
+}
+
 function badgeMode(m) {
   const mode = m === 'agent' ? 'agent' : m === 'safe' ? 'safe' : m || 'safe';
   const label =
@@ -545,6 +640,8 @@ function pageTitle() {
     documents: t('nav.documents'),
     audit: t('nav.audit'),
     settings: t('nav.settings'),
+    apiFeatures: t('nav.apiFeatures'),
+    media: t('nav.media'),
     usage: t('nav.usage'),
     ddos: t('nav.ddos'),
     queue: t('nav.queue'),
@@ -587,16 +684,16 @@ function shell(content) {
         ${nav('chats', t('nav.chats'))}
         ${nav('keys', t('nav.keys'))}
         ${nav('documents', t('nav.documents'))}
+        ${nav('media', t('nav.media'))}
         ${nav('audit', t('nav.audit'))}
         ${nav('settings', t('nav.settings'))}
+        ${nav('apiFeatures', t('nav.apiFeatures'))}
         ${nav('usage', t('nav.usage'))}
         ${nav('ddos', t('nav.ddos'))}
         ${nav('queue', t('nav.queue'))}
         ${nav('pm2', t('nav.pm2'))}
         ${nav('system', t('nav.system'))}
         <div class="sidebar-foot">
-          <div>${escapeHtml(state.me?.name || '')}</div>
-          <div>${escapeHtml(state.me?.keyPrefix || '')}…</div>
           <button class="btn secondary sm logout-btn" id="btn-logout">${escapeHtml(t('logout'))}</button>
         </div>
       </aside>
@@ -677,12 +774,29 @@ async function loadKeys() {
 }
 
 /* ——— Shared list UI helpers ——— */
-function filterPanelHtml({ title, hint, searchHtml, gridHtml }) {
+
+/**
+ * Secondary line under topbar (hints, totals). Never put totals in topbar right.
+ * @param {string|string[]} parts  plain text segments joined with ·
+ */
+function pageMetaHtml(parts) {
+  const list = (Array.isArray(parts) ? parts : [parts]).filter(Boolean);
+  if (!list.length) return '';
+  const body = list
+    .map((p) => `<span>${typeof p === 'string' ? escapeHtml(p) : p}</span>`)
+    .join('<span class="page-meta-sep" aria-hidden="true">·</span>');
+  return `<div class="page-meta" role="status">${body}</div>`;
+}
+
+function filterPanelHtml({ title, hint, meta, searchHtml, gridHtml }) {
   return `
     <div class="panel data-filter-panel">
       <div class="panel-h">
-        <strong>${escapeHtml(title)}</strong>
-        ${hint ? `<span class="muted">${escapeHtml(hint)}</span>` : ''}
+        <div class="panel-h-text">
+          <strong>${escapeHtml(title)}</strong>
+          ${hint ? `<span class="muted">${escapeHtml(hint)}</span>` : ''}
+        </div>
+        ${meta ? `<span class="panel-h-meta muted">${typeof meta === 'string' ? escapeHtml(meta) : meta}</span>` : ''}
       </div>
       <div class="data-filter">
         ${searchHtml || ''}
@@ -860,9 +974,8 @@ async function renderLogin() {
       state.key = token;
       sessionStorage.setItem(KEY_STORAGE, token);
       await ensureMe();
-      state.page = 'dashboard';
       state.error = '';
-      render().catch(onErr);
+      setPage('dashboard');
     } catch (e) {
       state.key = '';
       sessionStorage.removeItem(KEY_STORAGE);
@@ -874,12 +987,14 @@ async function renderLogin() {
   };
 }
 
-function dashKpiCard({ label, value, sub, tone, href }) {
+function dashKpiCard({ label, value, sub, tone, href, valueId, subId }) {
   const toneCls = tone ? ` dash-kpi--${tone}` : '';
+  const valueAttr = valueId ? ` id="${escapeHtml(valueId)}"` : '';
+  const subAttr = subId ? ` id="${escapeHtml(subId)}"` : '';
   const inner = `
     <div class="label">${escapeHtml(label)}</div>
-    <div class="value">${value}</div>
-    ${sub ? `<div class="dash-kpi-sub muted">${sub}</div>` : ''}`;
+    <div class="value"${valueAttr}>${value}</div>
+    ${sub != null && sub !== '' ? `<div class="dash-kpi-sub muted"${subAttr}>${sub}</div>` : ''}`;
   if (href) {
     return `<button type="button" class="card dash-kpi${toneCls}" data-nav="${escapeHtml(href)}">${inner}</button>`;
   }
@@ -890,6 +1005,55 @@ function dashStatusPill(ok, okText, badText) {
   return ok
     ? `<span class="badge success">${escapeHtml(okText)}</span>`
     : `<span class="badge warn">${escapeHtml(badText)}</span>`;
+}
+
+/**
+ * Page-level master switch for the topbar (not a form checkbox).
+ * @param {{ id: string, on: boolean, onLabel: string, offLabel: string, title?: string }} opts
+ */
+function masterToggleBtnHtml({ id, on, onLabel, offLabel, title }) {
+  return `<button type="button"
+    class="master-toggle ${on ? 'is-on' : 'is-off'}"
+    id="${escapeHtml(id)}"
+    aria-pressed="${on ? 'true' : 'false'}"
+    title="${escapeHtml(title || '')}">
+    <span class="master-toggle-track" aria-hidden="true"><span class="master-toggle-knob"></span></span>
+    <span class="master-toggle-label">${escapeHtml(on ? onLabel : offLabel)}</span>
+  </button>`;
+}
+
+function isMasterToggleOn(id) {
+  const btn = document.getElementById(id);
+  return btn ? btn.classList.contains('is-on') : false;
+}
+
+function setMasterToggle(id, on, onLabel, offLabel) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.classList.toggle('is-on', Boolean(on));
+  btn.classList.toggle('is-off', !on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  const lab = btn.querySelector('.master-toggle-label');
+  if (lab && onLabel != null && offLabel != null) {
+    lab.textContent = on ? onLabel : offLabel;
+  }
+}
+
+function featureOffBannerHtml(id, message) {
+  return `<div class="feature-off-banner" id="${escapeHtml(id)}" hidden role="status">
+    <strong>${escapeHtml(t('common.featureOff'))}</strong>
+    <span>${escapeHtml(message)}</span>
+  </div>`;
+}
+
+function setFeatureOffBanner(id, off) {
+  const el = document.getElementById(id);
+  if (el) el.hidden = !off;
+}
+
+function setFeatureRootOff(rootId, off) {
+  const root = document.getElementById(rootId);
+  if (root) root.classList.toggle('is-feature-off', Boolean(off));
 }
 
 function proxySourceShort(src) {
@@ -911,6 +1075,7 @@ async function renderDashboard() {
   const rt = d.runtime || {};
   const conc = d.concurrency || {};
   const q = d.queue || null;
+  const safety = d.safety || null;
   const models = d.models24h || [];
   const rate24 = tot.successRate24h ?? 0;
   const rateAll = tot.successRate ?? 0;
@@ -932,11 +1097,32 @@ async function renderDashboard() {
     } else {
       queueKpiValue = `${q.depth ?? 0}`;
     }
-    queueKpiSub = `${q.running ?? 0}/${q.globalConcurrency ?? '—'} run · ${q.dead ?? 0} dead${
-      q.oldestQueuedAgeMs ? ` · wait ${Math.round(q.oldestQueuedAgeMs / 1000)}s` : ''
-    }`;
+    const waitS =
+      q.oldestQueuedAgeMs > 0
+        ? ` · wait ${Math.round(q.oldestQueuedAgeMs / 1000)}s`
+        : '';
+    queueKpiSub = tf('dash.kpiQueueSubLive', {
+      run: q.running ?? 0,
+      max: q.globalConcurrency ?? '—',
+      dead: q.dead ?? 0,
+      wait: waitS,
+    });
     if ((q.dead || 0) > 0 || (q.depth || 0) > 20) queueTone = queueTone || 'warn';
   }
+
+  const safeOn = Boolean(safety?.globalSafeMode);
+  const safeKpiValue = safety
+    ? safeOn
+      ? t('dash.kpiSafeOn')
+      : t('dash.kpiSafeOff')
+    : '—';
+  const safeKpiSub = safety
+    ? tf('dash.kpiSafeSub', {
+        tools: safety.safeToolsMode || '—',
+        turns: safety.safeMaxTurns ?? '—',
+        model: safety.defaultModel || '—',
+      })
+    : t('dash.kpiSafeSubEmpty');
 
   const bodyHtml = (d.recentChats || [])
     .map(
@@ -984,6 +1170,25 @@ async function renderDashboard() {
   const ruleChip = (on, label) =>
     `<span class="dash-rule-chip ${on ? 'is-on' : 'is-off'}">${escapeHtml(label)}</span>`;
 
+  const queueDetailHtml = q
+    ? `
+      <div class="dash-stat-grid">
+        <div><div class="label">${escapeHtml(t('dash.qQueued'))}</div><div class="value value-sm">${q.queued ?? 0}</div></div>
+        <div><div class="label">${escapeHtml(t('dash.qRunning'))}</div><div class="value value-sm">${q.running ?? 0}<span class="dash-kpi-den">/${q.globalConcurrency ?? '—'}</span></div></div>
+        <div><div class="label">${escapeHtml(t('dash.qDead'))}</div><div class="value value-sm">${q.dead ?? 0}</div></div>
+        <div><div class="label">${escapeHtml(t('dash.qSucceeded'))}</div><div class="value value-sm">${q.succeeded ?? 0}</div></div>
+      </div>
+      <div class="dash-prot-meta muted">
+        ${escapeHtml(t('dash.qWorker'))}: ${escapeHtml(q.workerId || '—')}
+        · ${escapeHtml(t('dash.qWorkerActive'))}: ${q.workerActive ?? 0}
+        ${
+          q.oldestQueuedAgeMs > 0
+            ? ` · ${escapeHtml(t('dash.qOldest'))}: ${Math.round(q.oldestQueuedAgeMs / 1000)}s`
+            : ''
+        }
+      </div>`
+    : `<div class="data-empty" style="padding:12px 0"><strong>${escapeHtml(t('dash.qUnavailable'))}</strong></div>`;
+
   document.getElementById('app').innerHTML = shell(`
     <div class="dash-hero">
       <div class="dash-hero-text">
@@ -1022,6 +1227,20 @@ async function renderDashboard() {
         href: 'chats',
       })}
       ${dashKpiCard({
+        label: t('dash.kpiQueue'),
+        value: queueKpiValue,
+        sub: queueKpiSub,
+        tone: queueTone,
+        href: 'queue',
+      })}
+      ${dashKpiCard({
+        label: t('dash.kpiSafe'),
+        value: safeKpiValue,
+        sub: safeKpiSub,
+        tone: safety ? (safeOn ? 'ok' : 'warn') : '',
+        href: 'settings',
+      })}
+      ${dashKpiCard({
         label: t('dash.kpiKeys'),
         value: `${tot.activeKeys ?? 0}<span class="dash-kpi-den">/${tot.totalKeys ?? 0}</span>`,
         sub: t('dash.kpiKeysSub'),
@@ -1034,17 +1253,27 @@ async function renderDashboard() {
         href: 'documents',
       })}
       ${dashKpiCard({
+        label: t('dash.kpiMedia') || 'Media',
+        value: tot.mediaAssets ?? 0,
+        sub: tf('dash.kpiMediaSub', { n: tot.mediaAssets24h ?? 0 }),
+        href: 'media',
+      })}
+      ${dashKpiCard({
+        label: t('dash.kpiConv'),
+        value: tot.conversations ?? 0,
+        sub: tf('dash.kpiConvSub', { n: tot.conversations24h ?? 0 }),
+        href: 'chat',
+      })}
+      ${dashKpiCard({
+        label: t('dash.kpiSessions'),
+        value: tot.adminSessions ?? rt.adminSessions ?? 0,
+        sub: t('dash.kpiSessionsSub'),
+      })}
+      ${dashKpiCard({
         label: t('dash.kpiConcurrent'),
         value: `${conc.active ?? 0}<span class="dash-kpi-den">/${conc.max ?? 0}</span>`,
         sub: t('dash.kpiConcurrentSub'),
         tone: (conc.active || 0) >= (conc.max || 1) ? 'warn' : '',
-      })}
-      ${dashKpiCard({
-        label: t('dash.kpiQueue'),
-        value: queueKpiValue,
-        sub: queueKpiSub,
-        tone: queueTone,
-        href: 'queue',
       })}
     </div>
 
@@ -1057,9 +1286,53 @@ async function renderDashboard() {
           </div>
           ${recentTable.replace('data-table-panel', 'data-table-panel dash-embed-table')}
         </div>
+
+        <div class="panel dash-panel">
+          <div class="panel-h">
+            <strong>${escapeHtml(t('dash.queuePanel'))}</strong>
+            <button type="button" class="btn secondary sm" data-nav="queue">${escapeHtml(t('dash.openQueue'))}</button>
+          </div>
+          <div class="panel-pad dash-prot">
+            <div class="dash-prot-row">
+              <span>${escapeHtml(t('dash.queueState'))}</span>
+              ${
+                !q
+                  ? `<span class="badge warn">${escapeHtml(t('dash.kpiQueueOff'))}</span>`
+                  : !q.enabled
+                    ? `<span class="badge warn">${escapeHtml(t('dash.kpiQueueOff'))}</span>`
+                    : q.paused
+                      ? `<span class="badge warn">${escapeHtml(t('dash.kpiQueuePaused'))}</span>`
+                      : q.drainMode
+                        ? `<span class="badge warn">${escapeHtml(t('dash.kpiQueueDrain'))}</span>`
+                        : `<span class="badge success">${escapeHtml(t('dash.queueLive'))}</span>`
+              }
+            </div>
+            ${queueDetailHtml}
+          </div>
+        </div>
       </div>
 
       <aside class="dash-side">
+        <div class="panel dash-panel">
+          <div class="panel-h">
+            <strong>${escapeHtml(t('dash.safety'))}</strong>
+            <button type="button" class="btn secondary sm" data-nav="settings">${escapeHtml(t('dash.openSettings'))}</button>
+          </div>
+          <div class="panel-pad dash-prot">
+            <div class="dash-prot-row">
+              <span>${escapeHtml(t('dash.globalSafe'))}</span>
+              ${dashStatusPill(safeOn, t('dash.on'), t('dash.off'))}
+            </div>
+            <div class="dash-stat-grid">
+              <div><div class="label">${escapeHtml(t('dash.safeTools'))}</div><div class="value value-sm">${escapeHtml(safety?.safeToolsMode || '—')}</div></div>
+              <div><div class="label">${escapeHtml(t('dash.safeTurns'))}</div><div class="value value-sm">${safety?.safeMaxTurns ?? '—'}</div></div>
+              <div><div class="label">${escapeHtml(t('dash.safeTimeout'))}</div><div class="value value-sm">${safety?.safeTimeoutMs != null ? Math.round(safety.safeTimeoutMs / 1000) + 's' : '—'}</div></div>
+              <div><div class="label">${escapeHtml(t('dash.defaultModel'))}</div><div class="value value-sm" style="font-size:0.95rem!important">${escapeHtml(safety?.defaultModel || '—')}</div></div>
+            </div>
+            <div class="dash-prot-meta muted">${escapeHtml(t('dash.safetyHint'))}</div>
+          </div>
+        </div>
+
         <div class="panel dash-panel">
           <div class="panel-h">
             <strong>${escapeHtml(t('dash.protection'))}</strong>
@@ -1111,6 +1384,10 @@ async function renderDashboard() {
               <strong>${escapeHtml(rt.env || '—')}</strong>
             </div>
             <div class="dash-prot-row">
+              <span>${escapeHtml(t('dash.authMode'))}</span>
+              <strong>${escapeHtml(t('dash.authOtp'))}</strong>
+            </div>
+            <div class="dash-prot-row">
               <span>${escapeHtml(t('dash.encryption'))}</span>
               ${dashStatusPill(
                 Boolean(rt.encryptionReady),
@@ -1119,7 +1396,9 @@ async function renderDashboard() {
               )}
             </div>
             <div class="dash-quick">
+              <button type="button" class="btn secondary sm" data-nav="chat">${escapeHtml(t('nav.chat'))}</button>
               <button type="button" class="btn secondary sm" data-nav="queue">${escapeHtml(t('dash.openQueue'))}</button>
+              <button type="button" class="btn secondary sm" data-nav="settings">${escapeHtml(t('nav.settings'))}</button>
               <button type="button" class="btn secondary sm" data-nav="usage">${escapeHtml(t('nav.usage'))}</button>
               <button type="button" class="btn secondary sm" data-nav="pm2">${escapeHtml(t('nav.pm2'))}</button>
               <button type="button" class="btn secondary sm" data-nav="system">${escapeHtml(t('nav.system'))}</button>
@@ -1266,6 +1545,7 @@ async function renderChats() {
   const filter = filterPanelHtml({
     title: t('chats.filterTitle') || t('common.filterTitle'),
     hint: t('chats.filterHint') || t('common.filterHint'),
+    meta: tf('common.pagerTotal', { n: total }),
     searchHtml: `
       <div class="data-filter-search">
         <label for="f-q">${escapeHtml(t('chats.search'))}</label>
@@ -1332,8 +1612,8 @@ async function renderChats() {
   document.getElementById('app').innerHTML = shell(`
     <div class="topbar">
       <h2>${escapeHtml(t('chats.title'))}</h2>
-      <span class="muted">${escapeHtml(t('chats.total'))} ${total} · ${escapeHtml(t('chats.decrypt'))}</span>
     </div>
+    ${pageMetaHtml([t('chats.decrypt')])}
     ${filter}
     ${table}
   `);
@@ -1392,8 +1672,9 @@ async function openChat(id) {
       if (isImageMime(d.mimeType)) {
         try {
           const full = await api(`/documents/${d.id}`);
-          if (full.data?.imageDataUrl) {
-            preview = `<img class="preview" src="${full.data.imageDataUrl}" alt="${escapeHtml(d.originalName)}" />`;
+          const img = await resolveDocumentImageSrc(full.data || { id: d.id, isImage: true, mimeType: d.mimeType });
+          if (img?.src) {
+            preview = `<img class="preview" src="${img.src}" alt="${escapeHtml(d.originalName)}" />`;
           }
         } catch {
           preview = `<span class="muted">${escapeHtml(t('chats.previewFailed'))}</span>`;
@@ -1551,6 +1832,7 @@ async function renderKeys() {
   const filter = filterPanelHtml({
     title: t('common.filterTitle'),
     hint: t('common.filterHint'),
+    meta: tf('common.pagerTotal', { n: total }),
     searchHtml: `
       <div class="data-filter-search">
         <label for="kf-q">${escapeHtml(t('common.search'))}</label>
@@ -1601,7 +1883,9 @@ async function renderKeys() {
   document.getElementById('app').innerHTML = shell(`
     <div class="topbar">
       <h2>${escapeHtml(t('keys.title'))}</h2>
-      <button class="btn" id="btn-new-key">${escapeHtml(t('keys.new'))}</button>
+      <div class="toolbar">
+        <button class="btn" id="btn-new-key">${escapeHtml(t('keys.new'))}</button>
+      </div>
     </div>
     ${filter}
     ${table}
@@ -1836,6 +2120,7 @@ async function renderDocuments() {
   const filter = filterPanelHtml({
     title: t('common.filterTitle'),
     hint: t('common.filterHint'),
+    meta: tf('common.pagerTotal', { n: total }),
     searchHtml: `
       <div class="data-filter-search">
         <label for="df-q">${escapeHtml(t('common.search'))}</label>
@@ -1879,7 +2164,6 @@ async function renderDocuments() {
   document.getElementById('app').innerHTML = shell(`
     <div class="topbar">
       <h2>${escapeHtml(t('docs.title'))}</h2>
-      <span class="muted">${escapeHtml(t('docs.total'))} ${total}</span>
     </div>
     <p class="page-hint">${escapeHtml(storageHint)}</p>
     ${filter}
@@ -1931,15 +2215,50 @@ async function renderDocuments() {
   });
 }
 
+/** Fetch decrypted document bytes with admin session/key (for image preview). */
+async function fetchDocumentBlobUrl(id) {
+  const res = await fetch(`${API}/documents/${id}/download`, {
+    headers: state.key ? { Authorization: `Bearer ${state.key}` } : {},
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      msg = JSON.parse(text)?.error?.message || text;
+    } catch {
+      /* */
+    }
+    throw new Error(msg || t('docs.downloadFail'));
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+async function resolveDocumentImageSrc(doc) {
+  if (doc?.imageDataUrl) return { src: doc.imageDataUrl, revoke: null };
+  if (doc?.isImage || isImageMime(doc?.mimeType)) {
+    const src = await fetchDocumentBlobUrl(doc.id);
+    return { src, revoke: src };
+  }
+  return null;
+}
+
 async function openDocument(id) {
   const { data: doc } = await api(`/documents/${id}`);
   let preview;
-  if (doc.imageDataUrl) {
-    preview = `<img class="preview doc-preview-img" src="${doc.imageDataUrl}" alt="" />`;
-  } else if (doc.isBinary || doc.content == null) {
-    preview = `<div class="data-empty"><div class="data-empty-icon">⧉</div><strong>${escapeHtml(t('docs.binaryPreview'))}</strong></div>`;
-  } else {
-    preview = `<div class="pre" id="doc-content">${escapeHtml(doc.content || t('chats.none'))}</div>`;
+  let revokeUrl = null;
+  try {
+    const img = await resolveDocumentImageSrc(doc);
+    if (img) {
+      revokeUrl = img.revoke;
+      preview = `<img class="preview doc-preview-img" src="${img.src}" alt="${escapeHtml(doc.originalName || '')}" />`;
+    } else if (doc.isBinary || doc.content == null) {
+      preview = `<div class="data-empty"><div class="data-empty-icon">⧉</div><strong>${escapeHtml(t('docs.binaryPreview'))}</strong></div>`;
+    } else {
+      preview = `<div class="pre" id="doc-content">${escapeHtml(doc.content || t('chats.none'))}</div>`;
+    }
+  } catch {
+    preview = `<div class="data-empty"><div class="data-empty-icon">⧉</div><strong>${escapeHtml(t('chats.previewFailed') || t('docs.binaryPreview'))}</strong></div>`;
   }
   const storageLine = `${storageTypeLabel(doc.storageType)}${
     doc.storagePath ? ` · ${doc.storagePath}` : ''
@@ -1955,14 +2274,27 @@ async function openDocument(id) {
       </div>`,
     footerHtml: `
       ${
-        !doc.imageDataUrl && doc.content && !doc.isBinary
+        !doc.imageDataUrl &&
+        !(doc.isImage || isImageMime(doc.mimeType)) &&
+        doc.content &&
+        !doc.isBinary
           ? `<button type="button" class="btn secondary sm" id="doc-copy">${escapeHtml(t('docs.copy'))}</button>`
           : ''
       }
       <button type="button" class="btn sm" id="doc-download">${escapeHtml(t('docs.download'))}</button>
       <button type="button" class="btn secondary sm" id="doc-close">${escapeHtml(t('chats.close'))}</button>`,
   });
-  document.getElementById('doc-close')?.addEventListener('click', () => closeAppModal());
+  const closeAndRevoke = () => {
+    if (revokeUrl) {
+      try {
+        URL.revokeObjectURL(revokeUrl);
+      } catch {
+        /* */
+      }
+    }
+    closeAppModal();
+  };
+  document.getElementById('doc-close')?.addEventListener('click', closeAndRevoke);
   document.getElementById('doc-download').onclick = () =>
     downloadDocument(doc.id, doc.originalName);
   document.getElementById('doc-copy')?.addEventListener('click', async () => {
@@ -2086,6 +2418,7 @@ async function renderAudit() {
   const filter = filterPanelHtml({
     title: t('common.filterTitle'),
     hint: t('common.filterHint'),
+    meta: tf('common.pagerTotal', { n: total }),
     searchHtml: `
       <div class="data-filter-search">
         <label for="af-q">${escapeHtml(t('common.search'))}</label>
@@ -2121,8 +2454,8 @@ async function renderAudit() {
   });
 
   document.getElementById('app').innerHTML = shell(`
-    <div class="topbar"><h2>${escapeHtml(t('audit.title'))}</h2>
-      <span class="muted">${escapeHtml(tf('common.pagerTotal', { n: total }))}</span>
+    <div class="topbar">
+      <h2>${escapeHtml(t('audit.title'))}</h2>
     </div>
     ${filter}
     ${table}
@@ -2152,7 +2485,7 @@ async function renderAudit() {
   };
 }
 
-/** Presets for Safety settings guide (applied to form only until Save). */
+/** Presets for Safety settings guide (apply confirms + persists immediately). */
 function settingsPresets() {
   return [
     {
@@ -2233,7 +2566,9 @@ function settingsPresets() {
 
 function readSettingsFormValues() {
   return {
-    globalSafeMode: document.getElementById('s-global')?.checked === true,
+    globalSafeMode: document.getElementById('s-master-global')
+      ? isMasterToggleOn('s-master-global')
+      : false,
     safeToolsMode: document.getElementById('s-tools')?.value || 'none',
     safeMaxTurns: Number(document.getElementById('s-turns')?.value),
     safeTimeoutMs: Number(document.getElementById('s-timeout')?.value),
@@ -2269,30 +2604,68 @@ function refreshSettingsPresetUi() {
   }
 }
 
-function applySettingsPreset(values) {
-  const g = document.getElementById('s-global');
+function applySettingsPresetToForm(values) {
   const tools = document.getElementById('s-tools');
   const turns = document.getElementById('s-turns');
   const timeout = document.getElementById('s-timeout');
-  if (g) g.checked = Boolean(values.globalSafeMode);
+  const on = Boolean(values.globalSafeMode);
+  setMasterToggle(
+    's-master-global',
+    on,
+    t('settings.masterOn'),
+    t('settings.masterOff'),
+  );
+  setFeatureRootOff('settings-root', !on);
+  setFeatureOffBanner('settings-disabled-banner', !on);
   if (tools && values.safeToolsMode) tools.value = values.safeToolsMode;
   if (turns && values.safeMaxTurns != null) turns.value = String(values.safeMaxTurns);
   if (timeout && values.safeTimeoutMs != null) {
     timeout.value = String(values.safeTimeoutMs);
   }
   refreshSettingsPresetUi();
-  const bar = document.querySelector('#flash-error');
-  if (bar) {
-    bar.hidden = false;
-    bar.classList.add('flash-ok');
-    bar.textContent = t('settings.guideApplied');
-    setTimeout(() => {
-      if (bar.textContent === t('settings.guideApplied')) {
-        bar.hidden = true;
-        bar.classList.remove('flash-ok');
-        bar.textContent = '';
-      }
-    }, 2500);
+}
+
+/** Confirm → fill form → PUT /settings so “Applied” reflects saved state. */
+async function applySettingsPreset(preset) {
+  if (!preset?.values) return;
+  if (
+    !(await uiConfirm({
+      title: t(preset.titleKey),
+      message: tf('settings.guideApplyConfirm', { name: t(preset.titleKey) }),
+      variant: 'confirm',
+      confirmText: t('settings.guideApply'),
+    }))
+  ) {
+    return;
+  }
+  applySettingsPresetToForm(preset.values);
+  try {
+    await api('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        globalSafeMode: Boolean(preset.values.globalSafeMode),
+        safeToolsMode: preset.values.safeToolsMode,
+        safeMaxTurns: Number(preset.values.safeMaxTurns),
+        safeTimeoutMs: Number(preset.values.safeTimeoutMs),
+        defaultModel: document.getElementById('s-model')?.value?.trim() || '',
+      }),
+    });
+    refreshSettingsPresetUi();
+    const bar = document.querySelector('#flash-error');
+    if (bar) {
+      bar.hidden = false;
+      bar.classList.add('flash-ok');
+      bar.textContent = t('settings.guideApplied');
+      setTimeout(() => {
+        if (bar.textContent === t('settings.guideApplied')) {
+          bar.hidden = true;
+          bar.classList.remove('flash-ok');
+          bar.textContent = '';
+        }
+      }, 2500);
+    }
+  } catch (e) {
+    onErr(e);
   }
 }
 
@@ -2325,20 +2698,32 @@ async function renderSettings() {
     )
     .join('');
 
+  const safeOn = Boolean(data.globalSafeMode);
+
   document.getElementById('app').innerHTML = shell(`
+    <div id="settings-root" class="${safeOn ? '' : 'is-feature-off'}">
     <div class="topbar">
       <h2>${escapeHtml(t('settings.title'))}</h2>
-      <button class="btn secondary sm" id="btn-refresh-models">${escapeHtml(t('settings.refreshModels'))}</button>
+      <div class="toolbar">
+        ${masterToggleBtnHtml({
+          id: 's-master-global',
+          on: safeOn,
+          onLabel: t('settings.masterOn'),
+          offLabel: t('settings.masterOff'),
+          title: t('settings.globalSafeHint'),
+        })}
+        <button class="btn secondary sm" id="btn-refresh-models">${escapeHtml(t('settings.refreshModels'))}</button>
+      </div>
+    </div>
+    <div class="feature-off-banner" id="settings-disabled-banner" ${safeOn ? 'hidden' : ''} role="status">
+      <strong>${escapeHtml(t('common.featureOff'))}</strong>
+      <span>${escapeHtml(t('settings.disabledBanner'))}</span>
     </div>
     <div class="panel">
       <div class="modal-b">
         <p class="page-hint">${escapeHtml(t('settings.hint'))}</p>
-        <div class="switch-row">
-          <input type="checkbox" id="s-global" ${data.globalSafeMode ? 'checked' : ''} />
-          <label for="s-global">${escapeHtml(t('settings.globalSafe'))}</label>
-        </div>
         <p class="field-hint">${escapeHtml(t('settings.globalSafeHint'))}</p>
-        <div class="form-grid">
+        <div class="form-grid settings-safe-fields">
           <label>${escapeHtml(t('settings.tools'))}
             <select id="s-tools">
               <option value="none">${escapeHtml(t('settings.toolsNone'))}</option>
@@ -2379,18 +2764,55 @@ async function renderSettings() {
       <p class="muted">${escapeHtml(t('settings.panelStatus'))}: <strong>${data.adminPanelEnabled ? t('settings.panelOn') : t('settings.panelOff')}</strong></p>
       <button class="btn danger sm" id="s-disable-panel" ${!data.adminPanelEnabled ? 'disabled' : ''}>${escapeHtml(t('settings.disablePanel'))}</button>
     </div>
+    </div>
   `);
   bindShell();
   document.getElementById('s-tools').value = data.safeToolsMode || 'none';
 
   const syncPresetUi = () => refreshSettingsPresetUi();
-  ['s-global', 's-tools', 's-turns', 's-timeout'].forEach((id) => {
+  ['s-tools', 's-turns', 's-timeout'].forEach((id) => {
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener('change', syncPresetUi);
     el.addEventListener('input', syncPresetUi);
   });
   refreshSettingsPresetUi();
+
+  document.getElementById('s-master-global')?.addEventListener('click', async () => {
+    const next = !isMasterToggleOn('s-master-global');
+    setMasterToggle(
+      's-master-global',
+      next,
+      t('settings.masterOn'),
+      t('settings.masterOff'),
+    );
+    setFeatureRootOff('settings-root', !next);
+    setFeatureOffBanner('settings-disabled-banner', !next);
+    refreshSettingsPresetUi();
+    // Immediate save of master switch + current form values
+    try {
+      await api('/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          globalSafeMode: next,
+          safeToolsMode: document.getElementById('s-tools').value,
+          safeMaxTurns: Number(document.getElementById('s-turns').value),
+          safeTimeoutMs: Number(document.getElementById('s-timeout').value),
+          defaultModel: document.getElementById('s-model').value.trim(),
+        }),
+      });
+    } catch (e) {
+      setMasterToggle(
+        's-master-global',
+        !next,
+        t('settings.masterOn'),
+        t('settings.masterOff'),
+      );
+      setFeatureRootOff('settings-root', next);
+      setFeatureOffBanner('settings-disabled-banner', next);
+      onErr(e);
+    }
+  });
 
   document.getElementById('btn-refresh-models').onclick = async () => {
     await loadModels(true);
@@ -2401,7 +2823,7 @@ async function renderSettings() {
       await api('/settings', {
         method: 'PUT',
         body: JSON.stringify({
-          globalSafeMode: document.getElementById('s-global').checked,
+          globalSafeMode: isMasterToggleOn('s-master-global'),
           safeToolsMode: document.getElementById('s-tools').value,
           safeMaxTurns: Number(document.getElementById('s-turns').value),
           safeTimeoutMs: Number(document.getElementById('s-timeout').value),
@@ -2425,11 +2847,11 @@ async function renderSettings() {
     }
   };
   document.querySelectorAll('[data-apply-preset]').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       if (btn.disabled) return;
       const id = btn.getAttribute('data-apply-preset');
       const preset = settingsPresets().find((p) => p.id === id);
-      if (preset) applySettingsPreset(preset.values);
+      if (preset) await applySettingsPreset(preset);
     });
   });
   document.getElementById('s-disable-panel').onclick = async () => {
@@ -2455,6 +2877,389 @@ async function renderSettings() {
       onErr(e);
     }
   };
+}
+
+/** Admin: Grok CLI capability + protocol feature flags */
+async function renderApiFeatures() {
+  const res = await api('/api-features');
+  const data = res.data || {};
+  const groups = [
+    {
+      title: t('apiFeatures.groupProtocols'),
+      keys: ['openaiChat', 'openaiResponses', 'anthropicMessages'],
+    },
+    {
+      title: t('apiFeatures.groupMedia'),
+      keys: ['imagesApi', 'filesOpenAiAlias', 'videoApi', 'audioApi'],
+    },
+    {
+      title: t('apiFeatures.groupCaps'),
+      keys: [
+        'tools',
+        'structuredOutput',
+        'vision',
+        'reasoningEffort',
+        'webSearch',
+        'subagents',
+        'planMode',
+        'memory',
+        'sessionResume',
+        'bestOfN',
+        'checkLoop',
+        'systemOverride',
+        'rules',
+        'permissionMode',
+        'sandbox',
+      ],
+    },
+    {
+      title: t('apiFeatures.groupEmu'),
+      keys: [
+        'usageEstimate',
+        'assistantsEmulation',
+        'strictSampling',
+        'forceDisableToolsInSafe',
+      ],
+    },
+  ];
+
+  const flagLabel = (k) => t(`apiFeatures.flag.${k}`) || k;
+  const flagHint = (k) => t(`apiFeatures.hint.${k}`) || '';
+
+  const sections = groups
+    .map((g) => {
+      const rows = g.keys
+        .map((k) => {
+          const on = Boolean(data[k]);
+          return `
+          <div class="dash-prot-row api-feat-row" data-feat="${escapeHtml(k)}">
+            <div>
+              <strong>${escapeHtml(flagLabel(k))}</strong>
+              <div class="muted" style="font-size:0.78rem;font-weight:500">${escapeHtml(flagHint(k))}</div>
+            </div>
+            <button type="button" class="master-toggle ${on ? 'is-on' : 'is-off'}" data-feat-toggle="${escapeHtml(k)}" aria-pressed="${on ? 'true' : 'false'}">
+              <span class="master-toggle-track" aria-hidden="true"><span class="master-toggle-knob"></span></span>
+              <span class="master-toggle-label">${escapeHtml(on ? t('dash.on') : t('dash.off'))}</span>
+            </button>
+          </div>`;
+        })
+        .join('');
+      return `
+        <div class="panel dash-panel">
+          <div class="panel-h"><strong>${escapeHtml(g.title)}</strong></div>
+          <div class="panel-pad">${rows}</div>
+        </div>`;
+    })
+    .join('');
+
+  document.getElementById('app').innerHTML = shell(`
+    <div class="topbar">
+      <h2>${escapeHtml(t('apiFeatures.title'))}</h2>
+      <div class="toolbar">
+        <button type="button" class="btn secondary sm" data-feat-preset="open">${escapeHtml(t('apiFeatures.presetOpen'))}</button>
+        <button type="button" class="btn secondary sm" data-feat-preset="locked">${escapeHtml(t('apiFeatures.presetLocked'))}</button>
+        <button type="button" class="btn secondary sm" data-feat-preset="dev">${escapeHtml(t('apiFeatures.presetDev'))}</button>
+        <button type="button" class="btn secondary sm" id="feat-refresh">${escapeHtml(t('dash.refresh'))}</button>
+      </div>
+    </div>
+    <p class="page-hint">${escapeHtml(t('apiFeatures.intro'))}</p>
+    <div class="dash-layout" style="grid-template-columns:1fr">
+      <div class="dash-main">${sections}</div>
+    </div>
+  `);
+  bindShell();
+
+  document.getElementById('feat-refresh')?.addEventListener('click', () =>
+    renderApiFeatures().catch(onErr),
+  );
+
+  document.querySelectorAll('[data-feat-toggle]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const key = btn.getAttribute('data-feat-toggle');
+      if (!key) return;
+      const next = !btn.classList.contains('is-on');
+      try {
+        await api('/api-features', {
+          method: 'PUT',
+          body: JSON.stringify({ [key]: next }),
+        });
+        await renderApiFeatures();
+      } catch (e) {
+        onErr(e);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-feat-preset]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const name = btn.getAttribute('data-feat-preset');
+      if (
+        !(await uiConfirm({
+          message: tf('apiFeatures.presetConfirm', { name }),
+          confirmText: t('common.confirm'),
+        }))
+      )
+        return;
+      try {
+        await api('/api-features/preset', {
+          method: 'POST',
+          body: JSON.stringify({ name }),
+        });
+        await renderApiFeatures();
+      } catch (e) {
+        onErr(e);
+      }
+    });
+  });
+}
+
+/** Admin: generated media assets + video jobs — same list UX as keys/docs */
+async function renderMedia() {
+  if (!state.mediaFilter) {
+    state.mediaFilter = {
+      q: '',
+      kind: '',
+      provider: '',
+      from: '',
+      to: '',
+      limit: 20,
+      offset: 0,
+    };
+  }
+  const f = state.mediaFilter;
+  const params = new URLSearchParams({
+    limit: String(f.limit),
+    offset: String(f.offset),
+  });
+  if (f.q) params.set('q', f.q);
+  if (f.kind) params.set('kind', f.kind);
+  if (f.provider) params.set('provider', f.provider);
+  if (f.from) params.set('from', new Date(f.from).toISOString());
+  if (f.to) {
+    const end = new Date(f.to);
+    end.setHours(23, 59, 59, 999);
+    params.set('to', end.toISOString());
+  }
+
+  const [assetsRes, jobsRes] = await Promise.all([
+    api(`/media/assets?${params}`),
+    api('/media/jobs?limit=30').catch(() => ({ data: [], total: 0 })),
+  ]);
+  const assets = assetsRes.data || [];
+  const total = assetsRes.total ?? assets.length;
+  const jobs = jobsRes.data || [];
+
+  const bodyHtml = assets
+    .map((a) => {
+      const isImg = String(a.mime || '').startsWith('image/');
+      const preview = isImg
+        ? `<button type="button" class="btn ghost sm" data-media-preview="${escapeHtml(a.id)}">${escapeHtml(t('media.preview'))}</button>`
+        : '';
+      return `
+    <tr>
+      <td>
+        <div class="cell-primary mono" title="${escapeHtml(a.id)}">${escapeHtml(String(a.id).slice(0, 8))}…</div>
+        <div class="cell-sub">${escapeHtml(a.filename || a.source || '—')}</div>
+      </td>
+      <td>${escapeHtml(a.kind || '—')}</td>
+      <td class="muted">${escapeHtml(a.mime || '—')}</td>
+      <td>${fmtBytes(a.bytes)}</td>
+      <td>${escapeHtml(a.provider || '—')}</td>
+      <td class="muted" title="${escapeHtml(a.prompt || '')}">${escapeHtml((a.prompt || '—').slice(0, 48))}</td>
+      <td>${fmtTime(a.created_at)}</td>
+      <td><div class="row-actions">
+        ${preview}
+        <button type="button" class="btn ghost sm" data-media-dl="${escapeHtml(a.id)}">${escapeHtml(t('media.download'))}</button>
+        <button type="button" class="btn danger sm" data-media-del="${escapeHtml(a.id)}">${escapeHtml(t('media.delete'))}</button>
+      </div></td>
+    </tr>`;
+    })
+    .join('');
+
+  const filter = filterPanelHtml({
+    title: t('common.filterTitle'),
+    hint: t('common.filterHint'),
+    meta: tf('common.pagerTotal', { n: total }),
+    searchHtml: `
+      <div class="data-filter-search">
+        <label for="mf-q">${escapeHtml(t('common.search'))}</label>
+        <input type="search" id="mf-q" value="${escapeHtml(f.q)}" placeholder="${escapeHtml(t('media.searchPh'))}" />
+      </div>`,
+    gridHtml: `
+      <label>${escapeHtml(t('media.kind'))}
+        <select id="mf-kind">
+          <option value="">${escapeHtml(t('media.allKinds'))}</option>
+          <option value="image" ${f.kind === 'image' ? 'selected' : ''}>image</option>
+          <option value="video" ${f.kind === 'video' ? 'selected' : ''}>video</option>
+          <option value="audio" ${f.kind === 'audio' ? 'selected' : ''}>audio</option>
+        </select>
+      </label>
+      <label>${escapeHtml(t('media.provider'))}
+        <input type="text" id="mf-provider" value="${escapeHtml(f.provider)}" placeholder="${escapeHtml(t('media.providerPh'))}" />
+      </label>
+      <label>${escapeHtml(t('media.from') || t('chats.from') || 'From')}
+        <input type="date" id="mf-from" value="${escapeHtml(f.from)}" />
+      </label>
+      <label>${escapeHtml(t('media.to') || t('chats.to') || 'To')}
+        <input type="date" id="mf-to" value="${escapeHtml(f.to)}" />
+      </label>`,
+  });
+
+  const table = dataTablePanelHtml({
+    headHtml: `
+      <th>ID</th>
+      <th>${escapeHtml(t('media.kind'))}</th>
+      <th>MIME</th>
+      <th>${escapeHtml(t('media.bytes'))}</th>
+      <th>${escapeHtml(t('media.provider'))}</th>
+      <th>${escapeHtml(t('media.prompt'))}</th>
+      <th>${escapeHtml(t('media.created'))}</th>
+      <th>${escapeHtml(t('common.actions'))}</th>`,
+    bodyHtml,
+    colSpan: 8,
+    emptyText: t('media.empty'),
+    pagerHtml: pagerHtml({
+      total,
+      limit: f.limit,
+      offset: f.offset,
+      idPrefix: 'media',
+    }),
+  });
+
+  const jobRows = jobs.length
+    ? jobs
+        .map(
+          (j) => `
+    <tr>
+      <td class="mono">${escapeHtml(String(j.id).slice(0, 8))}…</td>
+      <td>${escapeHtml(j.status || '')}</td>
+      <td class="muted" title="${escapeHtml(j.prompt || '')}">${escapeHtml((j.prompt || '—').slice(0, 48))}</td>
+      <td class="mono">${escapeHtml(j.result_asset_id ? String(j.result_asset_id).slice(0, 8) + '…' : '—')}</td>
+      <td>${fmtTime(j.created_at)}</td>
+    </tr>`,
+        )
+        .join('')
+    : '';
+
+  const jobsTable = dataTablePanelHtml({
+    headHtml: `
+      <th>ID</th>
+      <th>${escapeHtml(t('media.status'))}</th>
+      <th>${escapeHtml(t('media.prompt'))}</th>
+      <th>Asset</th>
+      <th>${escapeHtml(t('media.created'))}</th>`,
+    bodyHtml: jobRows,
+    colSpan: 5,
+    emptyText: t('media.jobsEmpty'),
+  });
+
+  document.getElementById('app').innerHTML = shell(`
+    <div class="topbar">
+      <h2>${escapeHtml(t('media.title'))}</h2>
+      <div class="toolbar">
+        <button type="button" class="btn secondary sm" id="media-refresh">${escapeHtml(t('dash.refresh'))}</button>
+      </div>
+    </div>
+    ${pageMetaHtml([t('media.intro'), tf('common.pagerTotal', { n: total })])}
+    ${filter}
+    <div class="panel-h" style="margin:0.5rem 0 0"><strong>${escapeHtml(t('media.assets'))}</strong></div>
+    ${table}
+    <div class="panel-h" style="margin:1.25rem 0 0"><strong>${escapeHtml(t('media.jobs'))}</strong></div>
+    ${jobsTable}
+    <div id="media-preview-box" class="panel" style="margin-top:1rem;display:none">
+      <div class="panel-h"><strong>${escapeHtml(t('media.preview'))}</strong></div>
+      <div class="panel-pad" id="media-preview-pad"></div>
+    </div>
+  `);
+  bindShell();
+  bindPager('media', state.mediaFilter, () => renderMedia().catch(onErr));
+
+  document.getElementById('media-refresh')?.addEventListener('click', () =>
+    renderMedia().catch(onErr),
+  );
+  document.querySelector('[data-filter-apply]')?.addEventListener('click', () => {
+    state.mediaFilter.q = document.getElementById('mf-q')?.value.trim() || '';
+    state.mediaFilter.kind = document.getElementById('mf-kind')?.value || '';
+    state.mediaFilter.provider =
+      document.getElementById('mf-provider')?.value.trim() || '';
+    state.mediaFilter.from = document.getElementById('mf-from')?.value || '';
+    state.mediaFilter.to = document.getElementById('mf-to')?.value || '';
+    state.mediaFilter.offset = 0;
+    renderMedia().catch(onErr);
+  });
+  document.querySelector('[data-filter-reset]')?.addEventListener('click', () => {
+    state.mediaFilter = {
+      q: '',
+      kind: '',
+      provider: '',
+      from: '',
+      to: '',
+      limit: 20,
+      offset: 0,
+    };
+    renderMedia().catch(onErr);
+  });
+
+  async function fetchMediaBlob(id) {
+    const r = await fetch(`/admin/api/media/assets/${id}/download`, {
+      headers: { Authorization: `Bearer ${state.key}` },
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.blob();
+  }
+
+  document.querySelectorAll('[data-media-preview]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        const id = btn.getAttribute('data-media-preview');
+        const blob = await fetchMediaBlob(id);
+        const url = URL.createObjectURL(blob);
+        const box = document.getElementById('media-preview-box');
+        const pad = document.getElementById('media-preview-pad');
+        if (box && pad) {
+          box.style.display = '';
+          pad.innerHTML = `<img src="${url}" alt="preview" style="max-width:100%;max-height:420px;border-radius:8px" />`;
+        }
+      } catch (e) {
+        onErr(e);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-media-dl]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        const id = btn.getAttribute('data-media-dl');
+        const blob = await fetchMediaBlob(id);
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `media-${id.slice(0, 8)}`;
+        a.click();
+      } catch (e) {
+        onErr(e);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-media-del]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-media-del');
+      if (
+        !(await uiConfirm({
+          message: t('media.deleteConfirm'),
+          variant: 'danger',
+          confirmText: t('media.delete'),
+        }))
+      )
+        return;
+      try {
+        await api(`/media/assets/${id}`, { method: 'DELETE' });
+        await renderMedia();
+      } catch (e) {
+        onErr(e);
+      }
+    });
+  });
 }
 
 async function renderUsage() {
@@ -2929,8 +3734,13 @@ function readDdosPolicyForm() {
     .split(/[\n,]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+  // Master auto-ban lives in topbar toggle (hidden input kept for applyDdosPolicyToForm compat)
+  const masterOn = document.getElementById('ddos-master-autoban')
+    ? isMasterToggleOn('ddos-master-autoban')
+    : boolVal('dp-autoBanEnabled') ||
+      document.getElementById('dp-autoBanEnabled')?.value === '1';
   return {
-    autoBanEnabled: boolVal('dp-autoBanEnabled'),
+    autoBanEnabled: masterOn,
     rateLimitWindowMs: secToMs(numVal('dp-rateWindowSec', 60)),
     rateLimitMax: Math.floor(numVal('dp-rateMaxKey', 120)),
     rateLimitIpMax: Math.floor(numVal('dp-rateMaxIp', 60)),
@@ -3125,7 +3935,19 @@ function applyDdosPolicyToForm(p) {
     if (el.type === 'checkbox') el.checked = Boolean(v);
     else el.value = v;
   };
-  set('dp-autoBanEnabled', p.autoBanEnabled);
+  const hid = document.getElementById('dp-autoBanEnabled');
+  if (hid) {
+    if (hid.type === 'checkbox') hid.checked = Boolean(p.autoBanEnabled);
+    else hid.value = p.autoBanEnabled ? '1' : '0';
+  }
+  setMasterToggle(
+    'ddos-master-autoban',
+    Boolean(p.autoBanEnabled),
+    t('ddos.masterOn'),
+    t('ddos.masterOff'),
+  );
+  setFeatureRootOff('ddos-root', !p.autoBanEnabled);
+  setFeatureOffBanner('ddos-disabled-banner', !p.autoBanEnabled);
   set('dp-rateWindowSec', msToSec(p.rateLimitWindowMs));
   set('dp-rateMaxKey', p.rateLimitMax);
   set('dp-rateMaxIp', p.rateLimitIpMax);
@@ -3205,13 +4027,8 @@ function ddosPolicyPanelHtml(p) {
           </div>
           <p class="ddos-preset-hint" id="ddos-preset-hint"></p>
         </div>
-        <div class="ddos-policy-toolbar">
-          <label class="data-filter-check">
-            <input type="checkbox" id="dp-autoBanEnabled" ${p.autoBanEnabled ? 'checked' : ''} />
-            <span>${escapeHtml(t('ddos.autoBanMaster'))}</span>
-          </label>
-        </div>
         <p class="muted policy-master-hint">${escapeHtml(t('ddos.autoBanMasterHint'))}</p>
+        <input type="hidden" id="dp-autoBanEnabled" value="${p.autoBanEnabled ? '1' : '0'}" />
 
         <div class="policy-section">
           <h4>${escapeHtml(t('ddos.sectionProxy'))}</h4>
@@ -3502,14 +4319,27 @@ async function renderDdos(opts = {}) {
       trustedProxies: ['127.0.0.1', '::1'],
     };
 
+    const autoBanOn = Boolean(pol.autoBanEnabled);
+
     document.getElementById('app').innerHTML = shell(`
-    <div id="ddos-root">
+    <div id="ddos-root" class="${autoBanOn ? '' : 'is-feature-off'}">
     <div class="topbar">
       <h2>${escapeHtml(t('ddos.title'))}</h2>
       <div class="toolbar">
+        ${masterToggleBtnHtml({
+          id: 'ddos-master-autoban',
+          on: autoBanOn,
+          onLabel: t('ddos.masterOn'),
+          offLabel: t('ddos.masterOff'),
+          title: t('ddos.autoBanMasterHint'),
+        })}
         <button class="btn secondary sm" id="ddos-refresh">${escapeHtml(t('ddos.refresh'))}</button>
         <button class="btn secondary sm" id="ddos-pause">${escapeHtml(ddosPaused ? t('ddos.resume') : t('ddos.pause'))}</button>
       </div>
+    </div>
+    <div class="feature-off-banner" id="ddos-disabled-banner" ${autoBanOn ? 'hidden' : ''} role="status">
+      <strong>${escapeHtml(t('common.featureOff'))}</strong>
+      <span>${escapeHtml(t('ddos.disabledBanner'))}</span>
     </div>
     <div class="grid">
       <div class="card"><div class="label">${escapeHtml(t('ddos.activeConn'))}</div><div class="value" id="ddos-stat-active">${stats.activeConnections ?? active.length}</div></div>
@@ -3768,9 +4598,43 @@ function bindDdosActions(full = false, whitelist = []) {
       if (!ddosPaused) renderDdos({ soft: true }).catch(onErr);
     };
 
-    document.getElementById('dp-autoBanEnabled')?.addEventListener('change', (e) => {
-      updateDdosAutoBadge(e.target.checked);
+    document.getElementById('ddos-master-autoban')?.addEventListener('click', async () => {
+      const next = !isMasterToggleOn('ddos-master-autoban');
+      setMasterToggle(
+        'ddos-master-autoban',
+        next,
+        t('ddos.masterOn'),
+        t('ddos.masterOff'),
+      );
+      const hid = document.getElementById('dp-autoBanEnabled');
+      if (hid) {
+        if (hid.type === 'checkbox') hid.checked = next;
+        else hid.value = next ? '1' : '0';
+      }
+      updateDdosAutoBadge(next);
+      setFeatureRootOff('ddos-root', !next);
+      setFeatureOffBanner('ddos-disabled-banner', !next);
       updateDdosPresetUI();
+      // Immediate save of master switch (full form snapshot)
+      try {
+        const body = readDdosPolicyForm();
+        const res = await api('/ddos/policy', {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        });
+        state._ddosPolicyCache = res.data;
+        updateDdosPresetUI();
+      } catch (e) {
+        setMasterToggle(
+          'ddos-master-autoban',
+          !next,
+          t('ddos.masterOn'),
+          t('ddos.masterOff'),
+        );
+        setFeatureRootOff('ddos-root', next);
+        setFeatureOffBanner('ddos-disabled-banner', next);
+        onErr(e);
+      }
     });
 
     // Live-detect custom vs preset when user edits any field
@@ -4744,7 +5608,8 @@ async function compressChatHistory() {
         },
       ],
     };
-    if (asKeyId) body.apiKeyId = asKeyId;
+    const realKeyId = playgroundRealApiKeyId();
+    if (realKeyId) body.apiKeyId = realKeyId;
 
     const res = await fetch('/admin/api/chat/completions', {
       method: 'POST',
@@ -5142,6 +6007,22 @@ async function openConversation(id) {
   }
 }
 
+/** Real API key UUID only — never send OTP session synthetic ids to validators. */
+function playgroundRealApiKeyId() {
+  const id = playgroundKeyId();
+  if (!id) return null;
+  if (String(id).startsWith('admin-session:')) return null;
+  // basic uuid shape
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      id,
+    )
+  ) {
+    return null;
+  }
+  return id;
+}
+
 async function saveConversation() {
   const messages = messagesForSave();
   if (!messages.length && !chatContext.summary) return;
@@ -5156,7 +6037,7 @@ async function saveConversation() {
     messages,
     model: chatUi.model || null,
     systemPrompt: chatUi.systemPrompt || '',
-    apiKeyId: playgroundKeyId() || null,
+    apiKeyId: playgroundRealApiKeyId(),
     ...contextPayloadForSave(),
   };
   try {
@@ -5529,7 +6410,7 @@ function uploadChatFile(file, onProgress) {
   return new Promise((resolve, reject) => {
     const fd = new FormData();
     fd.append('file', file, file.name);
-    const asId = playgroundKeyId();
+    const asId = playgroundRealApiKeyId();
     if (asId) fd.append('apiKeyId', asId);
 
     const xhr = new XMLHttpRequest();
@@ -5668,7 +6549,8 @@ async function openChatLibraryPicker() {
     showError(t('chat.needKey'));
     return;
   }
-  const asKeyId = playgroundKeyId();
+  // Library list filters by real key only (session → omit = all admin-visible docs)
+  const asKeyId = playgroundRealApiKeyId();
   const room = Math.max(0, CHAT_MAX_DOCS - chatPendingDocs.length);
   if (room <= 0) {
     showError(t('chat.tooManyFiles'));
@@ -5932,7 +6814,14 @@ async function renderChatPlayground() {
   setChatHistoryMobileOpen(false);
 
   document.getElementById('app').innerHTML = shell(`
-    <div class="chat-page">
+    <div class="chat-page" id="chat-page">
+      <div class="chat-drop-overlay" id="chat-drop-overlay" hidden aria-hidden="true">
+        <div class="chat-drop-overlay-card">
+          <div class="chat-drop-overlay-icon" aria-hidden="true">📎</div>
+          <strong>${escapeHtml(t('chat.dropTitle'))}</strong>
+          <span class="muted">${escapeHtml(t('chat.dropHint'))}</span>
+        </div>
+      </div>
       <div class="topbar">
         <h2>${escapeHtml(t('chat.title'))}</h2>
         <div class="toolbar">
@@ -6117,25 +7006,105 @@ async function renderChatPlayground() {
     };
   }
 
-  const composer = document.getElementById('chat-composer');
-  composer.ondragover = (e) => {
-    e.preventDefault();
-    composer.classList.add('is-dragover');
-  };
-  composer.ondragleave = () => composer.classList.remove('is-dragover');
-  composer.ondrop = (e) => {
-    e.preventDefault();
-    composer.classList.remove('is-dragover');
-    if (e.dataTransfer?.files?.length) {
-      addChatFiles(e.dataTransfer.files);
-    }
-  };
+  // Full-page drag & drop: drop files anywhere on the chat page
+  bindChatPageFileDrop();
 
   document.getElementById('chat-input').onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendChatMessage();
     }
+  };
+}
+
+/**
+ * Allow dragging files from the OS into the chat page (whole surface).
+ * Prevents the browser from navigating to the dropped file.
+ */
+function bindChatPageFileDrop() {
+  const page = document.getElementById('chat-page');
+  const overlay = document.getElementById('chat-drop-overlay');
+  const composer = document.getElementById('chat-composer');
+  if (!page) return;
+
+  let dragDepth = 0;
+
+  const hasFiles = (e) => {
+    const types = e.dataTransfer?.types;
+    if (!types) return false;
+    // DOMStringList or array
+    if (typeof types.includes === 'function') return types.includes('Files');
+    return [...types].includes('Files');
+  };
+
+  const showOverlay = (on) => {
+    page.classList.toggle('is-file-drag', on);
+    if (composer) composer.classList.toggle('is-dragover', on);
+    if (overlay) {
+      overlay.hidden = !on;
+      overlay.setAttribute('aria-hidden', on ? 'false' : 'true');
+    }
+  };
+
+  const onDragEnter = (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepth += 1;
+    showOverlay(true);
+  };
+
+  const onDragOver = (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    showOverlay(true);
+  };
+
+  const onDragLeave = (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) showOverlay(false);
+  };
+
+  const onDrop = (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepth = 0;
+    showOverlay(false);
+    const files = e.dataTransfer?.files;
+    if (files?.length) {
+      addChatFiles(files).catch((err) =>
+        showError(err.message || t('chat.uploadFail')),
+      );
+    }
+  };
+
+  page.addEventListener('dragenter', onDragEnter);
+  page.addEventListener('dragover', onDragOver);
+  page.addEventListener('dragleave', onDragLeave);
+  page.addEventListener('drop', onDrop);
+
+  // Block browser default open-file navigation while on chat page
+  const winDragOver = (e) => {
+    if (state.page !== 'chat') return;
+    if (hasFiles(e)) e.preventDefault();
+  };
+  const winDrop = (e) => {
+    if (state.page !== 'chat') return;
+    if (hasFiles(e)) e.preventDefault();
+  };
+  window.addEventListener('dragover', winDragOver);
+  window.addEventListener('drop', winDrop);
+
+  // Stash removers on page node for cleanup on next render (node is discarded)
+  page._chatDropCleanup = () => {
+    window.removeEventListener('dragover', winDragOver);
+    window.removeEventListener('drop', winDrop);
   };
 }
 
@@ -6241,7 +7210,9 @@ async function sendChatMessage() {
     };
     // Always pass document_ids when any attachment is in the thread
     if (docIds.length) body.document_ids = docIds;
-    if (asKeyId) body.apiKeyId = asKeyId;
+    // Only send real key UUID — session actor is already on the Bearer token
+    const realKeyId = playgroundRealApiKeyId();
+    if (realKeyId) body.apiKeyId = realKeyId;
 
     // Admin playground proxy — select key by id (no raw secret)
     const res = await fetch('/admin/api/chat/completions', {
@@ -6372,8 +7343,10 @@ async function render() {
     else if (state.page === 'chats') await renderChats();
     else if (state.page === 'keys') await renderKeys();
     else if (state.page === 'documents') await renderDocuments();
+    else if (state.page === 'media') await renderMedia();
     else if (state.page === 'audit') await renderAudit();
     else if (state.page === 'settings') await renderSettings();
+    else if (state.page === 'apiFeatures') await renderApiFeatures();
     else if (state.page === 'usage') await renderUsage();
     else if (state.page === 'ddos') await renderDdos();
     else if (state.page === 'queue') await renderQueue();
@@ -6388,243 +7361,388 @@ async function render() {
 
 /** @type {ReturnType<typeof setInterval> | null} */
 let queueTimer = null;
-/** @type {string} */
-let queueStatusFilter = '';
 
-async function renderQueue() {
-  if (queueTimer) {
-    clearInterval(queueTimer);
-    queueTimer = null;
+/** Queue list filter (mirrors chats / docs filter state) */
+const queueFilter = {
+  status: '',
+  limit: 20,
+  offset: 0,
+};
+
+function fmtQueueAge(ms) {
+  if (!ms || ms < 0) return '—';
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
+  return `${(ms / 3_600_000).toFixed(1)}h`;
+}
+
+/** Fields compared for queue policy presets (operational pause/drain excluded). */
+const QUEUE_PRESET_KEYS = [
+  'enabled',
+  'globalConcurrency',
+  'perKeyConcurrency',
+  'maxQueueDepth',
+  'maxQueueDepthPerKey',
+  'fairness',
+  'defaultPriority',
+  'playgroundPriority',
+  'leaseMs',
+  'maxWaitMs',
+];
+
+/** Built-in schemes — same UX pattern as DDoS center. */
+function queuePolicyPresets() {
+  return {
+    relaxed: {
+      enabled: true,
+      globalConcurrency: 6,
+      perKeyConcurrency: 2,
+      maxQueueDepth: 200,
+      maxQueueDepthPerKey: 40,
+      fairness: 'weighted_round_robin',
+      defaultPriority: 100,
+      playgroundPriority: 40,
+      leaseMs: 60_000,
+      maxWaitMs: 900_000,
+    },
+    balanced: {
+      enabled: true,
+      globalConcurrency: 4,
+      perKeyConcurrency: 1,
+      maxQueueDepth: 100,
+      maxQueueDepthPerKey: 20,
+      fairness: 'weighted_round_robin',
+      defaultPriority: 100,
+      playgroundPriority: 50,
+      leaseMs: 45_000,
+      maxWaitMs: 600_000,
+    },
+    strict: {
+      enabled: true,
+      globalConcurrency: 2,
+      perKeyConcurrency: 1,
+      maxQueueDepth: 40,
+      maxQueueDepthPerKey: 8,
+      fairness: 'fifo_global',
+      defaultPriority: 100,
+      playgroundPriority: 80,
+      leaseMs: 30_000,
+      maxWaitMs: 300_000,
+    },
+  };
+}
+
+function normalizeQueuePolicySlice(p) {
+  if (!p) return {};
+  const out = {};
+  for (const k of QUEUE_PRESET_KEYS) {
+    const v = p[k];
+    if (typeof v === 'boolean') out[k] = v;
+    else if (typeof v === 'number' && Number.isFinite(v)) out[k] = Math.round(v);
+    else if (typeof v === 'string') out[k] = v;
+    else if (v == null) out[k] = null;
+    else out[k] = v;
   }
-  const statusQ = queueStatusFilter
-    ? `&status=${encodeURIComponent(queueStatusFilter)}`
-    : '';
-  const [statsRes, jobsRes, policyRes] = await Promise.all([
-    api('/queue/stats'),
-    api(`/queue/jobs?limit=40&offset=0${statusQ}`),
-    api('/queue/policy'),
-  ]);
-  const s = statsRes.data || {};
-  const pol = policyRes.data || s.policy || {};
-  const jobs = jobsRes.data || [];
-  const by = s.byStatus || {};
-  const deadCount = s.dead ?? by.dead ?? 0;
+  return out;
+}
 
-  const jobRows = jobs.length
-    ? jobs
-        .map(
-          (j) => `
-      <tr>
-        <td><code class="cell-primary">${escapeHtml(j.id.slice(0, 8))}…</code>
-          <div class="cell-sub">${escapeHtml(j.requestId || '')}</div>
-          ${
-            j.errorMessage
-              ? `<div class="cell-sub" style="color:var(--danger,#c44)">${escapeHtml(String(j.errorMessage).slice(0, 120))}</div>`
-              : ''
-          }
-        </td>
-        <td>${escapeHtml(j.source || '')}</td>
-        <td>${badgeStatus(j.status)}</td>
-        <td>${j.priority}</td>
-        <td class="muted">${escapeHtml((j.apiKeyId || '').slice(0, 8))}…</td>
-        <td>${j.attempt}/${j.maxAttempts}</td>
-        <td>${fmtTime(j.queuedAt)}</td>
-        <td class="row-actions">
-          ${
-            j.status === 'queued' || j.status === 'leased' || j.status === 'running'
-              ? `<button type="button" class="btn danger sm" data-q-cancel="${j.id}">${escapeHtml(t('queue.cancel'))}</button>`
-              : ''
-          }
-          ${
-            j.status === 'queued'
-              ? `<button type="button" class="btn secondary sm" data-q-pri="${j.id}" data-pri="${j.priority}">${escapeHtml(t('queue.priorityBtn'))}</button>`
-              : ''
-          }
-          ${
-            j.status === 'failed' || j.status === 'dead' || j.status === 'cancelled'
-              ? `<button type="button" class="btn secondary sm" data-q-requeue="${j.id}">${escapeHtml(t('queue.requeue'))}</button>`
-              : ''
-          }
-        </td>
-      </tr>`,
-        )
-        .join('')
-    : `<tr><td colspan="8" class="muted">${escapeHtml(t('queue.empty'))}</td></tr>`;
+function queuePoliciesEqual(a, b) {
+  return (
+    JSON.stringify(normalizeQueuePolicySlice(a)) ===
+    JSON.stringify(normalizeQueuePolicySlice(b))
+  );
+}
 
-  const statusOpts = [
-    ['', t('queue.allStatuses')],
-    ['queued', t('queue.filterQueued')],
-    ['active', t('queue.filterRunning')],
-    ['dead', t('queue.filterDead')],
-    ['failed', t('queue.filterFailed')],
-    ['succeeded', t('queue.filterSucceeded')],
-    ['cancelled', t('queue.filterCancelled')],
-  ]
-    .map(
-      ([v, lab]) =>
-        `<option value="${escapeHtml(v)}" ${queueStatusFilter === v ? 'selected' : ''}>${escapeHtml(lab)}</option>`,
-    )
-    .join('');
+/** @returns {'relaxed'|'balanced'|'strict'|'custom'} */
+function matchQueuePreset(policy) {
+  if (!policy) return 'custom';
+  const presets = queuePolicyPresets();
+  for (const name of ['relaxed', 'balanced', 'strict']) {
+    if (queuePoliciesEqual(policy, presets[name])) return name;
+  }
+  return 'custom';
+}
 
-  document.getElementById('app').innerHTML = shell(`
-    <div class="topbar">
-      <div>
-        <h2>${escapeHtml(t('queue.title'))}</h2>
-        <p class="muted">${escapeHtml(t('queue.subtitle'))}</p>
-      </div>
-      <div class="toolbar">
-        <button type="button" class="btn secondary sm" id="q-refresh">${escapeHtml(t('queue.refresh'))}</button>
-        <button type="button" class="btn secondary sm" id="q-pause">${escapeHtml(pol.paused ? t('queue.resume') : t('queue.pause'))}</button>
-        <button type="button" class="btn secondary sm" id="q-drain">${escapeHtml(pol.drainMode ? t('queue.undrain') : t('queue.drainBtn'))}</button>
-        <button type="button" class="btn danger sm" id="q-purge">${escapeHtml(t('queue.purgeDead'))}</button>
-      </div>
-    </div>
-    <div class="grid-3" style="margin-bottom:16px">
-      ${dashKpiCard({ label: t('queue.depth'), value: String(s.depth ?? 0), tone: (s.depth || 0) > 20 ? 'warn' : '' })}
-      ${dashKpiCard({ label: t('queue.queued'), value: String(s.queued ?? by.queued ?? 0) })}
-      ${dashKpiCard({ label: t('queue.activeJobs'), value: `${s.running ?? by.running ?? 0} / ${pol.globalConcurrency ?? '—'}`, sub: `${t('queue.worker')}: ${s.workerActive ?? 0}` })}
-      ${dashKpiCard({
-        label: t('queue.dead'),
-        value: String(deadCount),
-        tone: deadCount > 0 ? 'warn' : '',
-      })}
-      ${dashKpiCard({
-        label: t('queue.oldest'),
-        value: s.oldestQueuedAgeMs ? `${Math.round(s.oldestQueuedAgeMs / 1000)}s` : '—',
-      })}
-      ${dashKpiCard({
-        label: t('queue.running'),
-        value: pol.paused
-          ? t('queue.paused')
-          : pol.drainMode
-            ? t('queue.drain')
-            : t('queue.running'),
-        tone: pol.paused ? 'warn' : '',
-      })}
-    </div>
-    ${
-      deadCount > 0
-        ? `<div class="card" style="margin-bottom:16px;border-color:var(--warn,#c90)">
-      <h3>${escapeHtml(t('queue.dlqTitle'))} (${deadCount})</h3>
-      <p class="muted">${escapeHtml(t('queue.dlqHint'))}</p>
-      <div class="toolbar">
-        <button type="button" class="btn secondary sm" id="q-filter-dead">${escapeHtml(t('queue.filterDead'))}</button>
-        <button type="button" class="btn danger sm" id="q-purge-dlq">${escapeHtml(t('queue.purgeDead'))}</button>
-      </div>
-    </div>`
-        : ''
+function queuePresetLabel(name) {
+  if (name === 'relaxed') return t('queue.presetRelaxed');
+  if (name === 'balanced') return t('queue.presetBalanced');
+  if (name === 'strict') return t('queue.presetStrict');
+  return t('queue.presetCustom');
+}
+
+function queuePresetBadgeHtml(name, { unsaved = false } = {}) {
+  const label = queuePresetLabel(name);
+  const tone =
+    name === 'relaxed'
+      ? 'relaxed'
+      : name === 'balanced'
+        ? 'balanced'
+        : name === 'strict'
+          ? 'strict'
+          : 'custom';
+  const status = unsaved
+    ? tf('queue.presetFormLabel', { name: label })
+    : tf('queue.presetActiveLabel', { name: label });
+  return `<span class="ddos-preset-badge is-${tone}" id="queue-preset-badge" title="${escapeHtml(status)}">${escapeHtml(status)}</span>`;
+}
+
+function readQueuePolicyForm() {
+  return {
+    // Master switch lives in topbar (not a form checkbox)
+    enabled: document.getElementById('q-master-enabled')
+      ? isMasterToggleOn('q-master-enabled')
+      : true,
+    globalConcurrency: Math.max(
+      1,
+      Math.min(64, Math.floor(numVal('qp-gconc', 4))),
+    ),
+    perKeyConcurrency: Math.max(
+      1,
+      Math.min(16, Math.floor(numVal('qp-kconc', 1))),
+    ),
+    maxQueueDepth: Math.max(1, Math.floor(numVal('qp-depth', 100))),
+    maxQueueDepthPerKey: Math.max(1, Math.floor(numVal('qp-depthk', 20))),
+    fairness:
+      document.getElementById('qp-fair')?.value === 'fifo_global'
+        ? 'fifo_global'
+        : 'weighted_round_robin',
+    defaultPriority: Math.max(0, Math.min(1000, Math.floor(numVal('qp-pri', 100)))),
+    playgroundPriority: Math.max(
+      0,
+      Math.min(1000, Math.floor(numVal('qp-ppri', 50))),
+    ),
+    leaseMs: Math.max(5000, Math.floor(numVal('qp-lease', 45000))),
+    maxWaitMs: Math.max(5000, Math.floor(numVal('qp-wait', 600000))),
+  };
+}
+
+function applyQueueEnabledUi(on) {
+  setMasterToggle(
+    'q-master-enabled',
+    on,
+    t('queue.masterOn'),
+    t('queue.masterOff'),
+  );
+  setFeatureRootOff('queue-root', !on);
+  setFeatureOffBanner('queue-disabled-banner', !on);
+  // Status pill in runtime panel
+  const pill = document.getElementById('qk-pill-enabled');
+  if (pill) {
+    pill.innerHTML = dashStatusPill(on, t('dash.on'), t('dash.off'));
+  }
+}
+
+function applyQueuePresetToForm(values) {
+  if (!values) return;
+  const setNum = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = String(v);
+  };
+  applyQueueEnabledUi(values.enabled !== false);
+  setNum('qp-gconc', values.globalConcurrency);
+  setNum('qp-kconc', values.perKeyConcurrency);
+  setNum('qp-depth', values.maxQueueDepth);
+  setNum('qp-depthk', values.maxQueueDepthPerKey);
+  const fair = document.getElementById('qp-fair');
+  if (fair) fair.value = values.fairness || 'weighted_round_robin';
+  setNum('qp-pri', values.defaultPriority);
+  setNum('qp-ppri', values.playgroundPriority);
+  setNum('qp-lease', values.leaseMs);
+  setNum('qp-wait', values.maxWaitMs);
+  updateQueuePresetUI();
+}
+
+function updateQueuePresetUI() {
+  if (!document.getElementById('queue-policy-panel')) return;
+  let formPol;
+  try {
+    formPol = readQueuePolicyForm();
+  } catch {
+    return;
+  }
+  const formMatch = matchQueuePreset(formPol);
+  const savedMatch = matchQueuePreset(state._queuePolicyCache || formPol);
+  const unsaved = !queuePoliciesEqual(
+    formPol,
+    state._queuePolicyCache || formPol,
+  );
+
+  document.querySelectorAll('[data-queue-preset]').forEach((btn) => {
+    const name = btn.dataset.queuePreset;
+    if (name === 'custom') {
+      const isCustom = formMatch === 'custom';
+      btn.classList.toggle('is-active', isCustom);
+      btn.setAttribute('aria-pressed', isCustom ? 'true' : 'false');
+      btn.disabled = !isCustom;
+      return;
     }
-    <div class="card" style="margin-bottom:16px">
-      <h3>${escapeHtml(t('queue.savePolicy'))}</h3>
-      <div class="form-grid">
-        <label class="check-inline"><input type="checkbox" id="qp-enabled" ${pol.enabled !== false ? 'checked' : ''}/> ${escapeHtml(t('queue.enabled'))}</label>
-        <label>${escapeHtml(t('queue.globalConcurrency'))}
-          <input type="number" id="qp-gconc" min="1" max="64" value="${Number(pol.globalConcurrency) || 2}" />
-        </label>
-        <label>${escapeHtml(t('queue.perKeyConcurrency'))}
-          <input type="number" id="qp-kconc" min="1" max="16" value="${Number(pol.perKeyConcurrency) || 1}" />
-        </label>
-        <label>${escapeHtml(t('queue.maxDepth'))}
-          <input type="number" id="qp-depth" min="1" value="${Number(pol.maxQueueDepth) || 100}" />
-        </label>
-        <label>${escapeHtml(t('queue.maxDepthKey'))}
-          <input type="number" id="qp-depthk" min="1" value="${Number(pol.maxQueueDepthPerKey) || 20}" />
-        </label>
-        <label>${escapeHtml(t('queue.fairness'))}
-          <select id="qp-fair">
-            <option value="weighted_round_robin" ${pol.fairness === 'weighted_round_robin' ? 'selected' : ''}>${escapeHtml(t('queue.wrr'))}</option>
-            <option value="fifo_global" ${pol.fairness === 'fifo_global' ? 'selected' : ''}>${escapeHtml(t('queue.fifo'))}</option>
-          </select>
-        </label>
-        <label>${escapeHtml(t('queue.defaultPriority'))}
-          <input type="number" id="qp-pri" min="0" value="${Number(pol.defaultPriority) || 100}" />
-        </label>
-        <label>${escapeHtml(t('queue.playgroundPriority'))}
-          <input type="number" id="qp-ppri" min="0" value="${Number(pol.playgroundPriority) || 50}" />
-        </label>
-        <label>${escapeHtml(t('queue.leaseMs'))}
-          <input type="number" id="qp-lease" min="5000" value="${Number(pol.leaseMs) || 45000}" />
-        </label>
-        <label>${escapeHtml(t('queue.maxWaitMs'))}
-          <input type="number" id="qp-wait" min="5000" value="${Number(pol.maxWaitMs) || 600000}" />
-        </label>
-      </div>
-      <div class="toolbar" style="margin-top:12px">
-        <button type="button" class="btn sm" id="qp-save">${escapeHtml(t('queue.savePolicy'))}</button>
-      </div>
-    </div>
-    <div class="card">
-      <div class="panel-h" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-        <h3 style="margin:0">${escapeHtml(t('queue.jobs'))} (${jobsRes.total ?? jobs.length})</h3>
-        <label style="display:flex;align-items:center;gap:8px;margin:0">
-          <span class="muted">${escapeHtml(t('queue.filterStatus'))}</span>
-          <select id="q-status-filter">${statusOpts}</select>
-        </label>
-      </div>
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>ID / ${escapeHtml(t('queue.errorCol'))}</th><th>Src</th><th>Status</th><th>Pri</th><th>Key</th><th>Try</th><th>Queued</th><th></th>
-            </tr>
-          </thead>
-          <tbody>${jobRows}</tbody>
-        </table>
-      </div>
-    </div>
-  `);
-  bindShell();
-
-  document.getElementById('q-refresh').onclick = () => renderQueue().catch(onErr);
-  document.getElementById('q-pause').onclick = async () => {
-    await api(pol.paused ? '/queue/resume' : '/queue/pause', { method: 'POST', body: '{}' });
-    renderQueue().catch(onErr);
-  };
-  document.getElementById('q-drain').onclick = async () => {
-    await api(pol.drainMode ? '/queue/undrain' : '/queue/drain', { method: 'POST', body: '{}' });
-    renderQueue().catch(onErr);
-  };
-  const doPurge = async () => {
-    if (!(await uiConfirm({ title: t('queue.purgeDead'), message: t('queue.purgeDead'), variant: 'danger' }))) return;
-    await api('/queue/purge-dead', { method: 'POST', body: '{}' });
-    renderQueue().catch(onErr);
-  };
-  document.getElementById('q-purge').onclick = () => doPurge().catch(onErr);
-  document.getElementById('q-purge-dlq')?.addEventListener('click', () => doPurge().catch(onErr));
-  document.getElementById('q-filter-dead')?.addEventListener('click', () => {
-    queueStatusFilter = 'dead';
-    renderQueue().catch(onErr);
+    const isForm = name === formMatch;
+    const isSaved = name === savedMatch;
+    btn.classList.toggle('is-active', isForm);
+    btn.classList.toggle('is-saved', isSaved && !isForm);
+    btn.setAttribute('aria-pressed', isForm ? 'true' : 'false');
+    const base =
+      name === 'relaxed'
+        ? t('queue.presetRelaxed')
+        : name === 'balanced'
+          ? t('queue.presetBalanced')
+          : t('queue.presetStrict');
+    if (isForm && isSaved) {
+      btn.innerHTML = `${escapeHtml(base)} <span class="preset-tag">${escapeHtml(t('queue.presetTagActive'))}</span>`;
+    } else if (isForm && unsaved) {
+      btn.innerHTML = `${escapeHtml(base)} <span class="preset-tag preset-tag--draft">${escapeHtml(t('queue.presetTagDraft'))}</span>`;
+    } else if (isSaved) {
+      btn.innerHTML = `${escapeHtml(base)} <span class="preset-tag preset-tag--saved">${escapeHtml(t('queue.presetTagSaved'))}</span>`;
+    } else {
+      btn.textContent = base;
+    }
   });
-  document.getElementById('q-status-filter').onchange = (ev) => {
-    queueStatusFilter = ev.target.value || '';
-    renderQueue().catch(onErr);
-  };
-  document.getElementById('qp-save').onclick = async () => {
-    const body = {
-      enabled: document.getElementById('qp-enabled').checked,
-      globalConcurrency: Number(document.getElementById('qp-gconc').value),
-      perKeyConcurrency: Number(document.getElementById('qp-kconc').value),
-      maxQueueDepth: Number(document.getElementById('qp-depth').value),
-      maxQueueDepthPerKey: Number(document.getElementById('qp-depthk').value),
-      fairness: document.getElementById('qp-fair').value,
-      defaultPriority: Number(document.getElementById('qp-pri').value),
-      playgroundPriority: Number(document.getElementById('qp-ppri').value),
-      leaseMs: Number(document.getElementById('qp-lease').value),
-      maxWaitMs: Number(document.getElementById('qp-wait').value),
+
+  const badgeHost = document.getElementById('queue-preset-badge');
+  if (badgeHost) {
+    badgeHost.outerHTML = queuePresetBadgeHtml(formMatch, {
+      unsaved: unsaved && formMatch !== savedMatch,
+    });
+  }
+
+  const hint = document.getElementById('queue-preset-hint');
+  if (hint) {
+    const hints = {
+      relaxed: t('queue.presetRelaxedHint'),
+      balanced: t('queue.presetBalancedHint'),
+      strict: t('queue.presetStrictHint'),
+      custom: t('queue.presetCustomHint'),
     };
-    await api('/queue/policy', { method: 'PUT', body: JSON.stringify(body) });
-    showError('');
-    renderQueue().catch(onErr);
-  };
+    hint.textContent = hints[formMatch] || hints.custom;
+  }
+}
+
+function bindQueuePresetControls() {
+  document.querySelectorAll('[data-queue-preset]').forEach((btn) => {
+    if (btn.dataset.queuePreset === 'custom') return;
+    btn.onclick = () => {
+      const name = btn.dataset.queuePreset;
+      const preset = queuePolicyPresets()[name];
+      if (!preset) return;
+      applyQueuePresetToForm(preset);
+    };
+  });
+  [
+    'qp-gconc',
+    'qp-kconc',
+    'qp-depth',
+    'qp-depthk',
+    'qp-fair',
+    'qp-pri',
+    'qp-ppri',
+    'qp-lease',
+    'qp-wait',
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('change', () => updateQueuePresetUI());
+    el.addEventListener('input', () => updateQueuePresetUI());
+  });
+  updateQueuePresetUI();
+}
+
+function queueMainScrollEl() {
+  return document.querySelector('.main');
+}
+
+function queueJobRowsHtml(jobs) {
+  return jobs
+    .map((j) => {
+      const activeJob =
+        j.status === 'queued' || j.status === 'leased' || j.status === 'running';
+      const requeueable =
+        j.status === 'failed' || j.status === 'dead' || j.status === 'cancelled';
+      const waitMs =
+        j.startedAt || j.finishedAt
+          ? null
+          : j.queuedAt
+            ? Date.now() - new Date(j.queuedAt).getTime()
+            : null;
+      return `
+    <tr>
+      <td>
+        <div class="cell-primary mono">${escapeHtml((j.id || '').slice(0, 10))}…</div>
+        <div class="cell-sub mono" title="${escapeHtml(j.requestId || '')}">${escapeHtml((j.requestId || '').slice(0, 18))}${(j.requestId || '').length > 18 ? '…' : ''}</div>
+        ${
+          j.errorMessage
+            ? `<div class="queue-job-err" title="${escapeHtml(j.errorMessage)}">${escapeHtml(String(j.errorMessage).slice(0, 100))}</div>`
+            : ''
+        }
+      </td>
+      <td>${badgeQueueSource(j.source)}</td>
+      <td>
+        ${badgeQueueStatus(j.status)}
+        ${j.cancelRequested ? `<div class="cell-sub">${escapeHtml(t('queue.cancelReq'))}</div>` : ''}
+      </td>
+      <td class="mono">${escapeHtml(j.model || '—')}</td>
+      <td><span class="queue-pri">${j.priority ?? '—'}</span></td>
+      <td>
+        <div class="cell-primary mono">${escapeHtml((j.apiKeyId || '').slice(0, 8))}…</div>
+      </td>
+      <td class="mono">${j.attempt ?? 0}<span class="muted">/${j.maxAttempts ?? 1}</span></td>
+      <td>
+        <div class="cell-primary">${fmtTime(j.queuedAt)}</div>
+        ${
+          waitMs != null && j.status === 'queued'
+            ? `<div class="cell-sub">${escapeHtml(t('queue.wait'))}: ${fmtQueueAge(waitMs)}</div>`
+            : j.startedAt
+              ? `<div class="cell-sub">${escapeHtml(t('queue.started'))}: ${fmtTime(j.startedAt)}</div>`
+              : ''
+        }
+      </td>
+      <td class="row-actions">
+        ${
+          activeJob
+            ? `<button type="button" class="btn danger sm" data-q-cancel="${escapeHtml(j.id)}" title="${escapeHtml(t('queue.cancel'))}">${escapeHtml(t('queue.cancel'))}</button>`
+            : ''
+        }
+        ${
+          j.status === 'queued'
+            ? `<button type="button" class="btn secondary sm" data-q-pri="${escapeHtml(j.id)}" data-pri="${j.priority}" title="${escapeHtml(t('queue.priorityBtn'))}">${escapeHtml(t('queue.priorityBtn'))}</button>`
+            : ''
+        }
+        ${
+          requeueable
+            ? `<button type="button" class="btn secondary sm" data-q-requeue="${escapeHtml(j.id)}" title="${escapeHtml(t('queue.requeue'))}">${escapeHtml(t('queue.requeue'))}</button>`
+            : ''
+        }
+      </td>
+    </tr>`;
+    })
+    .join('');
+}
+
+function bindQueueRowActions() {
   document.querySelectorAll('[data-q-cancel]').forEach((b) => {
     b.onclick = async () => {
-      await api(`/queue/jobs/${b.dataset.qCancel}/cancel`, { method: 'POST', body: '{}' });
+      if (
+        !(await uiConfirm({
+          title: t('queue.cancel'),
+          message: t('queue.cancelConfirm'),
+          variant: 'danger',
+          confirmText: t('queue.cancel'),
+        }))
+      )
+        return;
+      await api(`/queue/jobs/${b.dataset.qCancel}/cancel`, {
+        method: 'POST',
+        body: '{}',
+      });
       renderQueue().catch(onErr);
     };
   });
   document.querySelectorAll('[data-q-requeue]').forEach((b) => {
     b.onclick = async () => {
-      await api(`/queue/jobs/${b.dataset.qRequeue}/requeue`, { method: 'POST', body: '{}' });
+      await api(`/queue/jobs/${b.dataset.qRequeue}/requeue`, {
+        method: 'POST',
+        body: '{}',
+      });
       renderQueue().catch(onErr);
     };
   });
@@ -6642,13 +7760,595 @@ async function renderQueue() {
       renderQueue().catch(onErr);
     };
   });
+}
 
+function queueModeLabel(pol) {
+  if (!pol.enabled) return t('queue.modeOff');
+  if (pol.paused) return t('queue.paused');
+  if (pol.drainMode) return t('queue.drain');
+  return t('queue.running');
+}
+
+/** Soft live-update: KPIs + job table only (keeps scroll / form focus). */
+function applyQueueSoftUpdate({ s, pol, jobs, total, by }) {
+  const deadCount = s.dead ?? by.dead ?? 0;
+  const leased = s.leased ?? by.leased ?? 0;
+  const running = s.running ?? by.running ?? 0;
+  const queued = s.queued ?? by.queued ?? 0;
+  const depth = s.depth ?? queued + leased + running;
+  const modeLabel = queueModeLabel(pol);
+  const fairnessLabel =
+    pol.fairness === 'fifo_global' ? t('queue.fifo') : t('queue.wrr');
+
+  const setText = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  const setHtml = (id, html) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  };
+
+  setText('qk-depth', String(depth));
+  setText('qk-depth-sub', tf('queue.kpiDepthSub', { q: queued, l: leased }));
+  setHtml(
+    'qk-running',
+    `${running}<span class="dash-kpi-den">/${pol.globalConcurrency ?? '—'}</span>`,
+  );
+  setText('qk-running-sub', tf('queue.kpiActiveSub', { n: s.workerActive ?? 0 }));
+  setText('qk-queued', String(queued));
+  setText('qk-dead', String(deadCount));
+  setText(
+    'qk-oldest',
+    s.oldestQueuedAgeMs ? fmtQueueAge(s.oldestQueuedAgeMs) : '—',
+  );
+  setText('qk-mode', modeLabel);
+  setText('qk-mode-sub', fairnessLabel);
+
+  const workerEl = document.getElementById('qk-worker-id');
+  if (workerEl) {
+    const wid = s.workerId || '—';
+    workerEl.textContent = wid;
+    workerEl.title = wid;
+  }
+
+  const setPill = (id, ok, okText, badText) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.outerHTML = `<span id="${id}">${dashStatusPill(ok, okText, badText)}</span>`;
+  };
+  setPill(
+    'qk-pill-enabled',
+    pol.enabled !== false,
+    t('dash.on'),
+    t('dash.off'),
+  );
+  setPill(
+    'qk-pill-consumer',
+    !pol.paused && pol.enabled !== false,
+    t('queue.running'),
+    pol.paused ? t('queue.paused') : t('queue.modeOff'),
+  );
+  setPill(
+    'qk-pill-admission',
+    !pol.drainMode,
+    t('queue.accepting'),
+    t('queue.drain'),
+  );
+  setText('qk-fairness-val', fairnessLabel);
+  setText(
+    'qk-conc-val',
+    `${pol.perKeyConcurrency ?? 1} / ${pol.globalConcurrency ?? '—'}`,
+  );
+
+  // DLQ banner show/hide
+  const dlqHost = document.getElementById('queue-dlq-slot');
+  if (dlqHost) {
+    if (deadCount > 0) {
+      dlqHost.innerHTML = `
+        <div class="queue-dlq-banner" role="status">
+          <div class="queue-dlq-text">
+            <strong>${escapeHtml(t('queue.dlqTitle'))}</strong>
+            <span class="queue-dlq-count">${deadCount}</span>
+            <span class="muted">${escapeHtml(t('queue.dlqHint'))}</span>
+          </div>
+          <div class="toolbar">
+            <button type="button" class="btn secondary sm" id="q-filter-dead">${escapeHtml(t('queue.viewDlq'))}</button>
+            <button type="button" class="btn danger sm" id="q-purge-dlq">${escapeHtml(t('queue.purgeDead'))}</button>
+          </div>
+        </div>`;
+      document.getElementById('q-filter-dead')?.addEventListener('click', () => {
+        queueFilter.status = 'dead';
+        queueFilter.offset = 0;
+        renderQueue().catch(onErr);
+      });
+      document.getElementById('q-purge-dlq')?.addEventListener('click', () => {
+        document.getElementById('q-purge')?.click();
+      });
+    } else {
+      dlqHost.innerHTML = '';
+    }
+  }
+
+  const meta = document.getElementById('qk-jobs-meta');
+  if (meta) meta.textContent = tf('queue.jobsMeta', { n: total });
+
+  const tbody = document.querySelector('#queue-jobs-table tbody');
+  if (tbody) {
+    tbody.innerHTML =
+      queueJobRowsHtml(jobs) ||
+      `<tr class="empty-row"><td colspan="9">
+        <div class="data-empty">
+          <div class="data-empty-icon">∅</div>
+          <strong>${escapeHtml(t('queue.empty'))}</strong>
+        </div>
+      </td></tr>`;
+    bindQueueRowActions();
+  }
+
+  // Pager meta only (avoid rebuilding selects and resetting focus)
+  const pagerTotal = document.querySelector('#queue-pager .data-pager-meta span');
+  if (pagerTotal) {
+    const pages = Math.max(1, Math.ceil((total || 0) / queueFilter.limit) || 1);
+    const page = Math.floor(queueFilter.offset / queueFilter.limit) + 1;
+    const spans = document.querySelectorAll('#queue-pager .data-pager-meta > span');
+    if (spans[0]) spans[0].textContent = tf('common.pagerTotal', { n: total || 0 });
+    if (spans[1])
+      spans[1].textContent = tf('common.pagerPage', { n: page, total: pages });
+    const prev = document.getElementById('queue-prev');
+    const next = document.getElementById('queue-next');
+    if (prev) prev.disabled = queueFilter.offset <= 0;
+    if (next) next.disabled = queueFilter.offset + queueFilter.limit >= total;
+  }
+
+  // Toolbar button labels (pause / drain may have changed externally)
+  const pauseBtn = document.getElementById('q-pause');
+  if (pauseBtn)
+    pauseBtn.textContent = pol.paused ? t('queue.resume') : t('queue.pause');
+  const drainBtn = document.getElementById('q-drain');
+  if (drainBtn)
+    drainBtn.textContent = pol.drainMode ? t('queue.undrain') : t('queue.drainBtn');
+
+  // Master enable switch (don't fight user mid-click — only sync when not focused)
+  const master = document.getElementById('q-master-enabled');
+  if (master && document.activeElement !== master) {
+    applyQueueEnabledUi(pol.enabled !== false);
+  }
+}
+
+function ensureQueueAutoRefresh() {
+  if (queueTimer) return;
   queueTimer = setInterval(() => {
     if (state.page !== 'queue') {
       clearInterval(queueTimer);
       queueTimer = null;
       return;
     }
-    renderQueue().catch(() => {});
-  }, 3000);
+    const el = document.activeElement;
+    if (
+      el &&
+      el.closest &&
+      el.closest('#queue-policy-panel') &&
+      (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA')
+    ) {
+      return;
+    }
+    // Soft refresh: no full shell rebuild → scroll stays put
+    renderQueue({ soft: true }).catch(() => {});
+  }, 4000);
 }
+
+async function renderQueue(opts = {}) {
+  const soft = Boolean(opts.soft) && document.getElementById('queue-root');
+
+  if (!soft && queueTimer) {
+    clearInterval(queueTimer);
+    queueTimer = null;
+  }
+
+  // Preserve scroll across full re-renders (filter / save / manual refresh)
+  const scrollEl = queueMainScrollEl();
+  const savedScroll = !soft && scrollEl ? scrollEl.scrollTop : 0;
+
+  const f = queueFilter;
+  const q = new URLSearchParams();
+  q.set('limit', String(f.limit));
+  q.set('offset', String(f.offset));
+  if (f.status) q.set('status', f.status);
+
+  const [statsRes, jobsRes, policyRes] = await Promise.all([
+    api('/queue/stats'),
+    api(`/queue/jobs?${q}`),
+    api('/queue/policy'),
+  ]);
+  // Page may have changed during fetch
+  if (state.page !== 'queue') return;
+
+  const s = statsRes.data || {};
+  const pol = policyRes.data || s.policy || {};
+  const jobs = jobsRes.data || [];
+  const total = jobsRes.total ?? jobs.length;
+  const by = s.byStatus || {};
+  const deadCount = s.dead ?? by.dead ?? 0;
+  const leased = s.leased ?? by.leased ?? 0;
+  const running = s.running ?? by.running ?? 0;
+  const queued = s.queued ?? by.queued ?? 0;
+  const depth = s.depth ?? queued + leased + running;
+  const modeLabel = queueModeLabel(pol);
+  const modeTone = !pol.enabled || pol.paused || pol.drainMode ? 'warn' : 'ok';
+
+  // Cache saved policy for preset matching (soft + full)
+  state._queuePolicyCache = { ...pol };
+
+  if (soft) {
+    applyQueueSoftUpdate({ s, pol, jobs, total, by });
+    ensureQueueAutoRefresh();
+    return;
+  }
+
+  const bodyHtml = queueJobRowsHtml(jobs);
+
+  const filter = filterPanelHtml({
+    title: t('queue.filterTitle'),
+    hint: t('queue.filterHint'),
+    gridHtml: `
+      <label>${escapeHtml(t('queue.filterStatus'))}
+        <select id="qf-status">
+          <option value="">${escapeHtml(t('queue.allStatuses'))}</option>
+          <option value="queued" ${f.status === 'queued' ? 'selected' : ''}>${escapeHtml(t('queue.filterQueued'))}</option>
+          <option value="active" ${f.status === 'active' ? 'selected' : ''}>${escapeHtml(t('queue.filterRunning'))}</option>
+          <option value="dead" ${f.status === 'dead' ? 'selected' : ''}>${escapeHtml(t('queue.filterDead'))}</option>
+          <option value="failed" ${f.status === 'failed' ? 'selected' : ''}>${escapeHtml(t('queue.filterFailed'))}</option>
+          <option value="succeeded" ${f.status === 'succeeded' ? 'selected' : ''}>${escapeHtml(t('queue.filterSucceeded'))}</option>
+          <option value="cancelled" ${f.status === 'cancelled' ? 'selected' : ''}>${escapeHtml(t('queue.filterCancelled'))}</option>
+        </select>
+      </label>`,
+  });
+
+  const table = dataTablePanelHtml({
+    headHtml: `
+      <th>${escapeHtml(t('queue.colJob'))}</th>
+      <th>${escapeHtml(t('queue.colSource'))}</th>
+      <th>${escapeHtml(t('queue.colStatus'))}</th>
+      <th>${escapeHtml(t('queue.colModel'))}</th>
+      <th>${escapeHtml(t('queue.colPri'))}</th>
+      <th>${escapeHtml(t('queue.colKey'))}</th>
+      <th>${escapeHtml(t('queue.colTry'))}</th>
+      <th>${escapeHtml(t('queue.colTime'))}</th>
+      <th></th>`,
+    bodyHtml,
+    colSpan: 9,
+    emptyText: t('queue.empty'),
+    pagerHtml: pagerHtml({
+      total,
+      limit: f.limit,
+      offset: f.offset,
+      idPrefix: 'queue',
+    }),
+  });
+
+  const fairnessLabel =
+    pol.fairness === 'fifo_global' ? t('queue.fifo') : t('queue.wrr');
+
+  const queueOn = pol.enabled !== false;
+
+  document.getElementById('app').innerHTML = shell(`
+  <div id="queue-root" class="${queueOn ? '' : 'is-feature-off'}">
+    <div class="topbar">
+      <h2>${escapeHtml(t('queue.title'))}</h2>
+      <div class="toolbar">
+        ${masterToggleBtnHtml({
+          id: 'q-master-enabled',
+          on: queueOn,
+          onLabel: t('queue.masterOn'),
+          offLabel: t('queue.masterOff'),
+          title: t('queue.masterHint'),
+        })}
+        <button type="button" class="btn secondary sm" id="q-refresh">${escapeHtml(t('queue.refresh'))}</button>
+        <button type="button" class="btn secondary sm" id="q-pause">${escapeHtml(pol.paused ? t('queue.resume') : t('queue.pause'))}</button>
+        <button type="button" class="btn secondary sm" id="q-drain">${escapeHtml(pol.drainMode ? t('queue.undrain') : t('queue.drainBtn'))}</button>
+        <button type="button" class="btn danger sm" id="q-purge">${escapeHtml(t('queue.purgeDead'))}</button>
+      </div>
+    </div>
+    <p class="page-hint">${escapeHtml(t('queue.subtitle'))}</p>
+    <div class="feature-off-banner" id="queue-disabled-banner" ${queueOn ? 'hidden' : ''} role="status">
+      <strong>${escapeHtml(t('common.featureOff'))}</strong>
+      <span>${escapeHtml(t('queue.disabledBanner'))}</span>
+    </div>
+
+    <div class="dash-kpi-grid queue-kpi-grid">
+      ${dashKpiCard({
+        label: t('queue.depth'),
+        value: String(depth),
+        valueId: 'qk-depth',
+        sub: tf('queue.kpiDepthSub', { q: queued, l: leased }),
+        subId: 'qk-depth-sub',
+        tone: depth > 20 ? 'warn' : depth > 0 ? 'primary' : '',
+      })}
+      ${dashKpiCard({
+        label: t('queue.activeJobs'),
+        value: `${running}<span class="dash-kpi-den">/${pol.globalConcurrency ?? '—'}</span>`,
+        valueId: 'qk-running',
+        sub: tf('queue.kpiActiveSub', { n: s.workerActive ?? 0 }),
+        subId: 'qk-running-sub',
+        tone: running >= (pol.globalConcurrency || 1) ? 'warn' : '',
+      })}
+      ${dashKpiCard({
+        label: t('queue.queued'),
+        value: String(queued),
+        valueId: 'qk-queued',
+        sub: t('queue.kpiQueuedSub'),
+      })}
+      ${dashKpiCard({
+        label: t('queue.dead'),
+        value: String(deadCount),
+        valueId: 'qk-dead',
+        sub: t('queue.kpiDeadSub'),
+        tone: deadCount > 0 ? 'danger' : 'ok',
+      })}
+      ${dashKpiCard({
+        label: t('queue.oldest'),
+        value: s.oldestQueuedAgeMs ? fmtQueueAge(s.oldestQueuedAgeMs) : '—',
+        valueId: 'qk-oldest',
+        sub: t('queue.kpiOldestSub'),
+        tone: (s.oldestQueuedAgeMs || 0) > 60_000 ? 'warn' : '',
+      })}
+      ${dashKpiCard({
+        label: t('queue.mode'),
+        value: modeLabel,
+        valueId: 'qk-mode',
+        sub: fairnessLabel,
+        subId: 'qk-mode-sub',
+        tone: modeTone === 'ok' ? 'ok' : 'warn',
+      })}
+    </div>
+
+    <div class="panel data-table-panel queue-status-panel">
+      <div class="panel-h">
+        <strong>${escapeHtml(t('queue.statusPanel'))}</strong>
+      </div>
+      <div class="panel-pad">
+        <div class="queue-status-row queue-status-row--6">
+          <div class="queue-status-item">
+            <span class="label">${escapeHtml(t('queue.enabled'))}</span>
+            <span id="qk-pill-enabled">${dashStatusPill(pol.enabled !== false, t('dash.on'), t('dash.off'))}</span>
+          </div>
+          <div class="queue-status-item">
+            <span class="label">${escapeHtml(t('queue.consumer'))}</span>
+            <span id="qk-pill-consumer">${dashStatusPill(!pol.paused && pol.enabled !== false, t('queue.running'), pol.paused ? t('queue.paused') : t('queue.modeOff'))}</span>
+          </div>
+          <div class="queue-status-item">
+            <span class="label">${escapeHtml(t('queue.admission'))}</span>
+            <span id="qk-pill-admission">${dashStatusPill(!pol.drainMode, t('queue.accepting'), t('queue.drain'))}</span>
+          </div>
+          <div class="queue-status-item">
+            <span class="label">${escapeHtml(t('queue.fairness'))}</span>
+            <strong class="queue-status-val" id="qk-fairness-val">${escapeHtml(fairnessLabel)}</strong>
+          </div>
+          <div class="queue-status-item">
+            <span class="label">${escapeHtml(t('queue.concurrency'))}</span>
+            <strong class="queue-status-val mono" id="qk-conc-val">${pol.perKeyConcurrency ?? 1} / ${pol.globalConcurrency ?? '—'}</strong>
+          </div>
+          <div class="queue-status-item queue-status-item--worker">
+            <span class="label">${escapeHtml(t('queue.workerInstance'))}</span>
+            <code class="queue-worker-id" id="qk-worker-id" title="${escapeHtml(s.workerId || '')}">${escapeHtml(s.workerId || '—')}</code>
+            <span class="queue-worker-hint muted">${escapeHtml(t('queue.workerInstanceHint'))}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="queue-dlq-slot">
+    ${
+      deadCount > 0
+        ? `<div class="queue-dlq-banner" role="status">
+      <div class="queue-dlq-text">
+        <strong>${escapeHtml(t('queue.dlqTitle'))}</strong>
+        <span class="queue-dlq-count">${deadCount}</span>
+        <span class="muted">${escapeHtml(t('queue.dlqHint'))}</span>
+      </div>
+      <div class="toolbar">
+        <button type="button" class="btn secondary sm" id="q-filter-dead">${escapeHtml(t('queue.viewDlq'))}</button>
+        <button type="button" class="btn danger sm" id="q-purge-dlq">${escapeHtml(t('queue.purgeDead'))}</button>
+      </div>
+    </div>`
+        : ''
+    }
+    </div>
+
+    <div class="panel data-table-panel" id="queue-policy-panel" style="margin-bottom:14px">
+      <div class="panel-h">
+        <div>
+          <strong>${escapeHtml(t('queue.policyTitle'))}</strong>
+          <span class="muted">${escapeHtml(t('queue.policyHint'))}</span>
+        </div>
+        ${queuePresetBadgeHtml(matchQueuePreset(pol))}
+      </div>
+      <div class="panel-pad">
+        <div class="ddos-preset-block">
+          <div class="ddos-preset-block-h">
+            <strong>${escapeHtml(t('queue.presetTitle'))}</strong>
+            <span class="muted">${escapeHtml(t('queue.presetHint'))}</span>
+          </div>
+          <div class="ddos-presets" role="group" aria-label="${escapeHtml(t('queue.presetTitle'))}">
+            <button type="button" class="ddos-preset-btn" data-queue-preset="relaxed" data-ddos-preset="relaxed" aria-pressed="false">${escapeHtml(t('queue.presetRelaxed'))}</button>
+            <button type="button" class="ddos-preset-btn" data-queue-preset="balanced" data-ddos-preset="balanced" aria-pressed="false">${escapeHtml(t('queue.presetBalanced'))}</button>
+            <button type="button" class="ddos-preset-btn" data-queue-preset="strict" data-ddos-preset="strict" aria-pressed="false">${escapeHtml(t('queue.presetStrict'))}</button>
+            <button type="button" class="ddos-preset-btn ddos-preset-btn--custom" data-queue-preset="custom" disabled aria-pressed="false">${escapeHtml(t('queue.presetCustom'))}</button>
+          </div>
+          <p class="ddos-preset-hint" id="queue-preset-hint"></p>
+        </div>
+        <div class="form-grid">
+          <label>${escapeHtml(t('queue.globalConcurrency'))}
+            <input type="number" id="qp-gconc" min="1" max="64" value="${Number(pol.globalConcurrency) || 2}" />
+            <span class="hint">${escapeHtml(t('queue.hintGlobalConc'))}</span>
+          </label>
+          <label>${escapeHtml(t('queue.perKeyConcurrency'))}
+            <input type="number" id="qp-kconc" min="1" max="16" value="${Number(pol.perKeyConcurrency) || 1}" />
+            <span class="hint">${escapeHtml(t('queue.hintPerKeyConc'))}</span>
+          </label>
+          <label>${escapeHtml(t('queue.maxDepth'))}
+            <input type="number" id="qp-depth" min="1" value="${Number(pol.maxQueueDepth) || 100}" />
+            <span class="hint">${escapeHtml(t('queue.hintMaxDepth'))}</span>
+          </label>
+          <label>${escapeHtml(t('queue.maxDepthKey'))}
+            <input type="number" id="qp-depthk" min="1" value="${Number(pol.maxQueueDepthPerKey) || 20}" />
+            <span class="hint">${escapeHtml(t('queue.hintMaxDepthKey'))}</span>
+          </label>
+          <label>${escapeHtml(t('queue.fairness'))}
+            <select id="qp-fair">
+              <option value="weighted_round_robin" ${pol.fairness === 'weighted_round_robin' ? 'selected' : ''}>${escapeHtml(t('queue.wrr'))}</option>
+              <option value="fifo_global" ${pol.fairness === 'fifo_global' ? 'selected' : ''}>${escapeHtml(t('queue.fifo'))}</option>
+            </select>
+            <span class="hint">${escapeHtml(t('queue.hintFairness'))}</span>
+          </label>
+          <label>${escapeHtml(t('queue.defaultPriority'))}
+            <input type="number" id="qp-pri" min="0" max="1000" value="${Number(pol.defaultPriority) || 100}" />
+          </label>
+          <label>${escapeHtml(t('queue.playgroundPriority'))}
+            <input type="number" id="qp-ppri" min="0" max="1000" value="${Number(pol.playgroundPriority) || 50}" />
+          </label>
+          <label>${escapeHtml(t('queue.leaseMs'))}
+            <input type="number" id="qp-lease" min="5000" step="1000" value="${Number(pol.leaseMs) || 45000}" />
+            <span class="hint">${escapeHtml(t('queue.hintLease'))}</span>
+          </label>
+          <label>${escapeHtml(t('queue.maxWaitMs'))}
+            <input type="number" id="qp-wait" min="5000" step="1000" value="${Number(pol.maxWaitMs) || 600000}" />
+            <span class="hint">${escapeHtml(t('queue.hintMaxWait'))}</span>
+          </label>
+        </div>
+        <div class="toolbar settings-save-bar" style="margin-top:14px">
+          <button type="button" class="btn sm" id="qp-save">${escapeHtml(t('queue.savePolicy'))}</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section-head">
+      <div>
+        <strong>${escapeHtml(t('queue.jobs'))}</strong>
+        <span class="muted" id="qk-jobs-meta">${escapeHtml(tf('queue.jobsMeta', { n: total }))}</span>
+      </div>
+    </div>
+    ${filter}
+    <div id="queue-jobs-table">${table}</div>
+  </div>
+  `);
+  bindShell();
+
+  // Restore scroll after full rebuild (filter / save / navigation)
+  if (savedScroll > 0) {
+    const main = queueMainScrollEl();
+    if (main) {
+      main.scrollTop = savedScroll;
+      requestAnimationFrame(() => {
+        main.scrollTop = savedScroll;
+      });
+    }
+  }
+
+  document.getElementById('q-master-enabled').onclick = async () => {
+    const next = !isMasterToggleOn('q-master-enabled');
+    applyQueueEnabledUi(next);
+    try {
+      const res = await api('/queue/policy', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled: next }),
+      });
+      state._queuePolicyCache = {
+        ...(state._queuePolicyCache || {}),
+        ...(res.data || { enabled: next }),
+      };
+      updateQueuePresetUI();
+    } catch (e) {
+      applyQueueEnabledUi(!next);
+      onErr(e);
+    }
+  };
+
+  document.getElementById('q-refresh').onclick = () => renderQueue().catch(onErr);
+  document.getElementById('q-pause').onclick = async () => {
+    await api(pol.paused ? '/queue/resume' : '/queue/pause', {
+      method: 'POST',
+      body: '{}',
+    });
+    renderQueue().catch(onErr);
+  };
+  document.getElementById('q-drain').onclick = async () => {
+    await api(pol.drainMode ? '/queue/undrain' : '/queue/drain', {
+      method: 'POST',
+      body: '{}',
+    });
+    renderQueue().catch(onErr);
+  };
+  const doPurge = async () => {
+    if (
+      !(await uiConfirm({
+        title: t('queue.purgeDead'),
+        message: t('queue.purgeConfirm'),
+        variant: 'danger',
+        confirmText: t('queue.purgeDead'),
+      }))
+    )
+      return;
+    await api('/queue/purge-dead', { method: 'POST', body: '{}' });
+    renderQueue().catch(onErr);
+  };
+  document.getElementById('q-purge').onclick = () => doPurge().catch(onErr);
+  document
+    .getElementById('q-purge-dlq')
+    ?.addEventListener('click', () => doPurge().catch(onErr));
+  document.getElementById('q-filter-dead')?.addEventListener('click', () => {
+    queueFilter.status = 'dead';
+    queueFilter.offset = 0;
+    renderQueue().catch(onErr);
+  });
+
+  document.querySelectorAll('[data-filter-apply]').forEach((btn) => {
+    btn.onclick = () => {
+      queueFilter.status = document.getElementById('qf-status')?.value || '';
+      queueFilter.offset = 0;
+      renderQueue().catch(onErr);
+    };
+  });
+  document.querySelectorAll('[data-filter-reset]').forEach((btn) => {
+    btn.onclick = () => {
+      queueFilter.status = '';
+      queueFilter.offset = 0;
+      renderQueue().catch(onErr);
+    };
+  });
+
+  bindPager('queue', queueFilter, () => renderQueue().catch(onErr));
+
+  document.getElementById('qp-save').onclick = async () => {
+    const body = readQueuePolicyForm();
+    await api('/queue/policy', { method: 'PUT', body: JSON.stringify(body) });
+    state._queuePolicyCache = { ...(state._queuePolicyCache || {}), ...body };
+    showError('');
+    renderQueue().catch(onErr);
+  };
+
+  bindQueuePresetControls();
+  bindQueueRowActions();
+  ensureQueueAutoRefresh();
+}
+
+// Boot Admin SPA (must run after all function declarations)
+// Hash routing: refresh / share keeps page; Back/Forward works.
+state.page = readInitialPage();
+if (!location.hash || location.hash === '#' || location.hash === '#/') {
+  writePageHash(state.page);
+}
+window.addEventListener('hashchange', () => {
+  const p = hashToPage(location.hash);
+  if (!p) return;
+  if (p === state.page) return;
+  // popstate/hash from browser — do not push again
+  applyPageChange(p, { writeHash: false });
+});
+window.addEventListener('popstate', () => {
+  const p = hashToPage(location.hash);
+  if (!p || p === state.page) return;
+  applyPageChange(p, { writeHash: false });
+});
+render();

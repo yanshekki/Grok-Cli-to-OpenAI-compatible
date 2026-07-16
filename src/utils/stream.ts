@@ -51,6 +51,18 @@ export function writeSseData(res: Response, data: unknown): void {
   tryFlush(res);
 }
 
+/** Named SSE event (Anthropic / Responses style). */
+export function writeSseEvent(
+  res: Response,
+  event: string,
+  data: unknown,
+): void {
+  if (res.writableEnded) return;
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+  tryFlush(res);
+}
+
 export function writeSseDone(res: Response): void {
   if (res.writableEnded) return;
   res.write('data: [DONE]\n\n');

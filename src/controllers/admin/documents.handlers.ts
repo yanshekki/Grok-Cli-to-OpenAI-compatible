@@ -89,12 +89,25 @@ export const adminDocumentsHandlers = {
     let imageDataUrl: string | null = null;
     let isBinary = false;
     const isImage = isImageMime(doc.mimeType);
+    /** Inline base64 preview cap — larger images use authenticated download in UI */
+    const IMAGE_INLINE_MAX_BYTES = 3 * 1024 * 1024;
     try {
-      // Images: never inline full base64 (memory DoS) — use download endpoint
       if (isImage) {
-        isBinary = true;
-        contentPreview = `[image ${doc.sizeBytes} bytes — use Download]`;
-        imageDataUrl = null;
+        if (doc.sizeBytes <= IMAGE_INLINE_MAX_BYTES) {
+          const buf = await documentService.readDecryptedContent(
+            doc.apiKeyId,
+            doc.id,
+          );
+          const mime = doc.mimeType || 'image/jpeg';
+          imageDataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+          contentPreview = null;
+          isBinary = false;
+        } else {
+          // Too large for JSON inline — client should load /download with auth
+          isBinary = false;
+          contentPreview = null;
+          imageDataUrl = null;
+        }
       } else {
         const buf = await documentService.readDecryptedContent(doc.apiKeyId, doc.id);
         if (

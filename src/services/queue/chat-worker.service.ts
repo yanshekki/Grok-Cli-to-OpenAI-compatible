@@ -1,6 +1,8 @@
-import { KEY_MODES, ROLES } from '../../config/constants';
 import type { AuthenticatedApiKey } from '../../interfaces';
-import type { ApiKeyMode, ApiKeyRole } from '../../interfaces';
+import {
+  normalizeApiKeyMode,
+  normalizeApiKeyRole,
+} from '../../utils/role-normalize';
 import { logger } from '../../utils/logger';
 import { chatService } from '../chat.service';
 import { chatQueueService } from './chat-queue.service';
@@ -22,14 +24,13 @@ function snapshotToApiKey(
     ipWhitelist: string[];
   },
 ): AuthenticatedApiKey {
+  const role = normalizeApiKeyRole(s.role);
   return {
     id: s.id,
     name: s.name,
     keyPrefix: s.keyPrefix,
-    role: (s.role === ROLES.ADMIN ? ROLES.ADMIN : ROLES.CLIENT) as ApiKeyRole,
-    mode: (s.mode === KEY_MODES.AGENT
-      ? KEY_MODES.AGENT
-      : KEY_MODES.SAFE) as ApiKeyMode,
+    role,
+    mode: normalizeApiKeyMode(role, s.mode),
     rateLimit: s.rateLimit,
     isActive: s.isActive,
     maxTurns: s.maxTurns,
@@ -115,6 +116,9 @@ export class ChatWorkerService {
         fromQueue: true,
         jobId,
         sseAlreadyInit: Boolean(res && res.headersSent),
+        wireFormat: payload.wireFormat || 'openai',
+        suppressQueueEvents:
+          payload.wireFormat != null && payload.wireFormat !== 'openai',
       });
 
       const still = await prisma.chatJob.findUnique({

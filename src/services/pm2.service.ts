@@ -28,8 +28,6 @@ import { ExceptionFactory } from '../exceptions/exception.factory';
 
 const execFileAsync = promisify(execFile);
 
-export type { RunnerMode } from '../interfaces/runner-mode.type';
-export type { Pm2RuntimeConfig } from '../interfaces/pm2-runtime-config.interface';
 
 function gctoacPidFile(): string {
   const home = process.env.GCTOAC_HOME?.trim() || getDefaultHome();

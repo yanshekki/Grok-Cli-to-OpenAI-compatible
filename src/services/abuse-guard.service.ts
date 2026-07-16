@@ -14,7 +14,6 @@ async function getIpBlacklist() {
   return m.ipBlacklistService;
 }
 
-export type { AutoBanEvent } from '../interfaces/auto-ban-event.interface';
 
 const MAX_EVENTS = 50;
 const events: AutoBanEvent[] = [];

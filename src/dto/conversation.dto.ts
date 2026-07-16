@@ -21,6 +21,23 @@ const conversationMessageSchema = z.object({
 
 export const contextModeSchema = z.enum(['full', 'summary', 'recent']);
 
+/** Nullable for create/update; OTP session ids → null */
+const conversationApiKeyIdSchema = z
+  .union([
+    z.string().uuid(),
+    z.string().regex(/^admin-session:[A-Za-z0-9_-]+$/),
+    z.literal(''),
+    z.null(),
+  ])
+  .optional()
+  .nullable()
+  .transform((v) => {
+    if (v == null || v === '' || String(v).startsWith('admin-session:')) {
+      return null;
+    }
+    return v as string;
+  });
+
 export const conversationListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional().default(20),
   offset: z.coerce.number().int().min(0).optional().default(0),
@@ -42,7 +59,7 @@ export const createConversationSchema = z.object({
   title: z.string().max(120).optional().default(''),
   model: z.string().max(128).optional().nullable(),
   systemPrompt: z.string().max(MAX_MESSAGE_CHARS).optional().default(''),
-  apiKeyId: z.string().uuid().optional().nullable(),
+  apiKeyId: conversationApiKeyIdSchema,
   messages: z.array(conversationMessageSchema).max(MAX_MESSAGES).default([]),
   ...contextFields,
 });
@@ -54,7 +71,7 @@ export const updateConversationSchema = z
     title: z.string().max(120).optional(),
     model: z.string().max(128).optional().nullable(),
     systemPrompt: z.string().max(MAX_MESSAGE_CHARS).optional(),
-    apiKeyId: z.string().uuid().optional().nullable(),
+    apiKeyId: conversationApiKeyIdSchema,
     messages: z.array(conversationMessageSchema).max(MAX_MESSAGES).optional(),
     ...contextFields,
   })

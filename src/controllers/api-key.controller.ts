@@ -5,7 +5,10 @@ import { ExceptionFactory } from '../exceptions/exception.factory';
 import { apiKeyService } from '../services/api-key.service';
 import { auditService } from '../services/audit.service';
 import { asyncHandler } from '../utils/async-handler';
-import type { ApiKeyMode, ApiKeyRole } from '../interfaces';
+import {
+  normalizeApiKeyMode,
+  normalizeApiKeyRole,
+} from '../utils/role-normalize';
 import { requestIp } from '../utils/client-ip';
 
 export class ApiKeyController {
@@ -14,10 +17,11 @@ export class ApiKeyController {
       throw ExceptionFactory.unauthorized();
     }
     const dto = req.body as CreateApiKeyDto;
+    const role = normalizeApiKeyRole(dto.role);
     const created = await apiKeyService.create({
       name: dto.name,
-      role: dto.role as ApiKeyRole,
-      mode: dto.mode as ApiKeyMode,
+      role,
+      mode: normalizeApiKeyMode(role, dto.mode),
       rateLimit: dto.rateLimit,
       actorApiKeyId: req.apiKey.id,
       ip: requestIp(req),

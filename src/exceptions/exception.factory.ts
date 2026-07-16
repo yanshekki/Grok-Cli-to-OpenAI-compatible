@@ -77,4 +77,32 @@ export const ExceptionFactory = {
   queueCancelled(message = 'Chat job was cancelled'): HttpException {
     return new HttpException(409, message, ErrorCodes.QUEUE_CANCELLED);
   },
+
+  mediaNotSupported(message = 'Media API is disabled'): HttpException {
+    return new HttpException(501, message, ErrorCodes.MEDIA_NOT_SUPPORTED);
+  },
+
+  mediaProviderUnavailable(
+    message = 'Media provider is not available',
+  ): HttpException {
+    return new HttpException(503, message, ErrorCodes.MEDIA_PROVIDER_UNAVAILABLE);
+  },
+
+  mediaGenerationFailed(
+    message = 'Media generation failed',
+    details?: unknown,
+  ): HttpException {
+    return new HttpException(
+      502,
+      message,
+      ErrorCodes.MEDIA_GENERATION_FAILED,
+      details,
+    );
+  },
+
+  mediaForbidden(
+    message = 'Media generation is not allowed for this API key',
+  ): HttpException {
+    return new HttpException(403, message, ErrorCodes.MEDIA_FORBIDDEN);
+  },
 };

@@ -1,25 +1,26 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
+import type { ApiKeyMode, ApiKeyRole } from '../../interfaces';
+import {
+  apiKeyPrefix,
+  createApiKeySecret,
+  hashApiKey,
+} from '../../utils/api-key-crypto';
+import {
+  normalizeApiKeyMode,
+  normalizeApiKeyRole,
+} from '../../utils/role-normalize';
 
-/** Canonical roles — match API ROLES.CLIENT / ROLES.ADMIN */
-export type KeyRole = 'admin' | 'client';
-export type KeyMode = 'safe' | 'agent';
+/** @deprecated Use normalizeApiKeyRole from utils/role-normalize */
+export const normalizeKeyRole = normalizeApiKeyRole;
 
-/** Accept CLI aliases: user → client */
-export function normalizeKeyRole(role?: string | null): KeyRole {
-  const r = String(role || '')
-    .trim()
-    .toLowerCase();
-  if (r === 'admin') return 'admin';
-  // user is legacy alias for client
-  return 'client';
-}
+export type { ApiKeyRole, ApiKeyMode };
 
 export interface CreatedKey {
   id: string;
   name: string;
-  role: KeyRole;
-  mode: KeyMode;
+  role: ApiKeyRole;
+  mode: ApiKeyMode;
   keyPrefix: string;
   rawKey: string;
   rateLimit: number;
@@ -37,18 +38,6 @@ export interface ListedKey {
   lastUsedAt: Date | null;
 }
 
-function createApiKeySecret(): string {
-  return `gk_live_${randomBytes(24).toString('base64url')}`;
-}
-
-function hashApiKey(rawKey: string): string {
-  return createHash('sha256').update(rawKey, 'utf8').digest('hex');
-}
-
-function apiKeyPrefix(rawKey: string): string {
-  return rawKey.slice(0, 16);
-}
-
 function openPrisma(databaseUrl: string): PrismaClient {
   return new PrismaClient({
     datasources: { db: { url: databaseUrl } },
@@ -58,18 +47,18 @@ function openPrisma(databaseUrl: string): PrismaClient {
 export async function createKey(options: {
   databaseUrl: string;
   name?: string;
-  role?: KeyRole | string;
-  mode?: KeyMode;
+  role?: ApiKeyRole | string;
+  mode?: ApiKeyMode;
   rateLimit?: number;
   rawKey?: string;
 }): Promise<CreatedKey> {
-  const role = normalizeKeyRole(options.role);
-  // Admin keys always agent; client defaults to safe
-  const mode: KeyMode =
-    role === 'admin' ? 'agent' : options.mode === 'agent' ? 'agent' : 'safe';
+  const role = normalizeApiKeyRole(options.role);
+  const mode = normalizeApiKeyMode(role, options.mode);
   const name =
     options.name?.trim() ||
-    (role === 'admin' ? `admin-${new Date().toISOString().slice(0, 10)}` : 'client');
+    (role === 'admin'
+      ? `admin-${new Date().toISOString().slice(0, 10)}`
+      : 'client');
   const rateLimit = options.rateLimit ?? 120;
   const rawKey = options.rawKey?.trim() || createApiKeySecret();
   const keyHash = hashApiKey(rawKey);
@@ -77,7 +66,6 @@ export async function createKey(options: {
 
   const prisma = openPrisma(options.databaseUrl);
   try {
-    // Backfill legacy role=user → client
     await prisma.apiKey.updateMany({
       where: { role: 'user' },
       data: { role: 'client' },
@@ -118,7 +106,7 @@ export async function createKey(options: {
 export async function listKeys(databaseUrl: string): Promise<ListedKey[]> {
   const prisma = openPrisma(databaseUrl);
   try {
-    const rows = await prisma.apiKey.findMany({
+    return await prisma.apiKey.findMany({
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -132,13 +120,15 @@ export async function listKeys(databaseUrl: string): Promise<ListedKey[]> {
         lastUsedAt: true,
       },
     });
-    return rows;
   } finally {
     await prisma.$disconnect();
   }
 }
 
-export async function revokeKey(databaseUrl: string, id: string): Promise<boolean> {
+export async function revokeKey(
+  databaseUrl: string,
+  id: string,
+): Promise<boolean> {
   const prisma = openPrisma(databaseUrl);
   try {
     const row = await prisma.apiKey.findUnique({ where: { id } });
@@ -146,6 +136,118 @@ export async function revokeKey(databaseUrl: string, id: string): Promise<boolea
     await prisma.apiKey.update({
       where: { id },
       data: { isActive: false },
+    });
+    return true;
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+export async function getKey(
+  databaseUrl: string,
+  id: string,
+): Promise<ListedKey | null> {
+  const prisma = openPrisma(databaseUrl);
+  try {
+    return await prisma.apiKey.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        mode: true,
+        keyPrefix: true,
+        isActive: true,
+        rateLimit: true,
+        createdAt: true,
+        lastUsedAt: true,
+      },
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+export async function updateKey(
+  databaseUrl: string,
+  id: string,
+  input: {
+    name?: string;
+    role?: ApiKeyRole | string;
+    mode?: ApiKeyMode;
+    rateLimit?: number;
+    isActive?: boolean;
+    maxTurns?: number | null;
+    timeoutMs?: number | null;
+  },
+): Promise<ListedKey | null> {
+  const prisma = openPrisma(databaseUrl);
+  try {
+    const existing = await prisma.apiKey.findUnique({ where: { id } });
+    if (!existing) return null;
+
+    const data: Record<string, unknown> = {};
+    if (input.name !== undefined) data.name = input.name.trim();
+    if (input.role !== undefined) data.role = normalizeApiKeyRole(input.role);
+    if (input.mode !== undefined) {
+      const role = (data.role as string) || existing.role;
+      data.mode = normalizeApiKeyMode(role, input.mode);
+    } else if (
+      input.role !== undefined &&
+      normalizeApiKeyRole(input.role) === 'admin'
+    ) {
+      data.mode = 'agent';
+    }
+    if (input.rateLimit !== undefined) data.rateLimit = input.rateLimit;
+    if (input.isActive !== undefined) data.isActive = input.isActive;
+    if (input.maxTurns !== undefined) data.maxTurns = input.maxTurns;
+    if (input.timeoutMs !== undefined) data.timeoutMs = input.timeoutMs;
+
+    if (!Object.keys(data).length) {
+      return {
+        id: existing.id,
+        name: existing.name,
+        role: existing.role,
+        mode: existing.mode,
+        keyPrefix: existing.keyPrefix,
+        isActive: existing.isActive,
+        rateLimit: existing.rateLimit,
+        createdAt: existing.createdAt,
+        lastUsedAt: existing.lastUsedAt,
+      };
+    }
+
+    return await prisma.apiKey.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        mode: true,
+        keyPrefix: true,
+        isActive: true,
+        rateLimit: true,
+        createdAt: true,
+        lastUsedAt: true,
+      },
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+export async function activateKey(
+  databaseUrl: string,
+  id: string,
+): Promise<boolean> {
+  const prisma = openPrisma(databaseUrl);
+  try {
+    const row = await prisma.apiKey.findUnique({ where: { id } });
+    if (!row) return false;
+    await prisma.apiKey.update({
+      where: { id },
+      data: { isActive: true },
     });
     return true;
   } finally {

@@ -13,11 +13,6 @@ import type { UpdateResult } from '../interfaces/update-result.interface';
 import type { VersionInfo } from '../interfaces/version-info.interface';
 import type { VersionStatus } from '../interfaces/version-status.type';
 
-export type { UpdateProgress } from '../interfaces/update-progress.type';
-export type { InstallChannel } from '../interfaces/install-channel.type';
-export type { VersionStatus } from '../interfaces/version-status.type';
-export type { VersionInfo } from '../interfaces/version-info.interface';
-export type { UpdateResult } from '../interfaces/update-result.interface';
 
 const PRISMA_VERSION = '6.5.0';
 

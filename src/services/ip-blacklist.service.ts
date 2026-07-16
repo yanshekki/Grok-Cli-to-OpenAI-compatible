@@ -1,6 +1,6 @@
 import { prisma } from '../config/database';
 import { ipMatchesExact, normalizeIp } from '../utils/ip-match';
-import { recordBlockedHit } from '../middlewares/connection-tracker';
+import { recordBlockedHit } from '../middlewares/connection-tracker.middleware';
 import { env } from '../config/env';
 import { createId } from '../utils/id';
 import { BAN_SOURCES } from '../config/constants';
@@ -9,16 +9,21 @@ import { ddosPolicyService } from './ddos-policy.service';
 /** Memory set of currently banned IPs (exact). */
 const memoryBan = new Map<string, { expiresAt: number | null; reason?: string }>();
 
+/** CLI may ban/unban via DB; refresh memory set so live gateway sees it. */
+const BLACKLIST_TTL_MS = 5_000;
+
 export class IpBlacklistService {
   private loaded = false;
+  private loadedAt = 0;
   private loadPromise: Promise<void> | null = null;
 
   async ensureLoaded(): Promise<void> {
-    if (this.loaded) return;
+    if (this.loaded && Date.now() - this.loadedAt <= BLACKLIST_TTL_MS) return;
     if (!this.loadPromise) {
       this.loadPromise = this.reload()
         .then(() => {
           this.loaded = true;
+          this.loadedAt = Date.now();
         })
         .finally(() => {
           this.loadPromise = null;
@@ -41,9 +46,15 @@ export class IpBlacklistService {
         reason: r.reason ?? undefined,
       });
     }
+    this.loaded = true;
+    this.loadedAt = Date.now();
   }
 
   isBlocked(ip: string): boolean {
+    // Best-effort soft refresh when TTL expired (sync path; fire-and-forget reload)
+    if (this.loaded && Date.now() - this.loadedAt > BLACKLIST_TTL_MS) {
+      void this.ensureLoaded();
+    }
     const now = Date.now();
     for (const [banned, hit] of memoryBan.entries()) {
       if (hit.expiresAt != null && now >= hit.expiresAt) {

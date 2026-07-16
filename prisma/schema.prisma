@@ -28,6 +28,7 @@ model ApiKey {
   documents     Document[]
   auditLogs     AuditLog[]
   conversations ChatConversation[]
+  mediaAssets   MediaAsset[]
 
   @@index([keyPrefix])
   @@index([isActive])
@@ -198,7 +199,7 @@ model ChatConversation {
   @@map("chat_conversations")
 }
 
-/// Durable chat work queue (Kafka-like admission + lease).
+/// Durable chat work queue (admission queue + lease / reclaim).
 model ChatJob {
   id                   String    @id @default(uuid())
   requestId            String
@@ -235,4 +236,141 @@ model ChatJob {
   @@index([requestId])
   @@unique([idempotencyKey])
   @@map("chat_jobs")
+}
+
+/// Stored OpenAI Responses API objects (text subset).
+model StoredResponse {
+  id           String    @id
+  apiKeyId     String
+  model        String?
+  status       String    @default("completed")
+  /// encrypted full response JSON
+  bodyCiphertext Bytes
+  bodyIv         Bytes
+  bodyTag        Bytes
+  previousId   String?
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
+
+  @@index([apiKeyId, createdAt])
+  @@index([previousId])
+  @@map("stored_responses")
+}
+
+/// Local Assistants-lite (feature-flagged).
+model Assistant {
+  id           String   @id @default(uuid())
+  apiKeyId     String
+  name         String   @default("")
+  model        String?
+  instructions String   @default("")
+  toolsJson    String   @default("[]")
+  metadataJson String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  threads AssistantThread[]
+
+  @@index([apiKeyId, createdAt])
+  @@map("assistants")
+}
+
+model AssistantThread {
+  id          String   @id @default(uuid())
+  apiKeyId    String
+  assistantId String?
+  metadataJson String?
+  /// Grok session id for continuity
+  grokSessionId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assistant Assistant? @relation(fields: [assistantId], references: [id], onDelete: SetNull)
+  messages  AssistantMessage[]
+  runs      AssistantRun[]
+
+  @@index([apiKeyId, updatedAt])
+  @@map("assistant_threads")
+}
+
+model AssistantMessage {
+  id        String   @id @default(uuid())
+  threadId  String
+  role      String
+  content   String
+  createdAt DateTime @default(now())
+
+  thread AssistantThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+  @@map("assistant_messages")
+}
+
+model AssistantRun {
+  id          String   @id @default(uuid())
+  threadId    String
+  assistantId String?
+  status      String   @default("queued")
+  model       String?
+  /// encrypted result JSON or error
+  resultJson  String?
+  errorMessage String?
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  thread AssistantThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+  @@map("assistant_runs")
+}
+
+/// Generated / stored media artifacts (OpenAI Images/Files media path).
+model MediaAsset {
+  id           String    @id @default(uuid())
+  apiKeyId     String
+  /// image | video | audio | file
+  kind         String    @default("image")
+  mime         String
+  byteSize     Int
+  /// relative path under STORAGE_DIR/media/
+  storagePath  String
+  checksumSha256 String
+  originalName String?
+  /// generation | edit | upload | import
+  source       String    @default("generation")
+  provider     String    @default("grok-tools")
+  metaJson     String?
+  prompt       String?
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime?
+  deletedAt    DateTime?
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@index([apiKeyId, createdAt])
+  @@index([kind, createdAt])
+  @@map("media_assets")
+}
+
+/// Async media jobs (video generation, etc.)
+model MediaJob {
+  id           String    @id @default(uuid())
+  apiKeyId     String
+  /// video | audio
+  kind         String    @default("video")
+  status       String    @default("queued")
+  prompt       String?
+  model        String?
+  /// input asset ids JSON
+  inputJson    String?
+  resultAssetId String?
+  errorMessage String?
+  provider     String    @default("mock")
+  createdAt    DateTime  @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+
+  @@index([apiKeyId, createdAt])
+  @@index([status, createdAt])
+  @@map("media_jobs")
 }

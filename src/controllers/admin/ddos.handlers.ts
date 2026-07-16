@@ -14,7 +14,7 @@ import { abuseGuardService } from '../../services/abuse-guard.service';
 import {
   getAbuseCounters,
   getConnectionsSnapshot,
-} from '../../middlewares/connection-tracker';
+} from '../../middlewares/connection-tracker.middleware';
 import type { DdosPolicyUpdateDto } from '../../dto/ddos.dto';
 import { normalizeIp } from '../../utils/ip-match';
 import { requestIp } from '../../utils/client-ip';

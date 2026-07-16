@@ -17,7 +17,12 @@ import type { OpenAiChatCompletion } from '../interfaces/open-ai-chat-completion
 import type { ResolvedPolicy } from '../interfaces/resolved-policy.interface';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { HttpException } from '../exceptions/http.exception';
-import { createChatCompletionId, createId } from '../utils/id';
+import {
+  createChatCompletionId,
+  createId,
+  createMessageId,
+  createResponseId,
+} from '../utils/id';
 import { rmSafe, ensureDir } from '../utils/fs-safe';
 import { toBytes } from '../utils/prisma-bytes';
 import {
@@ -26,9 +31,13 @@ import {
   mapReasoningDeltaChunk,
   mapRoleChunk,
   mapTextDeltaChunk,
-  messagesToPrompt,
 } from '../utils/openai-mapper';
-import { initSse, writeSseData, writeSseDone } from '../utils/stream';
+import {
+  initSse,
+  writeSseData,
+  writeSseDone,
+  writeSseEvent,
+} from '../utils/stream';
 import { logger } from '../utils/logger';
 import { auditService } from './audit.service';
 import { documentService } from './document.service';
@@ -39,10 +48,15 @@ import { settingsService } from './settings.service';
 import { chatQueueService } from './queue/chat-queue.service';
 import { jobWaiterRegistry } from './queue/job-waiter';
 import { queuePolicyService } from './queue/queue-policy.service';
-
-export type { ChatContext } from '../interfaces/chat-context.interface';
-export type { GrokCollectedOutput } from '../interfaces/grok-collected-output.interface';
-export type { ResolvedPolicy } from '../interfaces/resolved-policy.interface';
+import type { StreamWireFormat } from '../interfaces/chat-job-payload.interface';
+import type { ExecuteCompletionOptions } from '../interfaces/execute-completion-options.interface';
+import type { GrokToolCall, GrokUsage } from '../interfaces/grok-collected-output.interface';
+import { mapAnthropicStopReason } from '../utils/anthropic-mapper';
+import { apiFeaturesService } from './api-features.service';
+import {
+  buildGrokRequestFromChatDto,
+  estimateCompletionTokens,
+} from './grok-request-builder.service';
 
 /** Namespace session ids per API key so tenants cannot resume each other's CLI sessions. */
 function namespacedSessionId(
@@ -66,6 +80,11 @@ function policyToRunOpts(
     stream: boolean;
     sessionId?: string;
     apiKeyId: string;
+    toolsAllowlist?: string | null;
+    toolsDenylist?: string | null;
+    promptJson?: string;
+    jsonSchema?: string;
+    extra?: Partial<GrokRunOptions>;
   },
 ): GrokRunOptions {
   return {
@@ -77,21 +96,13 @@ function policyToRunOpts(
     timeoutMs: policy.timeoutMs,
     alwaysApprove: policy.alwaysApprove,
     maxTurns: policy.maxTurns,
-    toolsAllowlist: policy.toolsAllowlist,
-    toolsDenylist: policy.toolsDenylist,
+    toolsAllowlist: base.toolsAllowlist ?? policy.toolsAllowlist,
+    toolsDenylist: base.toolsDenylist ?? policy.toolsDenylist,
+    promptJson: base.promptJson,
+    jsonSchema: base.jsonSchema,
+    ...(base.extra || {}),
   };
 }
-
-export type ExecuteCompletionOptions = {
-  /** Called by queue worker — skip enqueue */
-  fromQueue?: boolean;
-  jobId?: string;
-  /** SSE headers already sent (queue status event) */
-  sseAlreadyInit?: boolean;
-  source?: 'v1' | 'playground';
-  /** Scoped idempotency key (usually apiKeyId:clientKey) */
-  idempotencyKey?: string;
-};
 
 export class ChatService {
   /**
@@ -115,6 +126,7 @@ export class ChatService {
         res,
         options?.source || 'v1',
         options?.idempotencyKey,
+        options,
       );
     }
     return this.executeCompletion(dto, ctx, res, options);
@@ -127,27 +139,44 @@ export class ChatService {
     res?: Response,
     source: 'v1' | 'playground' = 'v1',
     idempotencyKey?: string,
+    options?: ExecuteCompletionOptions,
   ): Promise<OpenAiChatCompletion | void> {
     const stream = Boolean(dto.stream);
+    const wireFormat = options?.wireFormat || 'openai';
+    const suppressQueue =
+      options?.suppressQueueEvents || wireFormat !== 'openai';
     const enq = await chatQueueService.enqueue({
       dto,
       ctx,
       source,
       idempotencyKey,
+      wireFormat,
     });
     const { jobId, position, policy } = enq;
     if (enq.alreadyDone) {
       // Idempotent replay: do not re-run. Stream clients get a terminal queue event.
       if (stream && res) {
         if (!res.headersSent) initSse(res);
-        writeSseData(res, {
-          object: 'gog.queue',
-          status: 'succeeded',
-          job_id: jobId,
-          result_chat_request_id: enq.resultChatRequestId ?? null,
-          message: 'Idempotent replay: job already completed',
-        });
-        writeSseDone(res);
+        if (!suppressQueue) {
+          writeSseData(res, {
+            object: 'gog.queue',
+            status: 'succeeded',
+            job_id: jobId,
+            result_chat_request_id: enq.resultChatRequestId ?? null,
+            message: 'Idempotent replay: job already completed',
+          });
+          writeSseDone(res);
+        } else {
+          // Protocol-native clients cannot consume gog.queue — fail clearly
+          writeSseEvent(res, 'error', {
+            type: 'error',
+            error: {
+              type: 'invalid_request_error',
+              message:
+                'Idempotent request already completed; omit Idempotency-Key to start a new job',
+            },
+          });
+        }
         res.end();
         return;
       }
@@ -162,23 +191,25 @@ export class ChatService {
       if (!res.headersSent) {
         initSse(res);
       }
-      writeSseData(res, {
-        object: 'gog.queue',
-        status: 'queued',
-        job_id: jobId,
-        position,
-        message: `Queued (position ${position})`,
-      });
-      ee.on('queue', (ev: { position: number }) => {
-        if (!res.writableEnded) {
-          writeSseData(res, {
-            object: 'gog.queue',
-            status: 'queued',
-            job_id: jobId,
-            position: ev.position,
-          });
-        }
-      });
+      if (!suppressQueue) {
+        writeSseData(res, {
+          object: 'gog.queue',
+          status: 'queued',
+          job_id: jobId,
+          position,
+          message: `Queued (position ${position})`,
+        });
+        ee.on('queue', (ev: { position: number }) => {
+          if (!res.writableEnded) {
+            writeSseData(res, {
+              object: 'gog.queue',
+              status: 'queued',
+              job_id: jobId,
+              position: ev.position,
+            });
+          }
+        });
+      }
     }
 
     // Position updates while waiting
@@ -245,10 +276,18 @@ export class ChatService {
     options?: ExecuteCompletionOptions,
   ): Promise<OpenAiChatCompletion | void> {
     const settings = await settingsService.getAll();
+    const features = await apiFeaturesService.get();
     const model = dto.model || settings.defaultModel;
     const stream = Boolean(dto.stream);
+    // OTP sessions use synthetic ids — ChatRequest.apiKeyId requires a real key row
+    const { toPersistentApiKeyId } = await import('../utils/api-key-id');
+    const ownerApiKeyId = await toPersistentApiKeyId(ctx.apiKey.id);
     const includeReasoning = dto.include_reasoning !== false;
     const policy = await policyService.resolve(ctx.apiKey, dto.cwd);
+
+    // Feature gates + Grok flag mapping (tools, vision, schema, effort, …)
+    const builtReq = buildGrokRequestFromChatDto(dto, policy, features);
+
     const documentIds = [
       ...new Set((dto.document_ids ?? []).filter((id) => typeof id === 'string' && id)),
     ];
@@ -266,8 +305,10 @@ export class ChatService {
     try {
       if (documentIds.length > 0) {
         await ensureDir(attachDir);
+        // Use persistent owner id (same mapping as upload) so OTP session
+        // synthetic ids can still attach documents they just uploaded.
         const built = await documentService.buildContextFromDocuments(
-          ctx.apiKey.id,
+          ownerApiKeyId,
           documentIds,
           MAX_DOCUMENT_CONTEXT_CHARS,
           {
@@ -290,26 +331,31 @@ export class ChatService {
         );
       }
 
-      const normalizedMessages = dto.messages.map((m) => ({
-        role: m.role,
-        content: typeof m.content === 'string' ? m.content : String(m.content ?? ''),
-      }));
-
+      let prompt = builtReq.prompt;
       if (docContext) {
-        normalizedMessages.unshift({
-          role: 'system',
-          content:
-            `The user has attached the following documents for this request. ` +
-            `Use their contents (and on-disk paths when tools allow) when answering.\n\n${docContext}`,
-        });
+        prompt =
+          `The user has attached the following documents for this request. ` +
+          `Use their contents (and on-disk paths when tools allow) when answering.\n\n${docContext}\n\n` +
+          prompt;
       }
-
-      const prompt = messagesToPrompt(normalizedMessages);
       if (prompt.length > MAX_TOTAL_PROMPT_CHARS) {
         throw ExceptionFactory.validation(
           `Total prompt exceeds ${MAX_TOTAL_PROMPT_CHARS} characters`,
         );
       }
+
+      const runBase = {
+        prompt,
+        model,
+        stream: true as boolean,
+        sessionId: dto.session_id,
+        apiKeyId: ctx.apiKey.id,
+        toolsAllowlist: builtReq.toolsAllowlist,
+        toolsDenylist: builtReq.toolsDenylist,
+        promptJson: builtReq.promptJson,
+        jsonSchema: builtReq.jsonSchema,
+        extra: builtReq.extra,
+      };
 
       // Queue worker already limits concurrency; direct mode still uses in-process slots
       const fromQueue = Boolean(options?.fromQueue);
@@ -330,7 +376,7 @@ export class ChatService {
         data: {
           id: chatRequestDbId,
           requestId: ctx.requestId,
-          apiKeyId: ctx.apiKey.id,
+          apiKeyId: ownerApiKeyId,
           model,
           stream,
           status: CHAT_STATUS.PENDING,
@@ -364,18 +410,17 @@ export class ChatService {
             includeReasoning,
             skipRoleChunk: Boolean(options?.sseAlreadyInit),
             jobId: options?.jobId,
+            wireFormat: options?.wireFormat || 'openai',
+            suppressQueueEvents: Boolean(options?.suppressQueueEvents),
+            runOpts: policyToRunOpts(policy, runBase),
+            usageEstimate: features.usageEstimate,
+            estimatedPromptTokens: builtReq.estimatedPromptTokens,
           });
           return;
         }
 
         const collected = await this.collectFromGrokStream(
-          policyToRunOpts(policy, {
-            prompt,
-            model,
-            stream: true,
-            sessionId: dto.session_id,
-            apiKeyId: ctx.apiKey.id,
-          }),
+          policyToRunOpts(policy, runBase),
         );
 
         const auditPayload = this.buildAuditPayload(collected, includeReasoning);
@@ -412,7 +457,22 @@ export class ChatService {
           ip: ctx.ip,
         });
 
-        return mapGrokToChatCompletion(
+        const { usageToOpenAi } = await import('../utils/grok-event-parse');
+        let usage = usageToOpenAi(collected.usage);
+        let usageEstimated = false;
+        if (
+          !collected.usage &&
+          features.usageEstimate
+        ) {
+          const outTok = estimateCompletionTokens(collected.text);
+          usage = {
+            prompt_tokens: builtReq.estimatedPromptTokens,
+            completion_tokens: outTok,
+            total_tokens: builtReq.estimatedPromptTokens + outTok,
+          };
+          usageEstimated = true;
+        }
+        const completion = mapGrokToChatCompletion(
           model,
           {
             text: collected.text,
@@ -424,13 +484,20 @@ export class ChatService {
             completionId,
             reasoningContent: collected.reasoning || null,
             includeReasoning,
+            usage,
+            toolCalls: collected.toolCalls,
             grok: {
               sessionId: collected.sessionId,
               stopReason: collected.stopReason,
               requestId: collected.requestId,
+              numTurns: collected.numTurns,
             },
           },
         );
+        if (usageEstimated) {
+          (completion as { usage_estimated?: boolean }).usage_estimated = true;
+        }
+        return completion;
       } catch (err) {
         await this.markFailed(chatRequestDbId, started, err);
         throw err;
@@ -449,9 +516,16 @@ export class ChatService {
   ): Promise<GrokCollectedOutput> {
     const textParts: string[] = [];
     const reasoningParts: string[] = [];
+    const toolCalls: GrokToolCall[] = [];
     let sessionId: string | undefined;
     let stopReason: string | undefined;
     let requestId: string | undefined;
+    let usage: GrokUsage | undefined;
+    let numTurns: number | undefined;
+
+    const { parseGrokUsage, parseGrokToolCallEvent } = await import(
+      '../utils/grok-event-parse'
+    );
 
     for await (const event of grokCliService.stream({ ...options, stream: true })) {
       if (event.type === 'thought' && typeof event.data === 'string') {
@@ -462,6 +536,10 @@ export class ChatService {
         if (typeof event.stopReason === 'string') stopReason = event.stopReason;
         if (typeof event.sessionId === 'string') sessionId = event.sessionId;
         if (typeof event.requestId === 'string') requestId = event.requestId;
+        if (event.usage) usage = parseGrokUsage(event.usage);
+        if (typeof event.num_turns === 'number') numTurns = event.num_turns;
+      } else {
+        toolCalls.push(...parseGrokToolCallEvent(event));
       }
     }
 
@@ -471,6 +549,9 @@ export class ChatService {
       sessionId,
       stopReason,
       requestId,
+      usage,
+      numTurns,
+      toolCalls: toolCalls.length ? toolCalls : undefined,
     };
   }
 
@@ -500,6 +581,11 @@ export class ChatService {
     includeReasoning: boolean;
     skipRoleChunk?: boolean;
     jobId?: string;
+    wireFormat?: StreamWireFormat;
+    suppressQueueEvents?: boolean;
+    runOpts?: GrokRunOptions;
+    usageEstimate?: boolean;
+    estimatedPromptTokens?: number;
   }): Promise<void> {
     const {
       dto,
@@ -514,14 +600,25 @@ export class ChatService {
       includeReasoning,
       skipRoleChunk,
       jobId,
+      wireFormat = 'openai',
+      suppressQueueEvents = false,
+      runOpts,
     } = args;
     const created = Math.floor(Date.now() / 1000);
     const textParts: string[] = [];
     const reasoningParts: string[] = [];
+    const toolCalls: GrokToolCall[] = [];
     let grokSessionId: string | undefined;
     let stopReason: string | undefined;
     let grokRequestId: string | undefined;
+    let streamUsage: GrokUsage | undefined;
     let clientClosed = false;
+
+    const msgId = createMessageId();
+    const respId = createResponseId();
+    const outputItemId = `msg_${createId().replace(/-/g, '').slice(0, 20)}`;
+    const { parseGrokUsage, parseGrokToolCallEvent, usageToOpenAi } =
+      await import('../utils/grok-event-parse');
 
     res.on('close', () => {
       clientClosed = true;
@@ -531,33 +628,87 @@ export class ChatService {
     if (!res.headersSent) {
       initSse(res);
     }
-    if (!skipRoleChunk) {
-      writeSseData(res, mapRoleChunk(model, completionId, created));
-    } else {
-      // Queue already opened SSE — still announce assistant role
-      writeSseData(res, mapRoleChunk(model, completionId, created));
-      writeSseData(res, {
-        object: 'gog.queue',
-        status: 'running',
-        job_id: jobId,
+
+    if (wireFormat === 'openai') {
+      if (!skipRoleChunk) {
+        writeSseData(res, mapRoleChunk(model, completionId, created));
+      } else {
+        writeSseData(res, mapRoleChunk(model, completionId, created));
+        if (!suppressQueueEvents) {
+          writeSseData(res, {
+            object: 'gog.queue',
+            status: 'running',
+            job_id: jobId,
+          });
+        }
+      }
+    } else if (wireFormat === 'anthropic') {
+      writeSseEvent(res, 'message_start', {
+        type: 'message_start',
+        message: {
+          id: msgId,
+          type: 'message',
+          role: 'assistant',
+          content: [],
+          model,
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      });
+      writeSseEvent(res, 'content_block_start', {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'text', text: '' },
+      });
+    } else if (wireFormat === 'responses') {
+      writeSseEvent(res, 'response.created', {
+        type: 'response.created',
+        response: {
+          id: respId,
+          object: 'response',
+          created_at: created,
+          status: 'in_progress',
+          model,
+          output: [],
+        },
+      });
+      writeSseEvent(res, 'response.output_item.added', {
+        type: 'response.output_item.added',
+        output_index: 0,
+        item: {
+          type: 'message',
+          id: outputItemId,
+          status: 'in_progress',
+          role: 'assistant',
+          content: [],
+        },
+      });
+      writeSseEvent(res, 'response.content_part.added', {
+        type: 'response.content_part.added',
+        output_index: 0,
+        content_index: 0,
+        part: { type: 'output_text', text: '', annotations: [] },
       });
     }
 
+    const streamOpts: GrokRunOptions =
+      runOpts ||
+      policyToRunOpts(policy, {
+        prompt,
+        model,
+        stream: true,
+        sessionId: dto.session_id,
+        apiKeyId: ctx.apiKey.id,
+      });
+
     try {
-      for await (const event of grokCliService.stream(
-        policyToRunOpts(policy, {
-          prompt,
-          model,
-          stream: true,
-          sessionId: dto.session_id,
-          apiKeyId: ctx.apiKey.id,
-        }),
-      )) {
+      for await (const event of grokCliService.stream(streamOpts)) {
         if (clientClosed) break;
 
         if (event.type === 'thought' && typeof event.data === 'string') {
           reasoningParts.push(event.data);
-          if (includeReasoning) {
+          if (includeReasoning && wireFormat === 'openai') {
             writeSseData(
               res,
               mapReasoningDeltaChunk(model, event.data, completionId, created, true),
@@ -565,25 +716,210 @@ export class ChatService {
           }
         } else if (event.type === 'text' && typeof event.data === 'string') {
           textParts.push(event.data);
-          writeSseData(res, mapTextDeltaChunk(model, event.data, completionId, created));
+          if (wireFormat === 'openai') {
+            writeSseData(
+              res,
+              mapTextDeltaChunk(model, event.data, completionId, created),
+            );
+          } else if (wireFormat === 'anthropic') {
+            writeSseEvent(res, 'content_block_delta', {
+              type: 'content_block_delta',
+              index: 0,
+              delta: { type: 'text_delta', text: event.data },
+            });
+          } else if (wireFormat === 'responses') {
+            writeSseEvent(res, 'response.output_text.delta', {
+              type: 'response.output_text.delta',
+              output_index: 0,
+              content_index: 0,
+              delta: event.data,
+            });
+          }
         } else if (event.type === 'end') {
           if (typeof event.stopReason === 'string') stopReason = event.stopReason;
           if (typeof event.sessionId === 'string') grokSessionId = event.sessionId;
           if (typeof event.requestId === 'string') grokRequestId = event.requestId;
+          if (event.usage) streamUsage = parseGrokUsage(event.usage);
+        } else {
+          const tcs = parseGrokToolCallEvent(event);
+          if (tcs.length && wireFormat === 'openai') {
+            for (let i = 0; i < tcs.length; i++) {
+              const tc = tcs[i]!;
+              toolCalls.push(tc);
+              writeSseData(res, {
+                id: completionId,
+                object: 'chat.completion.chunk',
+                created,
+                model,
+                choices: [
+                  {
+                    index: 0,
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: toolCalls.length - 1,
+                          id: tc.id,
+                          type: 'function',
+                          function: {
+                            name: tc.function.name,
+                            arguments: tc.function.arguments,
+                          },
+                        },
+                      ],
+                    },
+                    finish_reason: null,
+                  },
+                ],
+              });
+            }
+          } else {
+            toolCalls.push(...tcs);
+          }
         }
       }
 
       if (!clientClosed) {
-        const grokMeta: GrokResponseMeta = {
-          sessionId: grokSessionId,
-          stopReason,
-          requestId: grokRequestId,
-        };
-        writeSseData(
-          res,
-          mapFinishChunk(model, completionId, created, stopReason, grokMeta),
-        );
-        writeSseDone(res);
+        if (wireFormat === 'openai') {
+          const grokMeta: GrokResponseMeta = {
+            sessionId: grokSessionId,
+            stopReason,
+            requestId: grokRequestId,
+          };
+          const finishChunk = mapFinishChunk(
+            model,
+            completionId,
+            created,
+            toolCalls.length && !textParts.join('').trim()
+              ? 'tool_calls'
+              : stopReason,
+            grokMeta,
+          );
+          if (streamUsage || args.usageEstimate) {
+            finishChunk.usage = streamUsage
+              ? usageToOpenAi(streamUsage)
+              : {
+                  prompt_tokens: args.estimatedPromptTokens || 0,
+                  completion_tokens: estimateCompletionTokens(
+                    textParts.join(''),
+                  ),
+                  total_tokens:
+                    (args.estimatedPromptTokens || 0) +
+                    estimateCompletionTokens(textParts.join('')),
+                };
+          }
+          writeSseData(res, finishChunk);
+          writeSseDone(res);
+        } else if (wireFormat === 'anthropic') {
+          writeSseEvent(res, 'content_block_stop', {
+            type: 'content_block_stop',
+            index: 0,
+          });
+          // Emit tool_use content blocks when Grok surfaced tool calls
+          let blockIndex = 1;
+          for (const tc of toolCalls) {
+            let input: Record<string, unknown> = {};
+            try {
+              input = JSON.parse(tc.function.arguments || '{}') as Record<
+                string,
+                unknown
+              >;
+            } catch {
+              input = { raw: tc.function.arguments };
+            }
+            writeSseEvent(res, 'content_block_start', {
+              type: 'content_block_start',
+              index: blockIndex,
+              content_block: {
+                type: 'tool_use',
+                id: tc.id,
+                name: tc.function.name,
+                input: {},
+              },
+            });
+            writeSseEvent(res, 'content_block_delta', {
+              type: 'content_block_delta',
+              index: blockIndex,
+              delta: {
+                type: 'input_json_delta',
+                partial_json: tc.function.arguments || '{}',
+              },
+            });
+            writeSseEvent(res, 'content_block_stop', {
+              type: 'content_block_stop',
+              index: blockIndex,
+            });
+            void input;
+            blockIndex += 1;
+          }
+          const anthropicStop =
+            toolCalls.length && !textParts.join('').trim()
+              ? 'tool_use'
+              : mapAnthropicStopReason(stopReason);
+          writeSseEvent(res, 'message_delta', {
+            type: 'message_delta',
+            delta: {
+              stop_reason: anthropicStop,
+              stop_sequence: null,
+            },
+            usage: {
+              output_tokens: estimateCompletionTokens(textParts.join('')),
+            },
+          });
+          writeSseEvent(res, 'message_stop', { type: 'message_stop' });
+        } else if (wireFormat === 'responses') {
+          const fullText = textParts.join('');
+          writeSseEvent(res, 'response.output_text.done', {
+            type: 'response.output_text.done',
+            output_index: 0,
+            content_index: 0,
+            text: fullText,
+          });
+          writeSseEvent(res, 'response.content_part.done', {
+            type: 'response.content_part.done',
+            output_index: 0,
+            content_index: 0,
+            part: { type: 'output_text', text: fullText, annotations: [] },
+          });
+          writeSseEvent(res, 'response.output_item.done', {
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: {
+              type: 'message',
+              id: outputItemId,
+              status: 'completed',
+              role: 'assistant',
+              content: [
+                { type: 'output_text', text: fullText, annotations: [] },
+              ],
+            },
+          });
+          writeSseEvent(res, 'response.completed', {
+            type: 'response.completed',
+            response: {
+              id: respId,
+              object: 'response',
+              created_at: created,
+              status: 'completed',
+              model,
+              output: [
+                {
+                  type: 'message',
+                  id: outputItemId,
+                  status: 'completed',
+                  role: 'assistant',
+                  content: [
+                    { type: 'output_text', text: fullText, annotations: [] },
+                  ],
+                },
+              ],
+              usage: {
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+              },
+            },
+          });
+        }
         res.end();
       }
 

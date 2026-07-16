@@ -6,7 +6,6 @@ import type { ChatListQuery } from '../interfaces/chat-list-query.interface';
 import { encryptionService } from './encryption.service';
 import { auditService } from './audit.service';
 
-export type { ChatListQuery } from '../interfaces/chat-list-query.interface';
 
 function decryptField(
   ciphertext: Buffer | Uint8Array | null | undefined,

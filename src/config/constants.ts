@@ -177,6 +177,10 @@ export const AUDIT_ACTIONS = {
   QUEUE_POLICY_UPDATE: 'queue.policy_update',
   QUEUE_CANCEL: 'queue.cancel',
   QUEUE_REQUEUE: 'queue.requeue',
+  API_FEATURES_UPDATE: 'admin.api_features_update',
+  MEDIA_GENERATE: 'media.generate',
+  MEDIA_READ: 'media.read',
+  MEDIA_DELETE: 'media.delete',
 } as const;
 
 export const ROLES = {
@@ -236,6 +240,8 @@ export const SETTING_KEYS = {
   DDOS_POLICY: 'ddos_policy',
   /** JSON blob: chat work-queue policy */
   QUEUE_POLICY: 'queue_policy',
+  /** JSON blob: API protocol + Grok capability feature flags */
+  API_FEATURES: 'api_features',
 } as const;
 
 export const CHAT_JOB_STATUS = {

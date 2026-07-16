@@ -8,6 +8,11 @@ export async function cmdStop(opts: {
   home?: string;
   forceHome?: boolean;
   port?: number;
+  /**
+   * When true (used by restart), "not running" is not an error — just informational.
+   * Does not set process.exitCode.
+   */
+  quietIfNotRunning?: boolean;
 }): Promise<void> {
   const paths = resolveRuntimePaths({
     home: opts.home,
@@ -38,6 +43,11 @@ export async function cmdStop(opts: {
   }
 
   if (!stoppedPid && !stoppedPm2 && freedPort.length === 0) {
+    if (opts.quietIfNotRunning) {
+      info('Not running (nothing to stop)');
+      info(`Port ${port} is free.`);
+      return;
+    }
     fail('Not running (no pid / PM2 app / process already dead)');
     info(`Port ${port} is free.`);
     process.exitCode = 1;

@@ -119,6 +119,15 @@ export function globalRateLimiter(
   res: Response,
   next: NextFunction,
 ): void {
+  // Admin SPA polls many endpoints; auth is OTP/session (not public API).
+  // Global IP limiter runs *before* requireAdminAuth, so every admin call
+  // was counted under the strict IP budget → 429 and flaky UI.
+  // Public OTP login still has chatRateLimiter on that route.
+  const path = req.originalUrl || req.url || req.path || '';
+  if (path.startsWith('/admin/api')) {
+    next();
+    return;
+  }
   _global(req, res, next);
 }
 

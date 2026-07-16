@@ -17,6 +17,10 @@ export const ErrorCodes = {
   QUEUE_PAUSED: 'queue_draining',
   QUEUE_TIMEOUT: 'queue_wait_timeout',
   QUEUE_CANCELLED: 'queue_cancelled',
+  MEDIA_NOT_SUPPORTED: 'media_not_supported',
+  MEDIA_PROVIDER_UNAVAILABLE: 'media_provider_unavailable',
+  MEDIA_GENERATION_FAILED: 'media_generation_failed',
+  MEDIA_FORBIDDEN: 'media_forbidden',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

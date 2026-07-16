@@ -49,9 +49,26 @@ export class GrokCliService {
   ): string[] {
     const args: string[] = [];
 
-    if (options.promptFile) {
+    // Resume / continue take precedence over fresh -p for session continuity
+    if (options.continueSession) {
+      args.push('--continue');
+    } else if (options.resumeSessionId) {
+      args.push('--resume', options.resumeSessionId);
+    }
+
+    if (options.forkSession) {
+      args.push('--fork-session');
+    }
+
+    // Prompt sources: prompt-json > prompt-file > -p (only one)
+    if (options.promptJson) {
+      args.push('--prompt-json', options.promptJson);
+    } else if (options.promptFile) {
       args.push('--prompt-file', options.promptFile);
-    } else {
+    } else if (!options.continueSession && !options.resumeSessionId) {
+      args.push('-p', options.prompt || '');
+    } else if (options.prompt?.trim()) {
+      // resume with extra prompt
       args.push('-p', options.prompt);
     }
 
@@ -86,6 +103,82 @@ export class GrokCliService {
 
     if (options.toolsDenylist) {
       args.push('--disallowed-tools', options.toolsDenylist);
+    }
+
+    if (options.jsonSchema) {
+      args.push('--json-schema', options.jsonSchema);
+    }
+
+    if (options.reasoningEffort) {
+      args.push('--reasoning-effort', options.reasoningEffort);
+    }
+
+    if (options.systemPromptOverride) {
+      args.push('--system-prompt-override', options.systemPromptOverride);
+    }
+
+    if (options.rules) {
+      args.push('--rules', options.rules);
+    }
+
+    if (options.permissionMode) {
+      args.push('--permission-mode', options.permissionMode);
+    }
+
+    if (options.sandbox) {
+      args.push('--sandbox', options.sandbox);
+    }
+
+    if (options.allowRules?.length) {
+      for (const rule of options.allowRules) {
+        if (rule?.trim()) args.push('--allow', rule.trim());
+      }
+    }
+
+    if (options.denyRules?.length) {
+      for (const rule of options.denyRules) {
+        if (rule?.trim()) args.push('--deny', rule.trim());
+      }
+    }
+
+    if (options.disableWebSearch) {
+      args.push('--disable-web-search');
+    }
+
+    if (options.noSubagents) {
+      args.push('--no-subagents');
+    }
+
+    if (options.noPlan) {
+      args.push('--no-plan');
+    }
+
+    if (options.noMemory) {
+      args.push('--no-memory');
+    }
+
+    if (options.experimentalMemory) {
+      args.push('--experimental-memory');
+    }
+
+    if (options.bestOfN != null && options.bestOfN > 1) {
+      args.push('--best-of-n', String(options.bestOfN));
+    }
+
+    if (options.check) {
+      args.push('--check');
+    }
+
+    if (options.verbatim) {
+      args.push('--verbatim');
+    }
+
+    if (options.agent) {
+      args.push('--agent', options.agent);
+    }
+
+    if (options.agentsJson) {
+      args.push('--agents', options.agentsJson);
     }
 
     return args;

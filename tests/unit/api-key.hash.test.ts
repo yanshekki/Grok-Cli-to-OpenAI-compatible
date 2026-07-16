@@ -4,7 +4,7 @@ import {
   hashApiKeySha256,
   scryptHash,
   verifyApiKey,
-} from '../../src/services/api-key.service';
+} from '../../src/utils/api-key-crypto';
 
 describe('api-key hashing', () => {
   it('scrypt hash verifies and is not deterministic without salt reuse', () => {

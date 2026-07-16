@@ -5,10 +5,6 @@ import { env } from '../config/env';
 import type { SoftwareCheck } from '../interfaces/software-check.interface';
 import type { SystemSoftwareReport } from '../interfaces/system-software-report.interface';
 
-export type { SoftwareId } from '../interfaces/software-id.type';
-export type { SoftwareLevel } from '../interfaces/software-level.type';
-export type { SoftwareCheck } from '../interfaces/software-check.interface';
-export type { SystemSoftwareReport } from '../interfaces/system-software-report.interface';
 
 function packageRoot(): string {
   return path.resolve(__dirname, '../..');

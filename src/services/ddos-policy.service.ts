@@ -158,9 +158,13 @@ function mergePolicy(raw: unknown, fallback: DdosPolicy): DdosPolicy {
 
 type RebuildHook = () => void;
 
+/** CLI may write policy to DB; reload so live gateway picks it up without restart. */
+const POLICY_TTL_MS = 2_000;
+
 export class DdosPolicyService {
   private cache: DdosPolicy | null = null;
   private loaded = false;
+  private loadedAt = 0;
   private rebuildHooks: RebuildHook[] = [];
 
   onRebuild(hook: RebuildHook): void {
@@ -202,13 +206,16 @@ export class DdosPolicyService {
       this.cache = fallback;
     }
     this.loaded = true;
+    this.loadedAt = Date.now();
     applyProxyRuntime(this.cache);
     this.fireRebuild();
     return this.cache;
   }
 
   async get(): Promise<DdosPolicy> {
-    if (!this.loaded || !this.cache) return this.load();
+    if (!this.loaded || !this.cache || Date.now() - this.loadedAt > POLICY_TTL_MS) {
+      return this.load();
+    }
     return this.cache;
   }
 
@@ -241,6 +248,7 @@ export class DdosPolicyService {
     });
     this.cache = parsed;
     this.loaded = true;
+    this.loadedAt = Date.now();
     this.fireRebuild();
     return parsed;
   }

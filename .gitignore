@@ -25,3 +25,11 @@ coverage/
 .vitest/
 *.tgz
 generated/
+
+# --- Admin SPA (Vite) ---
+# Source of truth: admin/src/  (commit this)
+# Runtime entry:   public/admin/boot.js  (commit — also rebuilt by `npm run build`)
+# Sourcemaps / WIP outputs only:
+public/admin/**/*.map
+public/admin/ts/
+public/admin/boot.legacy.js

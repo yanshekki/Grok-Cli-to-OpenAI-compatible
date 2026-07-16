@@ -50,3 +50,37 @@ export function toOpenAiErrorBody(err: HttpException): {
     },
   };
 }
+
+/** Anthropic Messages API error envelope */
+export function toAnthropicErrorBody(err: HttpException): {
+  type: 'error';
+  error: {
+    type: string;
+    message: string;
+  };
+} {
+  let type = 'api_error';
+  if (err.statusCode === 401) type = 'authentication_error';
+  else if (err.statusCode === 403) type = 'permission_error';
+  else if (err.statusCode === 404) type = 'not_found_error';
+  else if (err.statusCode === 429) type = 'rate_limit_error';
+  else if (err.statusCode === 400) type = 'invalid_request_error';
+  return {
+    type: 'error',
+    error: {
+      type,
+      message: err.message,
+    },
+  };
+}
+
+/** Pick error JSON shape by request path (multi-protocol gateway). */
+export function toProtocolErrorBody(
+  err: HttpException,
+  path: string,
+): unknown {
+  if (path.includes('/v1/messages')) {
+    return toAnthropicErrorBody(err);
+  }
+  return toOpenAiErrorBody(err);
+}

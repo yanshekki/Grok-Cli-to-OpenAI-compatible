@@ -8,6 +8,8 @@ import { adminAuditHandlers } from './admin/audit.handlers';
 import { adminDdosHandlers } from './admin/ddos.handlers';
 import { adminPm2Handlers } from './admin/pm2.handlers';
 import { adminQueueHandlers } from './admin/queue.handlers';
+import { adminApiFeaturesHandlers } from './admin/api-features.handlers';
+import { adminMediaHandlers } from './admin/media.handlers';
 
 /** Composed Admin API handlers (split by domain for maintainability). */
 export const adminController = {
@@ -20,6 +22,10 @@ export const adminController = {
   ...adminAuditHandlers,
   ...adminDdosHandlers,
   ...adminPm2Handlers,
+  ...adminMediaHandlers,
+  apiFeaturesGet: adminApiFeaturesHandlers.get,
+  apiFeaturesPut: adminApiFeaturesHandlers.put,
+  apiFeaturesPreset: adminApiFeaturesHandlers.preset,
   // Queue control — map to flat names used in routes
   queueStats: adminQueueHandlers.stats,
   queueListJobs: adminQueueHandlers.listJobs,

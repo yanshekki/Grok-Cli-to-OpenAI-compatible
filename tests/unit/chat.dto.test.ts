@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createChatCompletionSchema } from '../../src/dto/chat.dto';
+import {
+  flattenMessageContent,
+  messageHasImageParts,
+} from '../../src/utils/message-content';
 
 describe('createChatCompletionSchema', () => {
   it('accepts minimal valid body', () => {
@@ -10,20 +14,35 @@ describe('createChatCompletionSchema', () => {
     expect(parsed.messages[0]?.content).toBe('hi');
   });
 
-  it('normalizes array content parts to string', () => {
+  it('preserves array content parts for vision path (flatten later)', () => {
+    const parts = [
+      { type: 'text', text: 'hello' },
+      { type: 'text', text: 'world' },
+    ];
     const parsed = createChatCompletionSchema.parse({
       messages: [
         {
           role: 'user',
-          content: [
-            { type: 'text', text: 'hello' },
-            { type: 'text', text: 'world' },
-          ],
+          content: parts,
         },
       ],
     });
-    expect(parsed.messages[0]?.content).toContain('hello');
-    expect(parsed.messages[0]?.content).toContain('world');
+    expect(Array.isArray(parsed.messages[0]?.content)).toBe(true);
+    const flat = flattenMessageContent(
+      parsed.messages[0]?.content as Array<Record<string, unknown>>,
+    );
+    expect(flat).toContain('hello');
+    expect(flat).toContain('world');
+  });
+
+  it('detects image parts for feature gate', () => {
+    expect(
+      messageHasImageParts([
+        { type: 'text', text: 'see' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,xx' } },
+      ]),
+    ).toBe(true);
+    expect(messageHasImageParts([{ type: 'text', text: 'no' }])).toBe(false);
   });
 
   it('rejects empty messages', () => {

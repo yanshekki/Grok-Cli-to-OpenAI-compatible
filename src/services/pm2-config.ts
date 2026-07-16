@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Pm2RuntimeConfig } from '../interfaces/pm2-runtime-config.interface';
 
-export type { Pm2RuntimeConfig } from '../interfaces/pm2-runtime-config.interface';
 
 export const PM2_APP_NAME_DEFAULT = 'grok-openai-gateway';
 

@@ -4,7 +4,11 @@ import type { CreateKeyBody, UpdateKeyBody } from './types';
 import { ExceptionFactory } from '../../exceptions/exception.factory';
 import { asyncHandler } from '../../utils/async-handler';
 import { apiKeyService } from '../../services/api-key.service';
-import type { ApiKeyMode, ApiKeyRole } from '../../interfaces';
+import type { ApiKeyMode } from '../../interfaces';
+import {
+  normalizeApiKeyMode,
+  normalizeApiKeyRole,
+} from '../../utils/role-normalize';
 import { requestIp } from '../../utils/client-ip';
 
 /** Admin handlers: keys */
@@ -43,10 +47,11 @@ export const adminKeysHandlers = {
   createKey: asyncHandler(async (req: Request, res: Response) => {
     if (!req.apiKey) throw ExceptionFactory.unauthorized();
     const body = req.body as CreateKeyBody;
+    const role = normalizeApiKeyRole(body.role);
     const created = await apiKeyService.create({
       name: body.name,
-      role: body.role as ApiKeyRole,
-      mode: body.mode as ApiKeyMode,
+      role,
+      mode: normalizeApiKeyMode(role, body.mode),
       rateLimit: body.rateLimit,
       maxTurns: body.maxTurns,
       timeoutMs: body.timeoutMs,
@@ -64,7 +69,10 @@ export const adminKeysHandlers = {
       String(req.params.id),
       {
         name: body.name,
-        role: body.role as ApiKeyRole | undefined,
+        role:
+          body.role !== undefined
+            ? normalizeApiKeyRole(body.role)
+            : undefined,
         mode: body.mode as ApiKeyMode | undefined,
         rateLimit: body.rateLimit,
         isActive: body.isActive,

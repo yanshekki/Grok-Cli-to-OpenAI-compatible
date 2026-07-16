@@ -19,14 +19,39 @@ Production OpenAI-compatible HTTP gateway for local **[Grok CLI](https://x.ai)**
 
 **What you get**
 
-- OpenAI-compatible `POST /v1/chat/completions` (stream + non-stream)
+- OpenAI-compatible `POST /v1/chat/completions` + **`POST /v1/responses`** (text subset) + Anthropic-compatible **`POST /v1/messages`** (stream + non-stream)
 - Thinking / `reasoning_content` (DeepSeek-style + Grok `thought`)
 - Per-key **safe** / **agent** policy + global safety overrides
 - AES-256-GCM encryption + full chat audit
 - **Admin Panel** — OTP login (`gctoac admin otp`), dashboard, chats, keys, documents, audit, usage, **chat queue**, **DDoS center**, Safety settings, PM2, system update
-- **Durable chat queue** — every conversation is enqueued (Kafka-style leases) then consumed by an in-process worker; Admin pause / drain / cancel / DLQ; optional `Idempotency-Key`
+- **Durable chat queue** — every conversation is enqueued with leases, then consumed by an in-process worker; Admin pause / drain / cancel / DLQ; optional `Idempotency-Key`
 - **DDoS / abuse protection** — configurable rate limits, multi-rule auto-ban, reverse-proxy client IP (nginx / Cloudflare)
-- Control CLI: setup, start/stop/restart, status, doctor, logs, update, keys, **`admin otp`**, admin on/off
+- Control CLI: lifecycle + **settings / api features / queue / ddos / keys / docs / chats / stats / models / admin sessions**
+- **API features** (Admin page + `gctoac api features`): protocol + Grok CLI capability gates (tools, vision, json-schema, effort, …)
+
+### Capability parity (Grok CLI–backed “100%”)
+
+| Capability | Chat | Responses | Anthropic Messages | Admin switch |
+|------------|:----:|:---------:|:------------------:|--------------|
+| Text + stream | ✅ | ✅ | ✅ | protocol flags |
+| Vision / image parts | ✅ | ✅ | ✅ | `vision` |
+| **Images** `/v1/images/generations` + `/edits` | ✅ OpenAI-shaped | — | — | `imagesApi` + agent key |
+| **Files** `/v1/files` (docs alias) | ✅ | — | — | `filesOpenAiAlias` |
+| **Videos** `/v1/videos` (async job) | ✅ mock / poll | — | — | `videoApi` |
+| **Audio** `/v1/audio/speech` + `/transcriptions` | ✅ mock or 503 | — | — | `audioApi` + provider env |
+| Tools (allowlist → Grok) | ✅ | ✅ | ✅ (incl. `tool_use`/`tool_result`) | `tools` |
+| tool_calls in response | ✅* | text+meta | ✅ `tool_use` blocks | `tools` |
+| Structured JSON schema | ✅ | ✅ | via tools/prompt | `structuredOutput` |
+| Reasoning effort | ✅ | ✅ | thinking→effort | `reasoningEffort` |
+| Session resume / fork | ✅ | — | — | `sessionResume` |
+| Assistants-lite | — | — | — | `assistantsEmulation` |
+| Usage estimate | ✅ | ✅ | ✅ | `usageEstimate` |
+| Temperature / sampling | accept† | accept† | accept† | `strictSampling` |
+
+\* When Grok stream emits tool events (often server-side tools run without client-visible tool_calls).  
+† Grok CLI has no sampling knobs — ignored unless `strictSampling` rejects them.
+
+**Not claimable as cloud OpenAI/Anthropic parity:** real embeddings, realtime audio, hosted file search indexes, exact provider-side tool runtime — those need backends Grok CLI does not expose.
 
 ```text
 Client (OpenAI SDK / curl / Open WebUI)
@@ -185,40 +210,89 @@ PORT=4000
 
 ## CLI (`gctoac` / `gcoa`)
 
-Global options: `--home <path>`, `--port <n>` (default **3847**).
+Global options: `--home <path>`, `--port <n>` (default **3847**), `--json` (machine-readable where supported).
+
+Most control commands talk to the **local DB** (same `DATABASE_URL` as the gateway). Policy writes are picked up by a running process within **~2–5s** — **no restart required**.
+
+### Lifecycle & ops
 
 | Command | Description |
 |---------|-------------|
-| `gctoac setup` | Create dirs, `.env`, migrate DB, seed admin key, install pm2 if possible |
-| `gctoac start` | Start gateway (detached gctoac) |
-| `gctoac start -f` | Foreground |
-| `gctoac start --pm2` | Start under PM2 |
-| `gctoac stop` | Stop gctoac + PM2 app + free port orphans |
-| `gctoac restart` | Restart; respects **preferred runner** (PM2 if last used) |
-| `gctoac restart --pm2` | Force restart under PM2 |
-| `gctoac status` | Runner, NODE_ENV, port, trust proxy / IP source, health |
-| `gctoac doctor` | Full env check (proxy, dual-runner, port conflicts, logs size) |
-| `gctoac logs` / `logs show` | Tail pm2 + gctoac log files |
-| `gctoac logs clear` | Truncate log files (same set as Admin clear) |
-| `gctoac admin status` | Admin panel on/off |
-| `gctoac admin on` / `off` | Enable/disable Admin (DB; **only CLI can turn it back on**) |
-| `gctoac admin otp` | One-time Admin **SPA login code** (5 min, single use; alias `login-code`) |
-| `gctoac migrate` | Prisma migrate deploy |
-| `gctoac seed` | Seed admin API key if missing |
-| `gctoac key` / `key create` | Create API key (plaintext once) |
-| `gctoac key list` | List keys (prefix only) |
-| `gctoac key revoke <id>` | Revoke a key |
-| `gctoac update` | Self-update + restart |
-| `gctoac update --check` | Check only |
-| `gctoac update --no-restart` | Update without restart |
-| `gctoac open` | Print API / Admin URLs |
-| `gctoac version` | Package version |
+| `gctoac setup` | Create dirs, `.env`, migrate DB, seed admin key |
+| `gctoac start` / `start -f` / `start --pm2` | Start gateway |
+| `gctoac stop` / `restart` | Stop / restart |
+| `gctoac status` | Runner, port, proxy, health |
+| `gctoac doctor` | Full env check |
+| `gctoac logs` / `logs clear` | Logs |
+| `gctoac migrate` / `seed` | DB migrate / seed |
+| `gctoac update` / `update --check` | Self-update |
+| `gctoac open` / `version` | URLs / version |
+
+### Admin login & panel
+
+| Command | Description |
+|---------|-------------|
+| `gctoac admin status` / `on` / `off` | Panel switch (**only CLI `on` re-enables**) |
+| `gctoac admin otp` | One-time SPA login code (5 min, single use) |
+| `gctoac admin sessions` | List active OTP sessions |
+| `gctoac admin sessions revoke <id\|all\|all-expired>` | Revoke sessions |
+
+### API keys
+
+| Command | Description |
+|---------|-------------|
+| `gctoac key create` / `list` / `show <id>` | Create / list / show |
+| `gctoac key update <id> --name … --mode safe\|agent --rate-limit n --active on\|off` | Update |
+| `gctoac key revoke <id>` / `activate <id>` | Revoke / re-enable |
+
+### Safety settings
+
+| Command | Description |
+|---------|-------------|
+| `gctoac settings` / `settings get` | Global safe, tools, turns, timeout, model |
+| `gctoac settings set --global-safe on\|off --tools none\|readonly --max-turns n --timeout-ms n --default-model …` | Write |
+| `gctoac settings preset local\|prod\|code\|read\|chat\|long` | Apply preset and save |
+
+### Chat queue
+
+| Command | Description |
+|---------|-------------|
+| `gctoac queue` / `queue stats` | Depth and status counts |
+| `gctoac queue policy get\|set\|preset relaxed\|balanced\|strict` | Policy |
+| `gctoac queue pause` / `resume` / `drain` / `undrain` | Control plane |
+| `gctoac queue jobs` / `queue job <id>` | List / detail |
+| `gctoac queue cancel\|requeue\|priority <id> …` | Job ops |
+| `gctoac queue purge-dead --yes` | Purge terminal jobs |
+
+### DDoS / blacklist
+
+| Command | Description |
+|---------|-------------|
+| `gctoac ddos` | Policy summary + blacklist |
+| `gctoac ddos policy get\|set\|preset\|reset` | Policy |
+| `gctoac ddos ban <ip> [--ttl 3600] [--reason …]` | Ban |
+| `gctoac ddos unban <ip>` / `blacklist` | Unban / list |
+
+### Observability & data
+
+| Command | Description |
+|---------|-------------|
+| `gctoac stats` | Dashboard-style summary |
+| `gctoac models [--refresh]` | Local Grok models |
+| `gctoac docs list\|show\|delete` | Documents (`delete` needs `--yes`) |
+| `gctoac chats list\|show` | API chat requests (meta) |
+| `gctoac conversations list\|delete` | Playground threads |
+| `gctoac audit list [--action …]` | Audit log |
 
 ```bash
 gctoac --home ~/.gctoac-alt setup
 gctoac --port 3847 start
 gctoac status
-gctoac admin otp       # open Admin SPA login
+gctoac admin otp
+gctoac settings preset prod
+gctoac queue pause
+gctoac ddos ban 203.0.113.10 --ttl 3600 --reason abuse
+gctoac stats --json
 gctoac logs clear
 ```
 
@@ -228,7 +302,8 @@ gctoac logs clear
 
 | Feature | Details |
 |---------|---------|
-| OpenAI API | `POST /v1/chat/completions` (stream + non-stream), `GET /v1/models` |
+| OpenAI API | `POST /v1/chat/completions`, `POST /v1/responses` (text), `GET /v1/models` |
+| Anthropic API | `POST /v1/messages` (Bearer or `x-api-key`) |
 | Thinking | `reasoning_content` + Grok `thought` + `grok.*` meta |
 | Documents | Type-sniffed upload, encrypted storage (DB or filesystem), download |
 | Safe / Agent | Per-key policy; optional global force-safe |
@@ -239,7 +314,7 @@ gctoac logs clear
 | DDoS center | Live connections, blacklist, auto-ban rules, presets, runtime policy |
 | Reverse proxy | Trust hops + CF / nginx / X-Forwarded-For client IP |
 | Auth | API keys: **scrypt** hashes (legacy SHA-256 auto-migrates); Admin SPA: OTP → session token |
-| CLI | Lifecycle, preferred runner, logs, self-update, `admin otp` |
+| CLI | Full control plane: lifecycle, settings, queue, DDoS, keys, docs, chats, stats, `admin otp` |
 | Ops | SQLite, PM2, log auto-trim (>5 MB), GitHub Actions CI |
 
 ---
@@ -271,7 +346,7 @@ curl -sN http://127.0.0.1:3847/v1/chat/completions \
 
 `Idempotency-Key` is optional (scoped per API key). Safe to retry the same key while a job is active.
 
-### OpenAI SDK
+### OpenAI SDK (Chat Completions)
 
 ```ts
 import OpenAI from 'openai';
@@ -287,6 +362,63 @@ const res = await client.chat.completions.create({
 });
 console.log(res.choices[0].message.content);
 ```
+
+### OpenAI Responses (text subset)
+
+```bash
+curl -s http://127.0.0.1:3847/v1/responses \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "grok-4.5",
+    "input": "Hello",
+    "stream": false
+  }'
+```
+
+```ts
+// openai SDK ≥ responses support
+const r = await client.responses.create({
+  model: 'grok-4.5',
+  input: 'Hello',
+});
+```
+
+Supported: `input` string or message items (text), `instructions`, `stream`, `tools` (→ Grok tools when enabled), `previous_response_id` (context chain), `GET/DELETE /v1/responses/:id` (encrypted store).
+
+### Anthropic Messages
+
+```bash
+curl -s http://127.0.0.1:3847/v1/messages \
+  -H "x-api-key: $API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "grok-4.5",
+    "max_tokens": 1024,
+    "messages": [{"role":"user","content":"Hello"}],
+    "stream": false
+  }'
+```
+
+Also accepts `Authorization: Bearer $API_KEY`.  
+Supported: text `system` + user/assistant messages, stream SSE (`message_start` … `message_stop`).  
+Not supported: image blocks, `tool_use` / `tool_result`.
+
+### API compatibility matrix
+
+| Feature | Chat Completions | Responses | Anthropic Messages |
+|---------|------------------|-----------|--------------------|
+| Text chat | ✅ | ✅ | ✅ |
+| Stream | ✅ OpenAI chunks | ✅ `response.*` events | ✅ Anthropic events |
+| Models list | ✅ `/v1/models` | (use same) | (use same) |
+| Auth | Bearer | Bearer | Bearer or `x-api-key` |
+| Vision / image parts | ❌ 400 | ❌ 400 | ❌ 400 |
+| Tools / function calling | ❌ 400 | ❌ 400 | ❌ 400 |
+| `temperature` / `top_p` / `stop` | accepted, **ignored** | ignored | ignored |
+| `max_tokens` | accepted, ignored | `max_output_tokens` ignored | required field, ignored by Grok |
+| Reasoning | `include_reasoning` → `reasoning_content` | optional | off by default |
+| Queue | yes (`gog.queue` on stream) | yes (no `gog.queue` in SSE) | yes (no `gog.queue` in SSE) |
 
 ### Chat body extensions
 
@@ -308,6 +440,9 @@ console.log(res.choices[0].message.content);
 | `cwd` | **agent** only (allowlist); **safe** forces sandbox |
 | `session_id` | Passed to `grok -s` |
 | `document_ids` | Inject decrypted documents as context |
+| `temperature`, `top_p`, `stop`, `user` | Accepted for SDK compatibility; **not applied** by Grok CLI |
+| `tools` / `functions` | Rejected with 400 |
+| `response_format: json_object` | Best-effort system hint only |
 
 ### Thinking mapping
 
@@ -360,7 +495,12 @@ POST /admin/api/queue/purge-dead
 | GET | `/health` | Liveness |
 | GET | `/ready` | DB + Grok check |
 | GET | `/v1/models` | List models |
-| POST | `/v1/chat/completions` | Chat (queued when queue enabled; optional `Idempotency-Key`) |
+| POST | `/v1/chat/completions` | OpenAI Chat (queued; optional `Idempotency-Key`) |
+| POST | `/v1/responses` | OpenAI Responses (text + store) |
+| GET/DELETE | `/v1/responses/:id` | Retrieve / soft-delete stored response |
+| POST | `/v1/messages` | Anthropic Messages (Bearer or `x-api-key`) |
+| POST/GET/DELETE | `/v1/assistants`… | Assistants-lite (feature `assistantsEmulation`) |
+| POST/GET | `/v1/threads`… | Threads + messages + runs (Assistants-lite) |
 | POST | `/v1/documents` | Upload (`file` field) |
 | GET/DELETE | `/v1/documents`… | List / soft-delete |
 | POST/GET/DELETE | `/v1/api-keys`… | Admin key management |

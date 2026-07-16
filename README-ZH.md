@@ -19,14 +19,36 @@
 
 **主要能力**
 
-- OpenAI 相容 `POST /v1/chat/completions`（stream / 非 stream）
+- OpenAI 相容 `POST /v1/chat/completions` + **`POST /v1/responses`**（文字子集）+ Anthropic 相容 **`POST /v1/messages`**（stream / 非 stream）
 - Thinking / `reasoning_content`（DeepSeek 風格 + Grok `thought`）
 - 每把 key 的 **safe** / **agent** 政策 + 全域安全覆寫
 - AES-256-GCM 加密 + 完整 chat 稽核
 - **Admin Panel** — OTP 登入（`gctoac admin otp`）、儀表板、對話、金鑰、文件、稽核、用量、**對話佇列**、**DDoS 中心**、安全設定、PM2、系統更新
-- **持久化對話佇列** — 每個對話先入隊（Kafka 級租約語意）再由進程內 worker 消費；Admin 可暫停／排空／取消／死信；可選 `Idempotency-Key`
+- **持久化對話佇列** — 每個對話先入隊（租約認領）再由進程內 worker 消費；Admin 可暫停／排空／取消／死信；可選 `Idempotency-Key`
 - **DDoS／防濫用** — 可配置限流、多規則自動封鎖、反向代理真實客戶端 IP（nginx / Cloudflare）
-- 控制 CLI：setup、start/stop/restart、status、doctor、logs、update、keys、**`admin otp`**、admin on/off
+- 控制 CLI：生命週期 + **settings / queue / ddos / keys / docs / chats / stats / models / admin sessions**（與 Admin 對齊，見下方 CLI 表）
+- **API features**（Admin + `gctoac api features`）：協議與 Grok 能力閘（tools / vision / schema / effort…）
+
+### Grok CLI 能力對齊（產品「100%」定義）
+
+| 能力 | Chat | Responses | Anthropic Messages | Admin 開關 |
+|------|:----:|:---------:|:------------------:|------------|
+| 文字 + stream | ✅ | ✅ | ✅ | 協議開關 |
+| Vision / 圖片 | ✅ | ✅ | ✅ | `vision` |
+| Images `/v1/images/generations` + `/edits` | ✅ | — | — | `imagesApi` + agent key |
+| Files `/v1/files` | ✅ | — | — | `filesOpenAiAlias` |
+| Videos `/v1/videos`（async job） | ✅ mock | — | — | `videoApi` |
+| Audio speech / transcriptions | ✅ mock 或 503 | — | — | `audioApi` + provider env |
+| Tools | ✅ | ✅ | ✅（含 `tool_use`/`tool_result`） | `tools` |
+| 回應 tool_calls | ✅* | 文字 | ✅ `tool_use` | `tools` |
+| JSON schema | ✅ | ✅ | 可透傳 | `structuredOutput` |
+| Reasoning effort | ✅ | ✅ | thinking→effort | `reasoningEffort` |
+| Assistants-lite | — | — | — | `assistantsEmulation` |
+| temperature 等採樣 | 接受† | 接受† | 接受† | `strictSampling` |
+
+\* 視 Grok stream 是否發出 tool 事件。  
+† Grok CLI 無採樣旋鈕；`strictSampling` 可改為拒絕。  
+**不宣稱** 官方雲端 100%（embeddings / realtime 等需獨立後端）。
 
 ```text
 Client (OpenAI SDK / curl / Open WebUI)
@@ -185,40 +207,89 @@ PORT=4000
 
 ## CLI（`gctoac` / `gcoa`）
 
-全域選項：`--home <path>`、`--port <n>`（預設 **3847**）。
+全域選項：`--home <path>`、`--port <n>`（預設 **3847**）、`--json`（支援的指令輸出 JSON）。
+
+多數控制指令**直連本機 DB**（與 gateway 同一 `DATABASE_URL`），政策類變更約 **2–5 秒**內被執行中進程重載，**無需重啟**。
+
+### 生命週期與維運
 
 | 指令 | 說明 |
 |------|------|
 | `gctoac setup` | 建目錄、`.env`、migrate、seed admin key，盡量安裝 pm2 |
-| `gctoac start` | 背景啟動 gateway（detached gctoac） |
-| `gctoac start -f` | 前景啟動 |
-| `gctoac start --pm2` | 用 PM2 啟動 |
-| `gctoac stop` | 停止 gctoac + PM2 app + 清 port 佔用 |
-| `gctoac restart` | 重啟；跟從 **preferred runner**（上次用 PM2 則用 PM2） |
-| `gctoac restart --pm2` | 強制用 PM2 重啟 |
-| `gctoac status` | Runner、NODE_ENV、port、trust proxy／IP 來源、health |
-| `gctoac doctor` | 全面檢查（代理、雙 runner、port 衝突、log 大小） |
-| `gctoac logs` / `logs show` | 查看 pm2 + gctoac 日誌 |
-| `gctoac logs clear` | 清空日誌（與 Admin 清除一致） |
-| `gctoac admin status` | Admin 面板開關狀態 |
-| `gctoac admin on` / `off` | 開關 Admin（DB；**只能用 CLI `on` 重開**） |
-| `gctoac admin otp` | 一次性 Admin **SPA 登入碼**（5 分鐘、單次；別名 `login-code`） |
-| `gctoac migrate` | Prisma migrate deploy |
-| `gctoac seed` | 產生 admin API key（若未有） |
-| `gctoac key` / `key create` | 建立 API key（明文只顯示一次） |
-| `gctoac key list` | 列出 keys（只有 prefix） |
-| `gctoac key revoke <id>` | 撤銷 key |
-| `gctoac update` | 自我更新後重啟 |
-| `gctoac update --check` | 只檢查有無新版本 |
-| `gctoac update --no-restart` | 更新但不重啟 |
-| `gctoac open` | 印出 API / Admin URL |
-| `gctoac version` | 顯示版本 |
+| `gctoac start` / `start -f` / `start --pm2` | 啟動 gateway |
+| `gctoac stop` / `restart` | 停止／重啟 |
+| `gctoac status` | Runner、port、proxy、health |
+| `gctoac doctor` | 環境全面檢查 |
+| `gctoac logs` / `logs clear` | 日誌 |
+| `gctoac migrate` / `seed` | DB migrate／seed |
+| `gctoac update` / `update --check` | 自我更新 |
+| `gctoac open` / `version` | URL／版本 |
+
+### Admin 登入與面板
+
+| 指令 | 說明 |
+|------|------|
+| `gctoac admin status` / `on` / `off` | 面板開關（**只能用 CLI `on` 重開**） |
+| `gctoac admin otp` | 一次性 SPA 登入碼（5 分鐘、單次） |
+| `gctoac admin sessions` | 列出有效 OTP session |
+| `gctoac admin sessions revoke <id\|all\|all-expired>` | 撤銷 session |
+
+### 金鑰
+
+| 指令 | 說明 |
+|------|------|
+| `gctoac key create` / `list` / `show <id>` | 建立／列表／詳情 |
+| `gctoac key update <id> --name … --mode safe\|agent --rate-limit n --active on\|off` | 更新 |
+| `gctoac key revoke <id>` / `activate <id>` | 撤銷／重新啟用 |
+
+### 安全設定（Safety）
+
+| 指令 | 說明 |
+|------|------|
+| `gctoac settings` / `settings get` | 顯示全域 safe、tools、turns、timeout、model |
+| `gctoac settings set --global-safe on\|off --tools none\|readonly --max-turns n --timeout-ms n --default-model …` | 寫入 |
+| `gctoac settings preset local\|prod\|code\|read\|chat\|long` | 套用建議預設並儲存 |
+
+### 對話佇列
+
+| 指令 | 說明 |
+|------|------|
+| `gctoac queue` / `queue stats` | 深度與各狀態計數 |
+| `gctoac queue policy get\|set\|preset relaxed\|balanced\|strict` | 政策 |
+| `gctoac queue pause` / `resume` / `drain` / `undrain` | 暫停／恢復／排空 |
+| `gctoac queue jobs` / `queue job <id>` | 列表／詳情 |
+| `gctoac queue cancel\|requeue\|priority <id> …` | 作業操作 |
+| `gctoac queue purge-dead --yes` | 清死信／失敗／取消 |
+
+### DDoS／黑名單
+
+| 指令 | 說明 |
+|------|------|
+| `gctoac ddos` | 政策摘要 + 黑名單 |
+| `gctoac ddos policy get\|set\|preset\|reset` | 政策 |
+| `gctoac ddos ban <ip> [--ttl 3600] [--reason …]` | 封鎖 |
+| `gctoac ddos unban <ip>` / `blacklist` | 解封／列表 |
+
+### 觀測與資料
+
+| 指令 | 說明 |
+|------|------|
+| `gctoac stats` | 儀表板式摘要 |
+| `gctoac models [--refresh]` | 本機 Grok 模型列表 |
+| `gctoac docs list\|show\|delete` | 文件（delete 需 `--yes`） |
+| `gctoac chats list\|show` | API 對話請求（meta） |
+| `gctoac conversations list\|delete` | Playground 線程 |
+| `gctoac audit list [--action …]` | 稽核日誌 |
 
 ```bash
 gctoac --home ~/.gctoac-alt setup
 gctoac --port 3847 start
 gctoac status
-gctoac admin otp       # 開啟 Admin SPA 登入
+gctoac admin otp
+gctoac settings preset prod
+gctoac queue pause
+gctoac ddos ban 203.0.113.10 --ttl 3600 --reason abuse
+gctoac stats --json
 gctoac logs clear
 ```
 
@@ -228,7 +299,8 @@ gctoac logs clear
 
 | 功能 | 說明 |
 |------|------|
-| OpenAI API | `POST /v1/chat/completions`（stream / 非 stream）、`GET /v1/models` |
+| OpenAI API | `POST /v1/chat/completions`、`POST /v1/responses`（文字）、`GET /v1/models` |
+| Anthropic API | `POST /v1/messages`（Bearer 或 `x-api-key`） |
 | Thinking | `reasoning_content` + Grok `thought` + `grok.*` |
 | 文件 | 類型嗅探上傳、加密儲存（DB 或檔案系統）、下載 |
 | Safe / Agent | 每 key 政策；可全域強制 safe |
@@ -360,7 +432,9 @@ POST /admin/api/queue/purge-dead
 | GET | `/health` | 存活 |
 | GET | `/ready` | DB + Grok 檢查 |
 | GET | `/v1/models` | 模型列表 |
-| POST | `/v1/chat/completions` | 對話（佇列啟用時先排隊；可選 `Idempotency-Key`） |
+| POST | `/v1/chat/completions` | OpenAI Chat（佇列；可選 `Idempotency-Key`） |
+| POST | `/v1/responses` | OpenAI Responses 文字子集 |
+| POST | `/v1/messages` | Anthropic Messages（Bearer 或 `x-api-key`） |
 | POST | `/v1/documents` | 上傳（欄位 `file`） |
 | GET/DELETE | `/v1/documents`… | 列表 / 軟刪除 |
 | POST/GET/DELETE | `/v1/api-keys`… | Admin 管理 key |

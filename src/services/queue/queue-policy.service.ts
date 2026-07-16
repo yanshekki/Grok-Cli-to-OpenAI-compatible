@@ -31,9 +31,13 @@ export function defaultQueuePolicy(): QueuePolicy {
   };
 }
 
+/** CLI may write policy to DB; reload so live gateway picks it up without restart. */
+const POLICY_TTL_MS = 2_000;
+
 export class QueuePolicyService {
   private cache: QueuePolicy = defaultQueuePolicy();
   private loaded = false;
+  private loadedAt = 0;
   private hooks: RebuildHook[] = [];
 
   onRebuild(hook: RebuildHook): void {
@@ -54,6 +58,7 @@ export class QueuePolicyService {
         if (parsed.success) {
           this.cache = parsed.data;
           this.loaded = true;
+          this.loadedAt = Date.now();
           return this.cache;
         }
       }
@@ -62,11 +67,14 @@ export class QueuePolicyService {
     }
     this.cache = defaultQueuePolicy();
     this.loaded = true;
+    this.loadedAt = Date.now();
     return this.cache;
   }
 
   async get(): Promise<QueuePolicy> {
-    if (!this.loaded) await this.load();
+    if (!this.loaded || Date.now() - this.loadedAt > POLICY_TTL_MS) {
+      await this.load();
+    }
     return this.cache;
   }
 
@@ -82,6 +90,7 @@ export class QueuePolicyService {
     });
     this.cache = next;
     this.loaded = true;
+    this.loadedAt = Date.now();
     for (const h of this.hooks) {
       try {
         h();

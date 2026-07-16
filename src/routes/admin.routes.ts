@@ -156,6 +156,30 @@ router.put(
   adminController.updateSettings,
 );
 
+// API protocol + Grok capability feature flags
+router.get('/api-features', adminController.apiFeaturesGet);
+router.put('/api-features', adminController.apiFeaturesPut);
+router.post('/api-features/preset', adminController.apiFeaturesPreset);
+
+// Generated media assets + video jobs
+router.get('/media/assets', adminController.listAssets);
+router.get(
+  '/media/assets/:id',
+  validate(adminIdParamSchema, 'params'),
+  adminController.getAsset,
+);
+router.get(
+  '/media/assets/:id/download',
+  validate(adminIdParamSchema, 'params'),
+  adminController.downloadAsset,
+);
+router.delete(
+  '/media/assets/:id',
+  validate(adminIdParamSchema, 'params'),
+  adminController.deleteAsset,
+);
+router.get('/media/jobs', adminController.listJobs);
+
 // DDoS control center
 router.get('/ddos/connections', adminController.ddosConnections);
 router.get('/ddos/blacklist', adminController.ddosBlacklist);

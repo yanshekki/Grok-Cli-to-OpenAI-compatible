@@ -1,7 +1,14 @@
 import type { NextFunction, Request, Response } from 'express';
-import { HttpException, toOpenAiErrorBody } from '../exceptions/http.exception';
+import {
+  HttpException,
+  toProtocolErrorBody,
+} from '../exceptions/http.exception';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { logger } from '../utils/logger';
+
+function requestPath(req: Request): string {
+  return req.originalUrl || req.url || req.path || '';
+}
 
 export function notFoundHandler(req: Request, _res: Response, next: NextFunction): void {
   next(ExceptionFactory.notFound(`Route ${req.method} ${req.path}`));
@@ -13,10 +20,12 @@ export function errorMiddleware(
   res: Response,
   _next: NextFunction,
 ): void {
+  const path = requestPath(req);
+
   // CORS errors from cors package
   if (err instanceof Error && err.message.startsWith('CORS origin not allowed')) {
     const httpErr = ExceptionFactory.forbidden(err.message);
-    res.status(httpErr.statusCode).json(toOpenAiErrorBody(httpErr));
+    res.status(httpErr.statusCode).json(toProtocolErrorBody(httpErr, path));
     return;
   }
 
@@ -37,7 +46,7 @@ export function errorMiddleware(
       return;
     }
 
-    res.status(err.statusCode).json(toOpenAiErrorBody(err));
+    res.status(err.statusCode).json(toProtocolErrorBody(err, path));
     return;
   }
 
@@ -48,5 +57,5 @@ export function errorMiddleware(
   }
 
   const httpErr = ExceptionFactory.internal();
-  res.status(httpErr.statusCode).json(toOpenAiErrorBody(httpErr));
+  res.status(httpErr.statusCode).json(toProtocolErrorBody(httpErr, path));
 }

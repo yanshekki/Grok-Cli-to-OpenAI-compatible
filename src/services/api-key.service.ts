@@ -1,6 +1,5 @@
-import { createHash, scryptSync, timingSafeEqual, randomBytes } from 'node:crypto';
 import { prisma } from '../config/database';
-import { AUDIT_ACTIONS, KEY_MODES, ROLES } from '../config/constants';
+import { AUDIT_ACTIONS, ROLES } from '../config/constants';
 import type { ApiKeyCreatedEntity, ApiKeyPublicEntity } from '../entities';
 import type {
   AuthenticatedApiKey,
@@ -8,44 +7,30 @@ import type {
   ApiKeyRole,
 } from '../interfaces';
 import { ExceptionFactory } from '../exceptions/exception.factory';
-import { apiKeyPrefix, createApiKeySecret, createId } from '../utils/id';
+import {
+  apiKeyPrefix,
+  createApiKeySecret,
+  createId,
+} from '../utils/id';
+import {
+  hashApiKeySha256,
+  scryptHash,
+  verifyApiKey,
+} from '../utils/api-key-crypto';
+import {
+  normalizeApiKeyMode,
+  normalizeApiKeyRole,
+} from '../utils/role-normalize';
 import { parseIpList, serializeIpList } from '../utils/ip-match';
 import { auditService } from './audit.service';
-import { normalizeApiKeyRole } from './role-normalize.service';
 
-/** Legacy: plain SHA-256 hex (64 chars). */
-export function hashApiKeySha256(rawKey: string): string {
-  return createHash('sha256').update(rawKey, 'utf8').digest('hex');
-}
-
-/** Preferred: scrypt$saltHex$hashHex */
-export function scryptHash(rawKey: string, salt = randomBytes(16)): string {
-  const hash = scryptSync(rawKey, salt, 32);
-  return `scrypt$${salt.toString('hex')}$${hash.toString('hex')}`;
-}
-
-/** New keys: scrypt. Prefer scryptHash for clarity. */
-export function hashApiKey(rawKey: string): string {
-  return scryptHash(rawKey);
-}
-
-export function verifyApiKey(rawKey: string, keyHash: string): boolean {
-  try {
-    if (keyHash.startsWith('scrypt$')) {
-      const parts = keyHash.split('$');
-      if (parts.length !== 3) return false;
-      const salt = Buffer.from(parts[1]!, 'hex');
-      const expected = Buffer.from(parts[2]!, 'hex');
-      const actual = scryptSync(rawKey, salt, expected.length);
-      return timingSafeEqual(actual, expected);
-    }
-    // Legacy SHA-256
-    const computed = hashApiKeySha256(rawKey);
-    return timingSafeEqual(Buffer.from(computed, 'hex'), Buffer.from(keyHash, 'hex'));
-  } catch {
-    return false;
-  }
-}
+/** Re-export crypto helpers for callers that imported from this service. */
+export {
+  hashApiKey,
+  hashApiKeySha256,
+  scryptHash,
+  verifyApiKey,
+} from '../utils/api-key-crypto';
 
 function mapPublic(r: {
   id: string;
@@ -65,8 +50,8 @@ function mapPublic(r: {
     id: r.id,
     name: r.name,
     keyPrefix: r.keyPrefix,
-    role: normalizeApiKeyRole(r.role) as ApiKeyRole,
-    mode: (r.mode === KEY_MODES.AGENT ? KEY_MODES.AGENT : KEY_MODES.SAFE) as ApiKeyMode,
+    role: normalizeApiKeyRole(r.role),
+    mode: normalizeApiKeyMode(r.role, r.mode),
     isActive: r.isActive,
     rateLimit: r.rateLimit,
     maxTurns: r.maxTurns,
@@ -127,8 +112,8 @@ export class ApiKeyService {
       id: record.id,
       name: record.name,
       keyPrefix: record.keyPrefix,
-      role: normalizeApiKeyRole(record.role) as ApiKeyRole,
-      mode: (record.mode === KEY_MODES.AGENT ? KEY_MODES.AGENT : KEY_MODES.SAFE) as ApiKeyMode,
+      role: normalizeApiKeyRole(record.role),
+      mode: normalizeApiKeyMode(record.role, record.mode),
       rateLimit: record.rateLimit,
       isActive: record.isActive,
       maxTurns: record.maxTurns,
@@ -159,12 +144,8 @@ export class ApiKeyService {
     }
 
     const id = createId();
-    const mode =
-      input.role === ROLES.ADMIN
-        ? KEY_MODES.AGENT
-        : input.mode === KEY_MODES.AGENT
-          ? KEY_MODES.AGENT
-          : KEY_MODES.SAFE;
+    const role = normalizeApiKeyRole(input.role ?? ROLES.CLIENT);
+    const mode = normalizeApiKeyMode(role, input.mode);
 
     const wl = input.ipWhitelist ? parseIpList(input.ipWhitelist) : [];
 
@@ -174,7 +155,7 @@ export class ApiKeyService {
         name: input.name,
         keyPrefix: prefix,
         keyHash,
-        role: input.role ?? ROLES.CLIENT,
+        role,
         mode,
         rateLimit: input.rateLimit ?? 60,
         maxTurns: input.maxTurns ?? null,
@@ -267,10 +248,8 @@ export class ApiKeyService {
       id: record.id,
       name: record.name,
       keyPrefix: record.keyPrefix,
-      role: normalizeApiKeyRole(record.role) as ApiKeyRole,
-      mode: (record.mode === KEY_MODES.AGENT
-        ? KEY_MODES.AGENT
-        : KEY_MODES.SAFE) as ApiKeyMode,
+      role: normalizeApiKeyRole(record.role),
+      mode: normalizeApiKeyMode(record.role, record.mode),
       rateLimit: record.rateLimit,
       isActive: record.isActive,
       maxTurns: record.maxTurns,
@@ -299,10 +278,19 @@ export class ApiKeyService {
       throw ExceptionFactory.notFound('API key');
     }
 
+    const nextRole =
+      input.role !== undefined
+        ? normalizeApiKeyRole(input.role)
+        : normalizeApiKeyRole(existing.role);
+    const nextMode =
+      input.mode !== undefined || input.role !== undefined
+        ? normalizeApiKeyMode(nextRole, input.mode ?? existing.mode)
+        : undefined;
+
     const data: Record<string, unknown> = {
       ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.role !== undefined ? { role: input.role } : {}),
-      ...(input.mode !== undefined ? { mode: input.mode } : {}),
+      ...(input.role !== undefined ? { role: nextRole } : {}),
+      ...(nextMode !== undefined ? { mode: nextMode } : {}),
       ...(input.rateLimit !== undefined ? { rateLimit: input.rateLimit } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
       ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),

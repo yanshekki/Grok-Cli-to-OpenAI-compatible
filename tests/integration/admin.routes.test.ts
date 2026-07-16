@@ -1,14 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createApp } from '../../src/app';
 import { prisma } from '../../src/config/database';
 import { encryptionService } from '../../src/services/encryption.service';
+import { scryptHash, apiKeyPrefix } from '../../src/utils/api-key-crypto';
 
 function hashApiKey(rawKey: string): string {
-  return createHash('sha256').update(rawKey, 'utf8').digest('hex');
+  return scryptHash(rawKey);
 }
 
  
@@ -46,7 +47,7 @@ describe('admin routes', () => {
       data: {
         id: randomUUID(),
         name: 'itest-admin',
-        keyPrefix: adminKey.slice(0, 16),
+        keyPrefix: apiKeyPrefix(adminKey),
         keyHash: adminHash,
         role: 'admin',
         mode: 'agent',
@@ -55,12 +56,13 @@ describe('admin routes', () => {
     });
 
     clientKeyId = randomUUID();
+    const clientRaw = `gk_live_${randomBytes(16).toString('hex')}`;
     await prisma.apiKey.create({
       data: {
         id: clientKeyId,
         name: 'itest-client',
-        keyPrefix: 'gk_live_clientxx',
-        keyHash: hashApiKey(`gk_live_${randomBytes(16).toString('hex')}`),
+        keyPrefix: apiKeyPrefix(clientRaw),
+        keyHash: hashApiKey(clientRaw),
         role: 'client',
         mode: 'safe',
         rateLimit: 30,

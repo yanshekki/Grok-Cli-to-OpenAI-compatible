@@ -2,8 +2,10 @@ import type { Request, Response } from 'express';
 import type { CreateChatCompletionDto } from '../dto/chat.dto';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { chatService } from '../services/chat.service';
+import { apiFeaturesService } from '../services/api-features.service';
 import { asyncHandler } from '../utils/async-handler';
 import { requestIp } from '../utils/client-ip';
+import { readIdempotencyKeyScoped } from '../utils/request-meta';
 
 export class ChatController {
   createCompletion = asyncHandler(async (req: Request, res: Response) => {
@@ -11,13 +13,10 @@ export class ChatController {
       throw ExceptionFactory.unauthorized();
     }
 
+    await apiFeaturesService.assertAnyProtocol('openaiChat');
+
     const dto = req.body as CreateChatCompletionDto;
     const stream = Boolean(dto.stream);
-
-    const idem =
-      req.header('idempotency-key') ||
-      req.header('Idempotency-Key') ||
-      undefined;
 
     const result = await chatService.createCompletion(
       dto,
@@ -30,9 +29,7 @@ export class ChatController {
       stream ? res : undefined,
       {
         source: 'v1',
-        idempotencyKey: idem
-          ? `${req.apiKey.id}:${String(idem).slice(0, 200)}`
-          : undefined,
+        idempotencyKey: readIdempotencyKeyScoped(req, req.apiKey.id),
       },
     );
 

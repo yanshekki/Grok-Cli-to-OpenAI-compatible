@@ -1,4 +1,5 @@
 import type { GrokResponseMeta } from './grok-response-meta.interface';
+import type { GrokToolCall } from './grok-collected-output.interface';
 
 /** Options when mapping Grok CLI output → OpenAI chat.completion */
 export interface MapCompletionOptions {
@@ -6,4 +7,10 @@ export interface MapCompletionOptions {
   reasoningContent?: string | null;
   includeReasoning?: boolean;
   grok?: GrokResponseMeta;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  toolCalls?: GrokToolCall[];
 }

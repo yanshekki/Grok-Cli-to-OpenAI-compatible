@@ -73,9 +73,7 @@ export const adminQueueHandlers = {
     const ok = await chatQueueService.requestCancel(id);
     if (!ok) throw ExceptionFactory.notFound('Job');
     await auditService.log({
-      apiKeyId: req.apiKey.id.startsWith('admin-session:')
-        ? null
-        : req.apiKey.id,
+      apiKeyId: req.apiKey.id,
       action: AUDIT_ACTIONS.QUEUE_CANCEL,
       resource: 'chat_job',
       resourceId: id,
@@ -90,9 +88,7 @@ export const adminQueueHandlers = {
     const ok = await chatQueueService.requeue(id);
     if (!ok) throw ExceptionFactory.validation('Job cannot be requeued');
     await auditService.log({
-      apiKeyId: req.apiKey.id.startsWith('admin-session:')
-        ? null
-        : req.apiKey.id,
+      apiKeyId: req.apiKey.id,
       action: AUDIT_ACTIONS.QUEUE_REQUEUE,
       resource: 'chat_job',
       resourceId: id,
@@ -123,9 +119,7 @@ export const adminQueueHandlers = {
     const partial = queuePolicyUpdateSchema.parse(req.body || {});
     const data = await queuePolicyService.update(partial);
     await auditService.log({
-      apiKeyId: req.apiKey.id.startsWith('admin-session:')
-        ? null
-        : req.apiKey.id,
+      apiKeyId: req.apiKey.id,
       action: AUDIT_ACTIONS.QUEUE_POLICY_UPDATE,
       resource: 'queue_policy',
       meta: { keys: Object.keys(partial) },

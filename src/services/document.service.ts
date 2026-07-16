@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { prisma } from '../config/database';
 import {
   AUDIT_ACTIONS,
+  ROLES,
   STORAGE_TYPES,
   isImageMime,
   isTextualMime,
@@ -25,12 +26,14 @@ import {
 } from '../utils/path-safe';
 import { auditService } from './audit.service';
 import { toPrismaBytes } from '../utils/prisma-bytes';
+import {
+  isSyntheticApiKeyId,
+  toPersistentApiKeyId,
+} from '../utils/api-key-id';
 import { encryptionService } from './encryption.service';
 
 const execFileAsync = promisify(execFile);
 
-export type { MaterializedDocument } from '../interfaces/materialized-document.interface';
-export type { DocumentContextResult } from '../interfaces/document-context-result.interface';
 
 export class DocumentService {
   async ensureStorageDir(): Promise<void> {
@@ -47,6 +50,9 @@ export class DocumentService {
     if (input.buffer.length > env.UPLOAD_MAX_BYTES) {
       throw ExceptionFactory.documentTooLarge(env.UPLOAD_MAX_BYTES);
     }
+
+    // OTP admin sessions use synthetic ids — map to a real api_keys row for FK
+    const apiKeyId = await toPersistentApiKeyId(input.apiKeyId);
 
     const { originalName, mimeType: mime } = assertSafeUpload({
       originalName: input.originalName,
@@ -90,7 +96,7 @@ export class DocumentService {
     const created = await prisma.document.create({
       data: {
         id,
-        apiKeyId: input.apiKeyId,
+        apiKeyId,
         originalName,
         mimeType: mime,
         sizeBytes: input.buffer.length,
@@ -104,7 +110,7 @@ export class DocumentService {
     });
 
     await auditService.log({
-      apiKeyId: input.apiKeyId,
+      apiKeyId,
       action: AUDIT_ACTIONS.DOCUMENT_UPLOAD,
       resource: 'document',
       resourceId: created.id,
@@ -120,12 +126,22 @@ export class DocumentService {
     return this.toPublic(created);
   }
 
+  /**
+   * Resolve ownership id for Document.apiKeyId (required FK).
+   * OTP sessions use synthetic ids — map to a real admin/key row so upload
+   * and later getOwned/chat attachment paths agree.
+   */
+  private async ownerId(apiKeyId: string): Promise<string> {
+    return toPersistentApiKeyId(apiKeyId);
+  }
+
   async list(
     apiKeyId: string,
     limit = 50,
     offset = 0,
   ): Promise<{ items: DocumentPublicEntity[]; total: number }> {
-    const where = { apiKeyId, deletedAt: null };
+    const owner = await this.ownerId(apiKeyId);
+    const where = { apiKeyId: owner, deletedAt: null };
     const [rows, total] = await Promise.all([
       prisma.document.findMany({
         where,
@@ -139,13 +155,30 @@ export class DocumentService {
   }
 
   async getOwned(apiKeyId: string, documentId: string) {
-    const doc = await prisma.document.findFirst({
-      where: { id: documentId, apiKeyId, deletedAt: null },
+    const owner = await this.ownerId(apiKeyId);
+    let doc = await prisma.document.findFirst({
+      where: { id: documentId, apiKeyId: owner, deletedAt: null },
     });
-    if (!doc) {
-      throw ExceptionFactory.notFound('Document');
+    if (doc) return doc;
+
+    // Admin keys (and OTP sessions mapped to an admin key) may read any
+    // non-deleted document — matches Admin panel document list/download.
+    // Client keys stay ownership-scoped for multi-tenant isolation.
+    const actorKey = await prisma.apiKey.findUnique({
+      where: { id: owner },
+      select: { role: true },
+    });
+    const isAdmin =
+      isSyntheticApiKeyId(apiKeyId) ||
+      String(actorKey?.role || '').toLowerCase() === ROLES.ADMIN;
+    if (isAdmin) {
+      doc = await prisma.document.findFirst({
+        where: { id: documentId, deletedAt: null },
+      });
+      if (doc) return doc;
     }
-    return doc;
+
+    throw ExceptionFactory.notFound('Document');
   }
 
   async getPublic(apiKeyId: string, documentId: string): Promise<DocumentPublicEntity> {

@@ -13,6 +13,7 @@ import {
 import { asyncHandler } from '../utils/async-handler';
 import { ipAllowed } from '../utils/ip-match';
 import { requestIp } from '../utils/client-ip';
+import { normalizeApiKeyRole } from '../utils/role-normalize';
 
 function extractBearer(req: Request): string | null {
   const header = req.header('authorization');
@@ -23,23 +24,28 @@ function extractBearer(req: Request): string | null {
   return token.trim();
 }
 
+/** OpenAI Bearer or Anthropic x-api-key (same gk_live_ keys). */
+function extractApiKeyToken(req: Request): string | null {
+  const bearer = extractBearer(req);
+  if (bearer) return bearer;
+  const xApiKey = req.header('x-api-key') || req.header('X-Api-Key');
+  if (xApiKey?.trim()) return xApiKey.trim();
+  return null;
+}
+
 function clientIp(req: Request): string {
   return requestIp(req);
 }
 
-function normalizeRole(role: string | undefined): string {
-  return String(role || '')
-    .trim()
-    .toLowerCase();
-}
-
 export const requireApiKey = asyncHandler(async (req, _res, next) => {
-  const token = extractBearer(req);
+  const token = extractApiKeyToken(req);
   if (!token) {
     recordFailedAuth(req);
-    throw ExceptionFactory.unauthorized('Missing Authorization: Bearer <api_key>');
+    throw ExceptionFactory.unauthorized(
+      'Missing API key. Use Authorization: Bearer <api_key> or x-api-key: <api_key>',
+    );
   }
-  // Session tokens are admin-panel only — not valid for /v1 OpenAI API
+  // Session tokens are admin-panel only — not valid for /v1 public API
   if (isSessionToken(token)) {
     recordFailedAuth(req);
     throw ExceptionFactory.unauthorized('Use an API key for this endpoint');
@@ -69,7 +75,7 @@ export const requireAdmin = asyncHandler(async (req, _res, next) => {
   if (!req.apiKey) {
     throw ExceptionFactory.unauthorized();
   }
-  if (normalizeRole(req.apiKey.role) !== ROLES.ADMIN) {
+  if (normalizeApiKeyRole(req.apiKey.role) !== ROLES.ADMIN) {
     throw ExceptionFactory.forbidden(
       `Admin role required (this key has role "${req.apiKey.role}"). Create an admin key: gctoac key create`,
     );
@@ -116,7 +122,7 @@ export const requireAdminAuth = asyncHandler(async (req, _res, next) => {
     throw err;
   }
 
-  if (normalizeRole(req.apiKey.role) !== ROLES.ADMIN) {
+  if (normalizeApiKeyRole(req.apiKey.role) !== ROLES.ADMIN) {
     throw ExceptionFactory.forbidden('Admin role required');
   }
 

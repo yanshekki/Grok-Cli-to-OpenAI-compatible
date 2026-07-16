@@ -5,15 +5,14 @@ import {
   SAFE_DISALLOWED_TOOLS,
   SAFE_READONLY_TOOLS,
   SAFE_TOOLS_MODES,
-  type KeyMode,
 } from '../config/constants';
 import { env } from '../config/env';
 import type { AuthenticatedApiKey } from '../interfaces/authenticated-api-key.interface';
+import type { ApiKeyMode } from '../interfaces/api-key-mode.type';
 import type { ResolvedPolicy } from '../interfaces/resolved-policy.interface';
 import { resolveSafeCwd } from '../utils/path-safe';
+import { normalizeApiKeyMode } from '../utils/role-normalize';
 import { settingsService } from './settings.service';
-
-export type { ResolvedPolicy } from '../interfaces/resolved-policy.interface';
 
 export class PolicyService {
   async resolve(
@@ -21,9 +20,9 @@ export class PolicyService {
     clientCwd?: string | null,
   ): Promise<ResolvedPolicy> {
     const settings = await settingsService.getAll();
-    const keyMode = (apiKey.mode === KEY_MODES.AGENT ? KEY_MODES.AGENT : KEY_MODES.SAFE) as KeyMode;
+    const keyMode = normalizeApiKeyMode(apiKey.role, apiKey.mode);
     const forcedSafe = settings.globalSafeMode || env.GROK_SAFE_MODE;
-    const mode: KeyMode = forcedSafe ? KEY_MODES.SAFE : keyMode;
+    const mode: ApiKeyMode = forcedSafe ? KEY_MODES.SAFE : keyMode;
 
     if (mode === KEY_MODES.SAFE) {
       const sandbox = await this.ensureSandbox(apiKey.id);
@@ -68,7 +67,20 @@ export class PolicyService {
   }
 
   async ensureSandbox(apiKeyId: string): Promise<string> {
-    const safeId = apiKeyId.replace(/[^a-zA-Z0-9\-_]/g, '');
+    // OTP sessions use synthetic ids — share sandbox with the persistent owner
+    // so attachments/materialized files stay under a stable path across requests.
+    let id = apiKeyId;
+    try {
+      const { isSyntheticApiKeyId, toPersistentApiKeyId } = await import(
+        '../utils/api-key-id'
+      );
+      if (isSyntheticApiKeyId(apiKeyId)) {
+        id = await toPersistentApiKeyId(apiKeyId);
+      }
+    } catch {
+      /* keep original id */
+    }
+    const safeId = id.replace(/[^a-zA-Z0-9\-_]/g, '');
     const dir = path.join(env.storageDir, 'sandboxes', safeId || 'unknown');
     await fs.mkdir(dir, { recursive: true });
     return dir;

@@ -11,8 +11,10 @@ export async function cmdRestart(opts: {
   pm2?: boolean;
   forceHome?: boolean;
 }): Promise<void> {
+  // Stop may find nothing — that is OK for restart; do not leave exitCode=1
   process.exitCode = 0;
-  await cmdStop(opts).catch(() => undefined);
+  await cmdStop({ ...opts, quietIfNotRunning: true }).catch(() => undefined);
+  process.exitCode = 0;
   await new Promise((r) => setTimeout(r, 400));
 
   // Honor preferred_runner unless user explicitly chose --pm2 / --foreground
