@@ -9371,9 +9371,7 @@ function applyQueueSoftUpdate({ s, pol, jobs, total, by }) {
         queueFilter.tab = 'jobs';
         renderQueue().catch(onErr);
       });
-      document.getElementById('q-purge-dlq')?.addEventListener('click', () => {
-        document.getElementById('q-purge')?.click();
-      });
+      // #q-purge-dlq handled via #queue-root click delegation (doPurge)
     } else {
       dlqHost.innerHTML = '';
     }
@@ -9886,23 +9884,44 @@ async function renderQueue(opts = {}) {
     });
     renderQueue().catch(onErr);
   };
+  let purgeBusy = false;
   const doPurge = async () => {
-    if (
-      !(await uiConfirm({
-        title: t('queue.purgeDead'),
+    if (purgeBusy) return;
+    purgeBusy = true;
+    try {
+      const ok = await uiConfirm({
+        title: t('queue.purgeTitle'),
         message: t('queue.purgeConfirm'),
         variant: 'danger',
-        confirmText: t('queue.purgeDead'),
-      }))
-    )
-      return;
-    await api('/queue/purge-dead', { method: 'POST', body: '{}' });
-    renderQueue().catch(onErr);
+        confirmText: t('queue.purgeConfirmBtn'),
+        cancelText: t('common.cancel'),
+      });
+      if (!ok) return;
+      const res = await api('/queue/purge-dead', {
+        method: 'POST',
+        body: '{}',
+      });
+      const n = Number(res?.data?.deleted ?? 0);
+      await uiAlert({
+        title: t('queue.purgeDoneTitle'),
+        message: tf('queue.purgeDoneMsg', { n }),
+        confirmText: t('common.ok'),
+      });
+      await renderQueue();
+    } finally {
+      purgeBusy = false;
+    }
   };
-  document.getElementById('q-purge').onclick = () => doPurge().catch(onErr);
-  document
-    .getElementById('q-purge-dlq')
-    ?.addEventListener('click', () => doPurge().catch(onErr));
+  // Event delegation: soft-refresh rebuilds #q-purge-dlq; onclick rebinds each full render
+  const queueRoot = document.getElementById('queue-root');
+  if (queueRoot) {
+    queueRoot.onclick = (e) => {
+      const btn = e.target?.closest?.('#q-purge, #q-purge-dlq');
+      if (!btn) return;
+      e.preventDefault();
+      doPurge().catch(onErr);
+    };
+  }
   document.getElementById('q-filter-dead')?.addEventListener('click', () => {
     queueFilter.status = 'dead';
     queueFilter.offset = 0;
