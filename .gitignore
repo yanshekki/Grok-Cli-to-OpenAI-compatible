@@ -1,7 +1,6 @@
 node_modules/
-# Do not publish GitHub Actions / repo meta to the public repo
-.github/
 # Built output is published via npm only (not committed to git)
+# Note: .github/workflows is tracked for CI badges; npm "files" field already excludes it from the package.
 dist/
 .env
 .env.local
