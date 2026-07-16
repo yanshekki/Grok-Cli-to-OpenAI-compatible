@@ -12,7 +12,8 @@ jobs:
     env:
       NODE_ENV: test
       DATABASE_URL: file:../data/gateway.db
-      ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      # 32 zero bytes as base64 (must decode to exactly 32 bytes)
+      ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       GROK_DEFAULT_CWD: ${{ github.workspace }}
       GROK_CWD_ALLOWLIST: ${{ github.workspace }}
       LOG_LEVEL: error

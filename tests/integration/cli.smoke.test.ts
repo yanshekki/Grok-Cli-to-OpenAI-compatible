@@ -16,13 +16,19 @@ function run(
   args: string[],
   opts?: { expectFail?: boolean },
 ): { code: number; out: string } {
+  // Isolated home must own ENCRYPTION_KEY / DATABASE_URL via its .env —
+  // do not inherit parent CI keys (loadEnvIntoProcess only fills undefined keys).
+  const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '0' };
+  delete env.ENCRYPTION_KEY;
+  delete env.DATABASE_URL;
+  delete env.GCTOAC_HOME;
   try {
     const out = execFileSync(
       process.execPath,
       [cli, '--home', home, '--port', String(PORT), ...args],
       {
         encoding: 'utf8',
-        env: { ...process.env, FORCE_COLOR: '0' },
+        env,
         timeout: 120_000,
         maxBuffer: 4 * 1024 * 1024,
       },
