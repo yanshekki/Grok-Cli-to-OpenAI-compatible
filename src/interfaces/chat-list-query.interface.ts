@@ -10,4 +10,6 @@ export interface ChatListQuery {
   to?: string;
   hasDocuments?: boolean | string;
   policyMode?: string;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
 }

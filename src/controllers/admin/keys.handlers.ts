@@ -34,6 +34,8 @@ export const adminKeysHandlers = {
       limit: query.limit,
       offset: query.offset,
       all,
+      sortBy: query.sortBy,
+      sortDir: query.sortDir,
     });
     res.json({
       object: 'list',

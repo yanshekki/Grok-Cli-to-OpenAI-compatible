@@ -4,7 +4,16 @@ import { recordBlockedHit } from '../middlewares/connection-tracker.middleware';
 import { env } from '../config/env';
 import { createId } from '../utils/id';
 import { BAN_SOURCES } from '../config/constants';
+import { resolveScalarOrderBy } from '../utils/list-sort';
 import { ddosPolicyService } from './ddos-policy.service';
+
+const IP_BAN_SORT_FIELDS = [
+  'createdAt',
+  'ip',
+  'source',
+  'expiresAt',
+  'reason',
+] as const;
 
 /** Memory set of currently banned IPs (exact). */
 const memoryBan = new Map<string, { expiresAt: number | null; reason?: string }>();
@@ -115,11 +124,17 @@ export class IpBlacklistService {
     await prisma.ipBlacklist.deleteMany({ where: { ip: key } });
   }
 
-  async list() {
+  async list(query?: { sortBy?: string; sortDir?: 'asc' | 'desc' }) {
     await this.ensureLoaded();
     const now = new Date();
+    const orderBy = resolveScalarOrderBy(
+      query?.sortBy,
+      query?.sortDir,
+      IP_BAN_SORT_FIELDS,
+      'createdAt',
+    );
     const rows = await prisma.ipBlacklist.findMany({
-      orderBy: { createdAt: 'desc' },
+      orderBy,
     });
     return rows.filter((r) => !r.expiresAt || r.expiresAt > now);
   }

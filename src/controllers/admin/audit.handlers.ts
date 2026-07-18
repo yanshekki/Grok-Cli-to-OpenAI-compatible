@@ -2,6 +2,14 @@ import type { Request, Response } from 'express';
 import { prisma } from '../../config/database';
 import type { AdminListQueryDto } from '../../dto/admin.dto';
 import { asyncHandler } from '../../utils/async-handler';
+import { resolveScalarOrderBy } from '../../utils/list-sort';
+
+const AUDIT_SORT_FIELDS = [
+  'createdAt',
+  'action',
+  'resource',
+  'ip',
+] as const;
 
 /** Admin handlers: audit */
 export const adminAuditHandlers = {
@@ -34,10 +42,16 @@ export const adminAuditHandlers = {
         { apiKey: { keyPrefix: { contains: q } } },
       ];
     }
+    const orderBy = resolveScalarOrderBy(
+      query.sortBy,
+      query.sortDir,
+      AUDIT_SORT_FIELDS,
+      'createdAt',
+    );
     const [rows, total] = await Promise.all([
       prisma.auditLog.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         take: query.limit,
         skip: query.offset,
         include: {

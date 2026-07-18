@@ -18,18 +18,64 @@ import {
 import type { DdosPolicyUpdateDto } from '../../dto/ddos.dto';
 import { normalizeIp } from '../../utils/ip-match';
 import { requestIp } from '../../utils/client-ip';
+import { sortInMemory } from '../../utils/list-sort';
+
+function parseSortQuery(req: Request): {
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
+} {
+  const sortBy =
+    typeof req.query.sortBy === 'string' ? req.query.sortBy : undefined;
+  const raw =
+    typeof req.query.sortDir === 'string' ? req.query.sortDir : undefined;
+  const sortDir = raw === 'asc' || raw === 'desc' ? raw : undefined;
+  return { sortBy, sortDir };
+}
 
 /** Admin handlers: ddos */
 export const adminDdosHandlers = {
-  ddosConnections: asyncHandler(async (_req: Request, res: Response) => {
+  ddosConnections: asyncHandler(async (req: Request, res: Response) => {
+    const { sortBy, sortDir } = parseSortQuery(req);
+    const snap = getConnectionsSnapshot();
+    const active = sortInMemory(
+      snap.active,
+      sortBy,
+      sortDir,
+      {
+        startedAt: (r) => r.startedAt,
+        ip: (r) => r.ip,
+        method: (r) => r.method,
+        path: (r) => r.path,
+        durationMs: (r) =>
+          r.durationMs ??
+          (r.startedAt ? Date.now() - r.startedAt : 0),
+      },
+      'startedAt',
+    );
+    const recent = sortInMemory(
+      snap.recent,
+      sortBy,
+      sortDir,
+      {
+        startedAt: (r) => r.startedAt,
+        finishedAt: (r) => r.finishedAt ?? r.startedAt,
+        ip: (r) => r.ip,
+        method: (r) => r.method,
+        path: (r) => r.path,
+        durationMs: (r) => r.durationMs ?? 0,
+        statusCode: (r) => r.statusCode ?? 0,
+      },
+      'startedAt',
+    );
     res.json({
       object: 'admin.ddos.connections',
-      data: getConnectionsSnapshot(),
+      data: { ...snap, active, recent },
     });
   }),
 
-  ddosBlacklist: asyncHandler(async (_req: Request, res: Response) => {
-    const items = await ipBlacklistService.list();
+  ddosBlacklist: asyncHandler(async (req: Request, res: Response) => {
+    const { sortBy, sortDir } = parseSortQuery(req);
+    const items = await ipBlacklistService.list({ sortBy, sortDir });
     res.json({ object: 'list', data: items });
   }),
 
@@ -143,10 +189,25 @@ export const adminDdosHandlers = {
     res.json({ object: 'admin.ddos.policy', data: policy, reset: true });
   }),
 
-  ddosEvents: asyncHandler(async (_req: Request, res: Response) => {
+  ddosEvents: asyncHandler(async (req: Request, res: Response) => {
+    const { sortBy, sortDir } = parseSortQuery(req);
+    const events = sortInMemory(
+      abuseGuardService.getEvents(100),
+      sortBy,
+      sortDir,
+      {
+        at: (r) => r.at,
+        createdAt: (r) => r.at,
+        ip: (r) => r.ip,
+        source: (r) => r.source,
+        reason: (r) => r.reason,
+        durationMs: (r) => r.durationMs ?? 0,
+      },
+      'at',
+    );
     res.json({
       object: 'list',
-      data: abuseGuardService.getEvents(50),
+      data: events.slice(0, 50),
       total: abuseGuardService.getAutoBanTotal(),
     });
   }),

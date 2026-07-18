@@ -17,6 +17,23 @@ import { mediaJobsService } from '../../services/media/media-jobs.service';
 import { mediaOrchestratorService } from '../../services/media/media-orchestrator.service';
 import { requestIp } from '../../utils/client-ip';
 import type { AuthenticatedApiKey } from '../../interfaces';
+import { resolveScalarOrderBy } from '../../utils/list-sort';
+
+const MEDIA_ASSET_SORT_FIELDS = [
+  'createdAt',
+  'kind',
+  'mime',
+  'byteSize',
+  'provider',
+  'originalName',
+] as const;
+
+const MEDIA_JOB_SORT_FIELDS = [
+  'createdAt',
+  'status',
+  'kind',
+  'completedAt',
+] as const;
 
 function mediaRoot(): string {
   return path.join(env.storageDir, 'media');
@@ -42,6 +59,10 @@ export const adminMediaHandlers = {
     const fromRaw =
       typeof req.query.from === 'string' ? req.query.from : undefined;
     const toRaw = typeof req.query.to === 'string' ? req.query.to : undefined;
+    const sortBy =
+      typeof req.query.sortBy === 'string' ? req.query.sortBy : undefined;
+    const sortDir =
+      typeof req.query.sortDir === 'string' ? req.query.sortDir : undefined;
 
     const createdAt: { gte?: Date; lte?: Date } = {};
     if (fromRaw) {
@@ -72,10 +93,17 @@ export const adminMediaHandlers = {
         : {}),
     };
 
+    const orderBy = resolveScalarOrderBy(
+      sortBy,
+      sortDir,
+      MEDIA_ASSET_SORT_FIELDS,
+      'createdAt',
+    ) as Prisma.MediaAssetOrderByWithRelationInput;
+
     const [rows, total] = await Promise.all([
       prisma.mediaAsset.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         take: limit,
         skip: offset,
         select: {
@@ -186,9 +214,19 @@ export const adminMediaHandlers = {
   listJobs: asyncHandler(async (req: Request, res: Response) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const sortBy =
+      typeof req.query.sortBy === 'string' ? req.query.sortBy : undefined;
+    const sortDir =
+      typeof req.query.sortDir === 'string' ? req.query.sortDir : undefined;
+    const orderBy = resolveScalarOrderBy(
+      sortBy,
+      sortDir,
+      MEDIA_JOB_SORT_FIELDS,
+      'createdAt',
+    ) as Prisma.MediaJobOrderByWithRelationInput;
     const [rows, total] = await Promise.all([
       prisma.mediaJob.findMany({
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         take: limit,
         skip: offset,
       }),

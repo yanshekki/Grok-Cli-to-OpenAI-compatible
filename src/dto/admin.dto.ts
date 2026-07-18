@@ -18,6 +18,10 @@ export const adminListQuerySchema = z.object({
   refresh: z
     .union([z.boolean(), z.enum(['true', 'false', '1', '0'])])
     .optional(),
+  /** Whitelist field name (resource-specific); default = time column */
+  sortBy: z.string().max(64).optional(),
+  /** Default desc (newest first) */
+  sortDir: z.enum(['asc', 'desc']).optional().default('desc'),
 });
 
 export type AdminListQueryDto = z.infer<typeof adminListQuerySchema>;

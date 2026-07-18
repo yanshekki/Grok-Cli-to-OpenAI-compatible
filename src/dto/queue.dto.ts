@@ -27,6 +27,8 @@ export const queueJobListQuerySchema = z.object({
   apiKeyId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
+  sortBy: z.string().max(64).optional(),
+  sortDir: z.enum(['asc', 'desc']).optional().default('desc'),
 });
 
 export type QueueJobListQueryDto = z.infer<typeof queueJobListQuerySchema>;

@@ -42,9 +42,31 @@ export const adminCoreHandlers = {
     const toRaw = typeof req.query.to === 'string' ? req.query.to : undefined;
     const from = fromRaw ? new Date(fromRaw) : undefined;
     const to = toRaw ? new Date(toRaw) : undefined;
+    const sortBy =
+      typeof req.query.sortBy === 'string' ? req.query.sortBy : undefined;
+    const sortDirRaw =
+      typeof req.query.sortDir === 'string' ? req.query.sortDir : undefined;
+    const sortDir =
+      sortDirRaw === 'asc' || sortDirRaw === 'desc' ? sortDirRaw : undefined;
+    const modelSortBy =
+      typeof req.query.modelSortBy === 'string'
+        ? req.query.modelSortBy
+        : undefined;
+    const modelSortDirRaw =
+      typeof req.query.modelSortDir === 'string'
+        ? req.query.modelSortDir
+        : undefined;
+    const modelSortDir =
+      modelSortDirRaw === 'asc' || modelSortDirRaw === 'desc'
+        ? modelSortDirRaw
+        : undefined;
     const data = await usageService.getSummary({
       from: from && !Number.isNaN(from.getTime()) ? from : undefined,
       to: to && !Number.isNaN(to.getTime()) ? to : undefined,
+      sortBy,
+      sortDir,
+      modelSortBy,
+      modelSortDir,
     });
     res.json({ object: 'admin.usage', data });
   }),

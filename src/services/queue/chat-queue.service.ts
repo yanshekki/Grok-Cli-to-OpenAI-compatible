@@ -11,6 +11,7 @@ import { ExceptionFactory } from '../../exceptions/exception.factory';
 import { createId } from '../../utils/id';
 import { toBytes } from '../../utils/prisma-bytes';
 import { logger } from '../../utils/logger';
+import { resolveScalarOrderBy } from '../../utils/list-sort';
 import { encryptionService } from '../encryption.service';
 import { decideIdempotency, pickNextClaimCandidate } from './fair-claim';
 import type {
@@ -22,6 +23,16 @@ import { queuePolicyService, type QueuePolicy } from './queue-policy.service';
 import { jobWaiterRegistry } from './job-waiter';
 
 const WORKER_ID = `w_${randomBytes(6).toString('hex')}`;
+
+const QUEUE_JOB_SORT_FIELDS = [
+  'queuedAt',
+  'priority',
+  'status',
+  'model',
+  'attempt',
+  'startedAt',
+  'finishedAt',
+] as const;
 
 const ACTIVE_STATUSES = [
   CHAT_JOB_STATUS.QUEUED,
@@ -491,6 +502,8 @@ export class ChatQueueService implements ChatQueueBackend {
     apiKeyId?: string;
     limit: number;
     offset: number;
+    sortBy?: string;
+    sortDir?: 'asc' | 'desc';
   }) {
     const where: Record<string, unknown> = {};
     if (query.status === 'active' || query.status === 'in_flight') {
@@ -501,10 +514,18 @@ export class ChatQueueService implements ChatQueueBackend {
       where.status = query.status;
     }
     if (query.apiKeyId) where.apiKeyId = query.apiKeyId;
+
+    const orderBy = resolveScalarOrderBy(
+      query.sortBy,
+      query.sortDir,
+      QUEUE_JOB_SORT_FIELDS,
+      'queuedAt',
+    );
+
     const [rows, total] = await Promise.all([
       prisma.chatJob.findMany({
         where,
-        orderBy: [{ priority: 'asc' }, { queuedAt: 'desc' }],
+        orderBy,
         take: query.limit,
         skip: query.offset,
         select: {

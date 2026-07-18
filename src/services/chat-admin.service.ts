@@ -3,8 +3,16 @@ import { prisma } from '../config/database';
 import { AUDIT_ACTIONS } from '../config/constants';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import type { ChatListQuery } from '../interfaces/chat-list-query.interface';
+import { resolveScalarOrderBy } from '../utils/list-sort';
 import { encryptionService } from './encryption.service';
 import { auditService } from './audit.service';
+
+const CHAT_SORT_FIELDS = [
+  'createdAt',
+  'status',
+  'model',
+  'durationMs',
+] as const;
 
 
 function decryptField(
@@ -104,10 +112,17 @@ export class ChatAdminService {
       ];
     }
 
+    const orderBy = resolveScalarOrderBy(
+      query.sortBy,
+      query.sortDir,
+      CHAT_SORT_FIELDS,
+      'createdAt',
+    ) as Prisma.ChatRequestOrderByWithRelationInput;
+
     const [rows, total] = await Promise.all([
       prisma.chatRequest.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         take: limit,
         skip: offset,
         include: {

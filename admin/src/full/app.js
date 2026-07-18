@@ -125,6 +125,8 @@ const state = {
     to: '',
     policyMode: '',
     hasDocuments: '',
+    sortBy: 'createdAt',
+    sortDir: 'desc',
     limit: 50,
     offset: 0,
   },
@@ -134,6 +136,8 @@ const state = {
     storageType: '',
     from: '',
     to: '',
+    sortBy: 'createdAt',
+    sortDir: 'desc',
     limit: 20,
     offset: 0,
   },
@@ -142,6 +146,8 @@ const state = {
     role: '',
     mode: '',
     isActive: '',
+    sortBy: 'createdAt',
+    sortDir: 'desc',
     limit: 20,
     offset: 0,
   },
@@ -151,6 +157,8 @@ const state = {
     apiKeyId: '',
     from: '',
     to: '',
+    sortBy: 'createdAt',
+    sortDir: 'desc',
     limit: 50,
     offset: 0,
   },
@@ -162,6 +170,12 @@ const state = {
     modelPage: 0,
     keyPage: 0,
     pageSize: 10,
+    /** perKey: default lastUsedAt desc */
+    sortBy: 'lastUsedAt',
+    sortDir: 'desc',
+    /** byModel: no time column — default requests desc */
+    modelSortBy: 'requests',
+    modelSortDir: 'desc',
   },
   ddosFilter: {
     /** 'policy' | 'live' | 'blacklist' | 'events' */
@@ -172,6 +186,12 @@ const state = {
     livePage: 0,
     banPage: 0,
     pageSize: 15,
+    liveSortBy: 'startedAt',
+    liveSortDir: 'desc',
+    banSortBy: 'createdAt',
+    banSortDir: 'desc',
+    eventSortBy: 'at',
+    eventSortDir: 'desc',
   },
   mediaFilter: {
     /** 'studio' | 'assets' | 'jobs' — same tab pattern as chat queue */
@@ -181,6 +201,10 @@ const state = {
     provider: '',
     from: '',
     to: '',
+    sortBy: 'createdAt',
+    sortDir: 'desc',
+    jobSortBy: 'createdAt',
+    jobSortDir: 'desc',
     limit: 20,
     offset: 0,
   },
@@ -1166,6 +1190,60 @@ function dataTablePanelHtml({ headHtml, bodyHtml, colSpan, emptyText, pagerHtml:
     </div>`;
 }
 
+/** Append server-side sort query params (default time desc when omitted on API). */
+function appendSortParams(params, filterRef, sortByKey = 'sortBy', sortDirKey = 'sortDir') {
+  const by = filterRef?.[sortByKey];
+  const dir = filterRef?.[sortDirKey];
+  if (by) params.set('sortBy', String(by));
+  if (dir === 'asc' || dir === 'desc') params.set('sortDir', dir);
+  return params;
+}
+
+/**
+ * Sortable table header cell. Click cycles: defaultDesc field → asc → desc.
+ * @param {{ field: string, label: string, filterRef: object, sortByKey?: string, sortDirKey?: string }} opts
+ */
+function sortThHtml({
+  field,
+  label,
+  filterRef,
+  sortByKey = 'sortBy',
+  sortDirKey = 'sortDir',
+}) {
+  const active = filterRef?.[sortByKey] === field;
+  const dir = active ? filterRef?.[sortDirKey] || 'desc' : '';
+  const aria =
+    active && dir === 'asc' ? 'ascending' : active && dir === 'desc' ? 'descending' : 'none';
+  const indicator = active ? (dir === 'asc' ? ' ▲' : ' ▼') : '';
+  return `<th class="th-sort${active ? ' is-sorted' : ''}" data-sort-field="${escapeHtml(field)}" data-sort-by-key="${escapeHtml(sortByKey)}" data-sort-dir-key="${escapeHtml(sortDirKey)}" aria-sort="${aria}" title="${escapeHtml(t('common.sortHint') || 'Sort')}"><button type="button" class="th-sort-btn">${escapeHtml(label)}<span class="th-sort-ind" aria-hidden="true">${indicator}</span></button></th>`;
+}
+
+/** Bind click on [data-sort-field] headers; toggles sort on filterRef and reloads. */
+function bindSortHeaders(filterRef, reload) {
+  document.querySelectorAll('th.th-sort[data-sort-field]').forEach((th) => {
+    const btn = th.querySelector('.th-sort-btn') || th;
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const field = th.getAttribute('data-sort-field');
+      if (!field || !filterRef) return;
+      const byKey = th.getAttribute('data-sort-by-key') || 'sortBy';
+      const dirKey = th.getAttribute('data-sort-dir-key') || 'sortDir';
+      if (filterRef[byKey] === field) {
+        filterRef[dirKey] = filterRef[dirKey] === 'asc' ? 'desc' : 'asc';
+      } else {
+        filterRef[byKey] = field;
+        filterRef[dirKey] = 'desc';
+      }
+      if ('offset' in filterRef) filterRef.offset = 0;
+      if ('modelPage' in filterRef && byKey === 'modelSortBy') filterRef.modelPage = 0;
+      if ('keyPage' in filterRef && byKey === 'sortBy') filterRef.keyPage = 0;
+      if ('livePage' in filterRef && byKey === 'liveSortBy') filterRef.livePage = 0;
+      if ('banPage' in filterRef && byKey === 'banSortBy') filterRef.banPage = 0;
+      reload();
+    });
+  });
+}
+
 function pagerHtml({ total, limit, offset, idPrefix }) {
   const pages = Math.max(1, Math.ceil((total || 0) / limit) || 1);
   const page = Math.floor(offset / limit) + 1;
@@ -1842,6 +1920,7 @@ async function renderChats() {
   }
   if (f.policyMode) q.set('policyMode', f.policyMode);
   if (f.hasDocuments !== '') q.set('hasDocuments', f.hasDocuments);
+  appendSortParams(q, f);
 
   const data = await api(`/chats?${q}`);
   const total = data.total || 0;
@@ -1882,6 +1961,7 @@ async function renderChats() {
       </td>
       <td class="chats-preview-cell"><div class="muted preview-text">${escapeHtml(c.contentPreview)}</div></td>
       <td>${fmtTime(c.createdAt)}</td>
+      <td class="muted">${c.durationMs != null ? fmtMs(c.durationMs) : '—'}</td>
     </tr>`;
     })
     .join('');
@@ -1936,14 +2016,15 @@ async function renderChats() {
     headHtml: `
       <th>${escapeHtml(t('chats.request'))}</th>
       <th>${escapeHtml(t('chats.apiKey'))}</th>
-      <th>${escapeHtml(t('chats.model'))}</th>
-      <th>${escapeHtml(t('chats.status'))}</th>
+      ${sortThHtml({ field: 'model', label: t('chats.model'), filterRef: f })}
+      ${sortThHtml({ field: 'status', label: t('chats.status'), filterRef: f })}
       <th>${escapeHtml(t('chats.attachments'))}</th>
       <th>${escapeHtml(t('chats.prompt'))}</th>
       <th>${escapeHtml(t('chats.response'))}</th>
-      <th>${escapeHtml(t('chats.time'))}</th>`,
+      ${sortThHtml({ field: 'createdAt', label: t('chats.time'), filterRef: f })}
+      ${sortThHtml({ field: 'durationMs', label: t('ddos.duration'), filterRef: f })}`,
     bodyHtml,
-    colSpan: 8,
+    colSpan: 9,
     emptyText: t('common.empty'),
     pagerHtml: pagerHtml({
       total,
@@ -1963,6 +2044,7 @@ async function renderChats() {
   `);
   bindShell();
   bindPager('chats', state.chatFilter, () => renderChats().catch(onErr));
+  bindSortHeaders(state.chatFilter, () => renderChats().catch(onErr));
 
   const applyFilter = () => {
     state.chatFilter.q = document.getElementById('f-q').value.trim();
@@ -1993,6 +2075,8 @@ async function renderChats() {
       to: '',
       policyMode: '',
       hasDocuments: '',
+      sortBy: 'createdAt',
+      sortDir: 'desc',
       limit: 50,
       offset: 0,
     };
@@ -2139,6 +2223,7 @@ async function renderKeys() {
   if (f.role) q.set('role', f.role);
   if (f.mode) q.set('mode', f.mode);
   if (f.isActive !== '') q.set('isActive', f.isActive);
+  appendSortParams(q, f);
   const res = await api(`/keys?${q}`);
   const data = res.data || [];
   const total = res.total ?? data.length;
@@ -2208,11 +2293,15 @@ async function renderKeys() {
 
   const table = dataTablePanelHtml({
     headHtml: `
-      <th>${escapeHtml(t('keys.name'))}</th><th>${escapeHtml(t('keys.role'))}</th>
-      <th>${escapeHtml(t('keys.mode'))}</th><th>${escapeHtml(t('keys.rate'))}</th>
+      ${sortThHtml({ field: 'name', label: t('keys.name'), filterRef: f })}
+      ${sortThHtml({ field: 'role', label: t('keys.role'), filterRef: f })}
+      ${sortThHtml({ field: 'mode', label: t('keys.mode'), filterRef: f })}
+      ${sortThHtml({ field: 'rateLimit', label: t('keys.rate'), filterRef: f })}
       <th>${escapeHtml(t('keys.ipWhitelistCol'))}</th>
-      <th>${escapeHtml(t('keys.usage24'))}</th><th>${escapeHtml(t('keys.status'))}</th>
-      <th>${escapeHtml(t('keys.created'))}</th><th>${escapeHtml(t('common.actions'))}</th>`,
+      <th>${escapeHtml(t('keys.usage24'))}</th>
+      ${sortThHtml({ field: 'isActive', label: t('keys.status'), filterRef: f })}
+      ${sortThHtml({ field: 'createdAt', label: t('keys.created'), filterRef: f })}
+      <th>${escapeHtml(t('common.actions'))}</th>`,
     bodyHtml,
     colSpan: 9,
     emptyText: t('keys.empty'),
@@ -2236,6 +2325,7 @@ async function renderKeys() {
   `);
   bindShell();
   bindPager('keys', state.keyFilter, () => renderKeys().catch(onErr));
+  bindSortHeaders(state.keyFilter, () => renderKeys().catch(onErr));
   document.querySelector('[data-filter-apply]').onclick = () => {
     state.keyFilter.q = document.getElementById('kf-q').value.trim();
     state.keyFilter.role = document.getElementById('kf-role').value;
@@ -2250,6 +2340,8 @@ async function renderKeys() {
       role: '',
       mode: '',
       isActive: '',
+      sortBy: 'createdAt',
+      sortDir: 'desc',
       limit: 20,
       offset: 0,
     };
@@ -2422,6 +2514,7 @@ async function renderDocuments() {
     end.setHours(23, 59, 59, 999);
     params.set('to', end.toISOString());
   }
+  appendSortParams(params, f);
   const data = await api(`/documents?${params}`);
   const total = data.total ?? 0;
   const meta = data.meta || {};
@@ -2487,12 +2580,12 @@ async function renderDocuments() {
 
   const table = dataTablePanelHtml({
     headHtml: `
-      <th>${escapeHtml(t('docs.file'))}</th>
+      ${sortThHtml({ field: 'originalName', label: t('docs.file'), filterRef: f })}
       <th>${escapeHtml(t('chats.apiKey'))}</th>
-      <th>${escapeHtml(t('docs.mime'))}</th>
-      <th>${escapeHtml(t('docs.size'))}</th>
-      <th>${escapeHtml(t('docs.storage'))}</th>
-      <th>${escapeHtml(t('docs.time'))}</th>
+      ${sortThHtml({ field: 'mimeType', label: t('docs.mime'), filterRef: f })}
+      ${sortThHtml({ field: 'sizeBytes', label: t('docs.size'), filterRef: f })}
+      ${sortThHtml({ field: 'storageType', label: t('docs.storage'), filterRef: f })}
+      ${sortThHtml({ field: 'createdAt', label: t('docs.time'), filterRef: f })}
       <th>${escapeHtml(t('common.actions'))}</th>`,
     bodyHtml,
     colSpan: 7,
@@ -2515,6 +2608,7 @@ async function renderDocuments() {
   `);
   bindShell();
   bindPager('docs', state.docFilter, () => renderDocuments().catch(onErr));
+  bindSortHeaders(state.docFilter, () => renderDocuments().catch(onErr));
   document.querySelector('[data-filter-apply]').onclick = () => {
     state.docFilter.q = document.getElementById('df-q').value.trim();
     state.docFilter.apiKeyId = document.getElementById('df-key').value;
@@ -2531,6 +2625,8 @@ async function renderDocuments() {
       storageType: '',
       from: '',
       to: '',
+      sortBy: 'createdAt',
+      sortDir: 'desc',
       limit: 20,
       offset: 0,
     };
@@ -2709,6 +2805,7 @@ async function renderAudit() {
     end.setHours(23, 59, 59, 999);
     q.set('to', end.toISOString());
   }
+  appendSortParams(q, f);
   const data = await api(`/audit-logs?${q}`);
   const total = data.total ?? 0;
   const actions = [
@@ -2781,9 +2878,9 @@ async function renderAudit() {
 
   const table = dataTablePanelHtml({
     headHtml: `
-      <th>${escapeHtml(t('audit.time'))}</th>
-      <th>${escapeHtml(t('audit.action'))}</th>
-      <th>${escapeHtml(t('audit.resource'))}</th>
+      ${sortThHtml({ field: 'createdAt', label: t('audit.time'), filterRef: f })}
+      ${sortThHtml({ field: 'action', label: t('audit.action'), filterRef: f })}
+      ${sortThHtml({ field: 'resource', label: t('audit.resource'), filterRef: f })}
       <th>${escapeHtml(t('audit.key'))}</th>
       <th>${escapeHtml(t('audit.meta'))}</th>`,
     bodyHtml,
@@ -2806,6 +2903,7 @@ async function renderAudit() {
   `);
   bindShell();
   bindPager('audit', state.auditFilter, () => renderAudit().catch(onErr));
+  bindSortHeaders(state.auditFilter, () => renderAudit().catch(onErr));
   document.querySelector('[data-filter-apply]').onclick = () => {
     state.auditFilter.q = document.getElementById('af-q').value.trim();
     state.auditFilter.action = document.getElementById('af-action').value;
@@ -2822,6 +2920,8 @@ async function renderAudit() {
       apiKeyId: '',
       from: '',
       to: '',
+      sortBy: 'createdAt',
+      sortDir: 'desc',
       limit: 50,
       offset: 0,
     };
@@ -3444,10 +3544,18 @@ async function renderMedia() {
       provider: '',
       from: '',
       to: '',
+      sortBy: 'createdAt',
+      sortDir: 'desc',
+      jobSortBy: 'createdAt',
+      jobSortDir: 'desc',
       limit: 20,
       offset: 0,
     };
   }
+  if (!state.mediaFilter.sortBy) state.mediaFilter.sortBy = 'createdAt';
+  if (!state.mediaFilter.sortDir) state.mediaFilter.sortDir = 'desc';
+  if (!state.mediaFilter.jobSortBy) state.mediaFilter.jobSortBy = 'createdAt';
+  if (!state.mediaFilter.jobSortDir) state.mediaFilter.jobSortDir = 'desc';
   if (!state.mediaFilter.tab) state.mediaFilter.tab = 'studio';
   const f = state.mediaFilter;
   const tab =
@@ -3469,6 +3577,10 @@ async function renderMedia() {
     end.setHours(23, 59, 59, 999);
     params.set('to', end.toISOString());
   }
+  appendSortParams(params, f);
+
+  const jobParams = new URLSearchParams({ limit: '50', offset: '0' });
+  appendSortParams(jobParams, f, 'jobSortBy', 'jobSortDir');
 
   // Keys + full model catalog (all Grok models + system default) + assets/jobs
   const [catalog, , assetsRes, jobsRes] = await Promise.all([
@@ -3478,7 +3590,7 @@ async function renderMedia() {
     })),
     loadKeys().catch(() => {}),
     api(`/media/assets?${params}`),
-    api('/media/jobs?limit=50').catch(() => ({ data: [], total: 0 })),
+    api(`/media/jobs?${jobParams}`).catch(() => ({ data: [], total: 0 })),
   ]);
   const assets = assetsRes.data || [];
   const assetsTotal = assetsRes.total ?? assets.length;
@@ -3589,12 +3701,12 @@ async function renderMedia() {
   const assetsTable = dataTablePanelHtml({
     headHtml: `
       <th>ID</th>
-      <th>${escapeHtml(t('media.kind'))}</th>
-      <th>MIME</th>
-      <th>${escapeHtml(t('media.bytes'))}</th>
-      <th>${escapeHtml(t('media.provider'))}</th>
+      ${sortThHtml({ field: 'kind', label: t('media.kind'), filterRef: f })}
+      ${sortThHtml({ field: 'mime', label: 'MIME', filterRef: f })}
+      ${sortThHtml({ field: 'byteSize', label: t('media.bytes'), filterRef: f })}
+      ${sortThHtml({ field: 'provider', label: t('media.provider'), filterRef: f })}
       <th>${escapeHtml(t('media.prompt'))}</th>
-      <th>${escapeHtml(t('media.created'))}</th>
+      ${sortThHtml({ field: 'createdAt', label: t('media.created'), filterRef: f })}
       <th>${escapeHtml(t('common.actions'))}</th>`,
     bodyHtml,
     colSpan: 8,
@@ -3625,10 +3737,10 @@ async function renderMedia() {
   const jobsTable = dataTablePanelHtml({
     headHtml: `
       <th>ID</th>
-      <th>${escapeHtml(t('media.status'))}</th>
+      ${sortThHtml({ field: 'status', label: t('media.status'), filterRef: f, sortByKey: 'jobSortBy', sortDirKey: 'jobSortDir' })}
       <th>${escapeHtml(t('media.prompt'))}</th>
       <th>Asset</th>
-      <th>${escapeHtml(t('media.created'))}</th>`,
+      ${sortThHtml({ field: 'createdAt', label: t('media.created'), filterRef: f, sortByKey: 'jobSortBy', sortDirKey: 'jobSortDir' })}`,
     bodyHtml: jobRows,
     colSpan: 5,
     emptyText: t('media.jobsEmpty'),
@@ -4137,6 +4249,9 @@ async function renderMedia() {
     });
   }
 
+  if (tab === 'assets' || tab === 'jobs') {
+    bindSortHeaders(state.mediaFilter, () => renderMedia().catch(onErr));
+  }
   if (tab === 'assets') {
     bindPager('media', state.mediaFilter, () => renderMedia().catch(onErr));
 
@@ -4166,6 +4281,10 @@ async function renderMedia() {
           provider: '',
           from: '',
           to: '',
+          sortBy: 'createdAt',
+          sortDir: 'desc',
+          jobSortBy: 'createdAt',
+          jobSortDir: 'desc',
           limit: 20,
           offset: 0,
         };
@@ -4434,10 +4553,20 @@ async function openMediaSourceLibraryPicker(opts) {
 }
 
 async function renderUsage() {
-  const { data } = await api('/usage');
+  const uf = state.usageFilter;
+  if (!uf.sortBy) uf.sortBy = 'lastUsedAt';
+  if (!uf.sortDir) uf.sortDir = 'desc';
+  if (!uf.modelSortBy) uf.modelSortBy = 'requests';
+  if (!uf.modelSortDir) uf.modelSortDir = 'desc';
+  const uq = new URLSearchParams();
+  appendSortParams(uq, uf);
+  if (uf.modelSortBy) uq.set('modelSortBy', uf.modelSortBy);
+  if (uf.modelSortDir === 'asc' || uf.modelSortDir === 'desc') {
+    uq.set('modelSortDir', uf.modelSortDir);
+  }
+  const { data } = await api(`/usage?${uq}`);
   const tot = data.totals || {};
   const limits = data.limits || {};
-  const uf = state.usageFilter;
   const ps = uf.pageSize || 10;
 
   let models = data.byModel || [];
@@ -4479,6 +4608,7 @@ async function renderUsage() {
           <div class="usage-bar ${util > 80 ? 'warn' : ''}"><span style="width:${util}%"></span></div>
         </td>
         <td>${k.isActive ? `<span class="badge success">${escapeHtml(t('common.active'))}</span>` : `<span class="badge error">${escapeHtml(t('common.revoked'))}</span>`}</td>
+        <td class="muted">${k.lastUsedAt ? fmtTime(k.lastUsedAt) : '—'}</td>
       </tr>`;
     })
     .join('');
@@ -4504,7 +4634,9 @@ async function renderUsage() {
     gridHtml: '',
   });
   const modelTable = dataTablePanelHtml({
-    headHtml: `<th>${escapeHtml(t('chats.model'))}</th><th>${escapeHtml(t('usage.requests'))}</th>`,
+    headHtml: `
+      ${sortThHtml({ field: 'model', label: t('chats.model'), filterRef: uf, sortByKey: 'modelSortBy', sortDirKey: 'modelSortDir' })}
+      ${sortThHtml({ field: 'requests', label: t('usage.requests'), filterRef: uf, sortByKey: 'modelSortBy', sortDirKey: 'modelSortDir' })}`,
     bodyHtml: modelRows,
     colSpan: 2,
     emptyText: t('common.empty'),
@@ -4524,13 +4656,14 @@ async function renderUsage() {
   });
   const keyTable = dataTablePanelHtml({
     headHtml: `
-      <th>${escapeHtml(t('keys.name'))}</th>
-      <th>${escapeHtml(t('usage.requests'))}</th>
-      <th>${escapeHtml(t('usage.rateLimit'))}</th>
-      <th>${escapeHtml(t('usage.util'))}</th>
-      <th>${escapeHtml(t('keys.status'))}</th>`,
+      ${sortThHtml({ field: 'name', label: t('keys.name'), filterRef: uf })}
+      ${sortThHtml({ field: 'requests', label: t('usage.requests'), filterRef: uf })}
+      ${sortThHtml({ field: 'rateLimit', label: t('usage.rateLimit'), filterRef: uf })}
+      ${sortThHtml({ field: 'utilization', label: t('usage.util'), filterRef: uf })}
+      ${sortThHtml({ field: 'isActive', label: t('keys.status'), filterRef: uf })}
+      ${sortThHtml({ field: 'lastUsedAt', label: t('usage.lastUsed') || t('media.created'), filterRef: uf })}`,
     bodyHtml: keyRows,
-    colSpan: 5,
+    colSpan: 6,
     emptyText: t('common.empty'),
     pagerHtml: keyPager,
   });
@@ -4586,6 +4719,7 @@ async function renderUsage() {
     </div>
   `);
   bindShell();
+  bindSortHeaders(state.usageFilter, () => renderUsage().catch(onErr));
   document.getElementById('btn-usage-refresh').onclick = () =>
     renderUsage().catch(onErr);
 
@@ -5402,17 +5536,31 @@ async function renderDdos(opts = {}) {
     ddosTimer = null;
   }
 
+  const df = state.ddosFilter;
+  if (!df.liveSortBy) df.liveSortBy = 'startedAt';
+  if (!df.liveSortDir) df.liveSortDir = 'desc';
+  if (!df.banSortBy) df.banSortBy = 'createdAt';
+  if (!df.banSortDir) df.banSortDir = 'desc';
+  if (!df.eventSortBy) df.eventSortBy = 'at';
+  if (!df.eventSortDir) df.eventSortDir = 'desc';
+
+  const connQ = new URLSearchParams();
+  appendSortParams(connQ, df, 'liveSortBy', 'liveSortDir');
+  const banQ = new URLSearchParams();
+  appendSortParams(banQ, df, 'banSortBy', 'banSortDir');
+  const evQ = new URLSearchParams();
+  appendSortParams(evQ, df, 'eventSortBy', 'eventSortDir');
+
   const fetches = [
-    api('/ddos/connections'),
-    api('/ddos/blacklist'),
+    api(`/ddos/connections?${connQ}`),
+    api(`/ddos/blacklist?${banQ}`),
     api('/ddos/stats'),
-    api('/ddos/events'),
+    api(`/ddos/events?${evQ}`),
   ];
   if (!soft) fetches.push(api('/ddos/policy'));
   const results = await Promise.all(fetches);
   const [conn, bl, st, evRes] = results;
   const policyRes = soft ? null : results[4];
-  const df = state.ddosFilter;
   const ps = df.pageSize || 15;
   let active = conn.data?.active || [];
   let recent = conn.data?.recent || [];
@@ -5620,9 +5768,12 @@ async function renderDdos(opts = {}) {
       <div class="table-wrap">
       <table class="data-table">
         <thead><tr>
-          <th>${escapeHtml(t('ddos.ip'))}</th><th>${escapeHtml(t('ddos.method'))}</th>
-          <th>${escapeHtml(t('ddos.path'))}</th><th>${escapeHtml(t('ddos.key'))}</th>
-          <th>${escapeHtml(t('ddos.state'))}</th><th>${escapeHtml(t('ddos.duration'))}</th>
+          ${sortThHtml({ field: 'ip', label: t('ddos.ip'), filterRef: df, sortByKey: 'liveSortBy', sortDirKey: 'liveSortDir' })}
+          ${sortThHtml({ field: 'method', label: t('ddos.method'), filterRef: df, sortByKey: 'liveSortBy', sortDirKey: 'liveSortDir' })}
+          ${sortThHtml({ field: 'path', label: t('ddos.path'), filterRef: df, sortByKey: 'liveSortBy', sortDirKey: 'liveSortDir' })}
+          <th>${escapeHtml(t('ddos.key'))}</th>
+          <th>${escapeHtml(t('ddos.state'))}</th>
+          ${sortThHtml({ field: 'durationMs', label: t('ddos.duration'), filterRef: df, sortByKey: 'liveSortBy', sortDirKey: 'liveSortDir' })}
           <th>${escapeHtml(t('common.actions'))}</th>
         </tr></thead>
         <tbody id="ddos-live-body">${liveRows || emptyLive}</tbody>
@@ -5635,8 +5786,11 @@ async function renderDdos(opts = {}) {
       <div class="table-wrap">
       <table class="data-table">
         <thead><tr>
-          <th>${escapeHtml(t('ddos.ip'))}</th><th>${escapeHtml(t('ddos.path'))}</th>
-          <th>${escapeHtml(t('common.httpStatus'))}</th><th>${escapeHtml(t('ddos.duration'))}</th><th>${escapeHtml(t('common.actions'))}</th>
+          ${sortThHtml({ field: 'ip', label: t('ddos.ip'), filterRef: df, sortByKey: 'liveSortBy', sortDirKey: 'liveSortDir' })}
+          ${sortThHtml({ field: 'path', label: t('ddos.path'), filterRef: df, sortByKey: 'liveSortBy', sortDirKey: 'liveSortDir' })}
+          ${sortThHtml({ field: 'statusCode', label: t('common.httpStatus'), filterRef: df, sortByKey: 'liveSortBy', sortDirKey: 'liveSortDir' })}
+          ${sortThHtml({ field: 'durationMs', label: t('ddos.duration'), filterRef: df, sortByKey: 'liveSortBy', sortDirKey: 'liveSortDir' })}
+          <th>${escapeHtml(t('common.actions'))}</th>
         </tr></thead>
         <tbody id="ddos-recent-body">${recentRows || emptyRecent}</tbody>
       </table>
@@ -5681,8 +5835,11 @@ async function renderDdos(opts = {}) {
       <div class="table-wrap">
       <table class="data-table">
         <thead><tr>
-          <th>${escapeHtml(t('ddos.ip'))}</th><th>${escapeHtml(t('ddos.reason'))}</th>
-          <th>${escapeHtml(t('ddos.source'))}</th><th>${escapeHtml(t('ddos.expires'))}</th><th>${escapeHtml(t('common.actions'))}</th>
+          ${sortThHtml({ field: 'ip', label: t('ddos.ip'), filterRef: df, sortByKey: 'banSortBy', sortDirKey: 'banSortDir' })}
+          ${sortThHtml({ field: 'reason', label: t('ddos.reason'), filterRef: df, sortByKey: 'banSortBy', sortDirKey: 'banSortDir' })}
+          ${sortThHtml({ field: 'source', label: t('ddos.source'), filterRef: df, sortByKey: 'banSortBy', sortDirKey: 'banSortDir' })}
+          ${sortThHtml({ field: 'expiresAt', label: t('ddos.expires'), filterRef: df, sortByKey: 'banSortBy', sortDirKey: 'banSortDir' })}
+          <th>${escapeHtml(t('common.actions'))}</th>
         </tr></thead>
         <tbody id="ddos-ban-body">${banRows || emptyBan}</tbody>
       </table>
@@ -5698,11 +5855,11 @@ async function renderDdos(opts = {}) {
       <div class="table-wrap">
       <table class="data-table">
         <thead><tr>
-          <th>${escapeHtml(t('ddos.eventTime'))}</th>
-          <th>${escapeHtml(t('ddos.ip'))}</th>
-          <th>${escapeHtml(t('ddos.eventSource'))}</th>
-          <th>${escapeHtml(t('ddos.reason'))}</th>
-          <th>${escapeHtml(t('ddos.eventDuration'))}</th>
+          ${sortThHtml({ field: 'at', label: t('ddos.eventTime'), filterRef: df, sortByKey: 'eventSortBy', sortDirKey: 'eventSortDir' })}
+          ${sortThHtml({ field: 'ip', label: t('ddos.ip'), filterRef: df, sortByKey: 'eventSortBy', sortDirKey: 'eventSortDir' })}
+          ${sortThHtml({ field: 'source', label: t('ddos.eventSource'), filterRef: df, sortByKey: 'eventSortBy', sortDirKey: 'eventSortDir' })}
+          ${sortThHtml({ field: 'reason', label: t('ddos.reason'), filterRef: df, sortByKey: 'eventSortBy', sortDirKey: 'eventSortDir' })}
+          ${sortThHtml({ field: 'durationMs', label: t('ddos.eventDuration'), filterRef: df, sortByKey: 'eventSortBy', sortDirKey: 'eventSortDir' })}
         </tr></thead>
         <tbody id="ddos-events-body">${eventRows}</tbody>
       </table>
@@ -5778,6 +5935,7 @@ async function renderDdos(opts = {}) {
   `);
     bindShell();
     bindDdosActions(true, whitelist);
+    bindSortHeaders(state.ddosFilter, () => renderDdos().catch(onErr));
 
     document.querySelectorAll('[data-ddos-tab]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -5803,6 +5961,8 @@ async function renderDdos(opts = {}) {
     });
     document.getElementById('ddos-live-filter-reset')?.addEventListener('click', () => {
       state.ddosFilter.liveQ = '';
+      state.ddosFilter.liveSortBy = 'startedAt';
+      state.ddosFilter.liveSortDir = 'desc';
       state.ddosFilter.livePage = 0;
       renderDdos().catch(onErr);
     });
@@ -5817,6 +5977,8 @@ async function renderDdos(opts = {}) {
     document.getElementById('ddos-ban-filter-reset')?.addEventListener('click', () => {
       state.ddosFilter.banQ = '';
       state.ddosFilter.banSource = '';
+      state.ddosFilter.banSortBy = 'createdAt';
+      state.ddosFilter.banSortDir = 'desc';
       state.ddosFilter.banPage = 0;
       renderDdos().catch(onErr);
     });
@@ -8871,6 +9033,8 @@ const queueFilter = {
   /** 'overview' | 'jobs' | 'policy' */
   tab: 'overview',
   status: '',
+  sortBy: 'queuedAt',
+  sortDir: 'desc',
   limit: 20,
   offset: 0,
 };
@@ -9495,10 +9659,13 @@ async function renderQueue(opts = {}) {
   const savedScroll = !soft && scrollEl ? scrollEl.scrollTop : 0;
 
   const f = queueFilter;
+  if (!f.sortBy) f.sortBy = 'queuedAt';
+  if (!f.sortDir) f.sortDir = 'desc';
   const q = new URLSearchParams();
   q.set('limit', String(f.limit));
   q.set('offset', String(f.offset));
   if (f.status) q.set('status', f.status);
+  appendSortParams(q, f);
 
   const [statsRes, jobsRes, policyRes] = await Promise.all([
     api('/queue/stats'),
@@ -9560,12 +9727,12 @@ async function renderQueue(opts = {}) {
     headHtml: `
       <th>${escapeHtml(t('queue.colJob'))}</th>
       <th>${escapeHtml(t('queue.colSource'))}</th>
-      <th>${escapeHtml(t('queue.colStatus'))}</th>
-      <th>${escapeHtml(t('queue.colModel'))}</th>
-      <th>${escapeHtml(t('queue.colPri'))}</th>
+      ${sortThHtml({ field: 'status', label: t('queue.colStatus'), filterRef: f })}
+      ${sortThHtml({ field: 'model', label: t('queue.colModel'), filterRef: f })}
+      ${sortThHtml({ field: 'priority', label: t('queue.colPri'), filterRef: f })}
       <th>${escapeHtml(t('queue.colKey'))}</th>
-      <th>${escapeHtml(t('queue.colTry'))}</th>
-      <th>${escapeHtml(t('queue.colTime'))}</th>
+      ${sortThHtml({ field: 'attempt', label: t('queue.colTry'), filterRef: f })}
+      ${sortThHtml({ field: 'queuedAt', label: t('queue.colTime'), filterRef: f })}
       <th>${escapeHtml(t('common.actions'))}</th>`,
     bodyHtml,
     colSpan: 9,
@@ -9939,12 +10106,15 @@ async function renderQueue(opts = {}) {
   document.querySelectorAll('[data-filter-reset]').forEach((btn) => {
     btn.onclick = () => {
       queueFilter.status = '';
+      queueFilter.sortBy = 'queuedAt';
+      queueFilter.sortDir = 'desc';
       queueFilter.offset = 0;
       renderQueue().catch(onErr);
     };
   });
 
   bindPager('queue', queueFilter, () => renderQueue().catch(onErr));
+  bindSortHeaders(queueFilter, () => renderQueue().catch(onErr));
 
   document.getElementById('qp-save').onclick = async () => {
     const body = readQueuePolicyForm();

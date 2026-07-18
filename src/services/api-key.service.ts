@@ -23,6 +23,17 @@ import {
 } from '../utils/role-normalize';
 import { parseIpList, serializeIpList } from '../utils/ip-match';
 import { auditService } from './audit.service';
+import { resolveScalarOrderBy } from '../utils/list-sort';
+
+const API_KEY_SORT_FIELDS = [
+  'createdAt',
+  'name',
+  'role',
+  'mode',
+  'rateLimit',
+  'isActive',
+  'lastUsedAt',
+] as const;
 
 /** Re-export crypto helpers for callers that imported from this service. */
 export {
@@ -190,6 +201,8 @@ export class ApiKeyService {
     limit?: number;
     offset?: number;
     all?: boolean;
+    sortBy?: string;
+    sortDir?: 'asc' | 'desc';
   }): Promise<{ data: ApiKeyPublicEntity[]; total: number; limit: number; offset: number }> {
     const where: {
       role?: string;
@@ -208,11 +221,18 @@ export class ApiKeyService {
       ];
     }
 
+    const orderBy = resolveScalarOrderBy(
+      query?.sortBy,
+      query?.sortDir,
+      API_KEY_SORT_FIELDS,
+      'createdAt',
+    );
+
     const total = await prisma.apiKey.count({ where });
     if (query?.all) {
       const rows = await prisma.apiKey.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
       });
       return {
         data: rows.map(mapPublic),
@@ -226,7 +246,7 @@ export class ApiKeyService {
     const offset = Math.max(query?.offset ?? 0, 0);
     const rows = await prisma.apiKey.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy,
       take: limit,
       skip: offset,
     });

@@ -1,8 +1,18 @@
 import { prisma } from '../config/database';
 import { env } from '../config/env';
+import { sortInMemory } from '../utils/list-sort';
 
 export class UsageService {
-  async getSummary(options?: { from?: Date; to?: Date }) {
+  async getSummary(options?: {
+    from?: Date;
+    to?: Date;
+    /** perKey table sort (default lastUsedAt desc) */
+    sortBy?: string;
+    sortDir?: 'asc' | 'desc';
+    /** byModel table sort (default requests desc — no time column) */
+    modelSortBy?: string;
+    modelSortDir?: 'asc' | 'desc';
+  }) {
     const to = options?.to ?? new Date();
     const from =
       options?.from ?? new Date(to.getTime() - 24 * 60 * 60 * 1000);
@@ -49,7 +59,7 @@ export class UsageService {
       Math.round((to.getTime() - from.getTime()) / 60_000),
     );
 
-    const perKey = byKey.map((row) => {
+    let perKey = byKey.map((row) => {
       const meta = keyMap.get(row.apiKeyId);
       const count = row._count._all;
       const limitPerMin = meta?.rateLimit ?? 60;
@@ -90,7 +100,34 @@ export class UsageService {
       }
     }
 
-    perKey.sort((a, b) => b.requests - a.requests);
+    perKey = sortInMemory(
+      perKey,
+      options?.sortBy,
+      options?.sortDir,
+      {
+        lastUsedAt: (r) => r.lastUsedAt,
+        requests: (r) => r.requests,
+        name: (r) => r.name,
+        rateLimit: (r) => r.rateLimit,
+        utilization: (r) => r.utilization,
+        isActive: (r) => (r.isActive ? 1 : 0),
+      },
+      'lastUsedAt',
+    );
+
+    const modelsSorted = sortInMemory(
+      byModel.map((m) => ({
+        model: m.model,
+        requests: m._count._all,
+      })),
+      options?.modelSortBy,
+      options?.modelSortDir,
+      {
+        model: (r) => r.model,
+        requests: (r) => r.requests,
+      },
+      'requests',
+    );
 
     return {
       from: from.toISOString(),
@@ -102,10 +139,7 @@ export class UsageService {
         errors,
         errorRate: total > 0 ? errors / total : 0,
       },
-      byModel: byModel.map((m) => ({
-        model: m.model,
-        requests: m._count._all,
-      })),
+      byModel: modelsSorted,
       perKey,
       limits: await (async () => {
         try {

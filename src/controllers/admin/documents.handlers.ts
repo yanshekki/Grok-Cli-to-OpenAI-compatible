@@ -8,6 +8,15 @@ import { auditService } from '../../services/audit.service';
 import { documentService } from '../../services/document.service';
 import { env } from '../../config/env';
 import { requestIp } from '../../utils/client-ip';
+import { resolveScalarOrderBy } from '../../utils/list-sort';
+
+const DOC_SORT_FIELDS = [
+  'createdAt',
+  'originalName',
+  'mimeType',
+  'sizeBytes',
+  'storageType',
+] as const;
 
 /** Admin handlers: documents */
 export const adminDocumentsHandlers = {
@@ -39,10 +48,17 @@ export const adminDocumentsHandlers = {
     }
     if (Object.keys(createdAt).length) where.createdAt = createdAt;
 
+    const orderBy = resolveScalarOrderBy(
+      query.sortBy,
+      query.sortDir,
+      DOC_SORT_FIELDS,
+      'createdAt',
+    );
+
     const [rows, total] = await Promise.all([
       prisma.document.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         take: query.limit,
         skip: query.offset,
         include: {

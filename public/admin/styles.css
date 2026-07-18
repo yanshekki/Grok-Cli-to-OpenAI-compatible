@@ -867,6 +867,40 @@ table.data-table thead th {
   border-bottom: 1px solid var(--border-color);
   white-space: nowrap;
 }
+table.data-table thead th.th-sort {
+  padding: 0;
+  user-select: none;
+}
+table.data-table thead th.th-sort .th-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 11px 16px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 800;
+  font-size: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+table.data-table thead th.th-sort .th-sort-btn:hover {
+  color: var(--text-main);
+  background: rgba(59, 130, 246, 0.08);
+}
+table.data-table thead th.th-sort.is-sorted .th-sort-btn {
+  color: var(--accent, #2563eb);
+}
+table.data-table thead th.th-sort .th-sort-ind {
+  font-size: 0.65rem;
+  opacity: 0.9;
+  min-width: 0.9em;
+}
 table.data-table tbody td {
   padding: 13px 16px;
   font-size: 0.9rem;
