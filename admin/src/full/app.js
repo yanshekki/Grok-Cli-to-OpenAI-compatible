@@ -6962,6 +6962,9 @@ const chatUi = {
   reasoning: true,
   /** Grok --reasoning-effort; empty = CLI default */
   effort: '',
+  /** Grok --resume UUID */
+  resumeId: '',
+  forkSession: false,
   /** optional system prompt (sent every turn, not stored in chat history bubbles) */
   systemPrompt: '',
   systemOpen: false,
@@ -7932,6 +7935,10 @@ function captureChatUi() {
   if (reasonEl) chatUi.reasoning = reasonEl.checked;
   const effortEl = document.getElementById('chat-effort');
   if (effortEl) chatUi.effort = effortEl.value || '';
+  const resumeEl = document.getElementById('chat-resume');
+  if (resumeEl) chatUi.resumeId = resumeEl.value.trim();
+  const forkEl = document.getElementById('chat-fork');
+  if (forkEl) chatUi.forkSession = forkEl.checked;
   if (sysEl) chatUi.systemPrompt = sysEl.value;
 }
 
@@ -8064,6 +8071,15 @@ function renderChatBubbles() {
         const spendHtml = spend
           ? `<div class="muted chat-spend">${escapeHtml(spend)}</div>`
           : '';
+        const toolsHtml =
+          Array.isArray(m.tools) && m.tools.length
+            ? `<div class="chat-tools">${m.tools
+                .map(
+                  (tc) =>
+                    `<span class="chat-tool-chip" title="${escapeHtml(tc.arguments || '')}">${escapeHtml(tc.name || 'tool')}</span>`,
+                )
+                .join('')}</div>`
+            : '';
         const copyBtn =
           bodyText
             ? `<button type="button" class="chat-copy-btn" data-copy-msg="${idx}" title="${escapeHtml(t('chat.copy'))}">${escapeHtml(t('chat.copy'))}</button>`
@@ -8075,6 +8091,7 @@ function renderChatBubbles() {
         </div>
         ${docs}
         ${reasoning}
+        ${toolsHtml}
         <div class="${contentCls}" data-content-idx="${idx}">${bodyHtml}${m.streaming ? '<span class="chat-cursor">▍</span>' : ''}</div>
         ${moreBtn}
         ${spendHtml}
@@ -8168,6 +8185,9 @@ function formatChatSpend(m) {
   if (typeof usd === 'number') {
     parts.push(`${t('chat.cost')}: $${usd.toFixed(6)}`);
   }
+  if (m.grok?.sessionId) {
+    parts.push(`${t('chat.resume')}: ${m.grok.sessionId}`);
+  }
   return parts.join(' · ');
 }
 
@@ -8204,6 +8224,25 @@ function applyStreamDelta(assistant, json) {
   }
   if (json.grok && typeof json.grok === 'object') {
     assistant.grok = { ...(assistant.grok || {}), ...json.grok };
+    if (assistant.grok.sessionId) {
+      chatUi.resumeId = assistant.grok.sessionId;
+      const resumeEl = document.getElementById('chat-resume');
+      if (resumeEl) resumeEl.value = assistant.grok.sessionId;
+    }
+    changed = true;
+  }
+  const tcs = json.choices?.[0]?.delta?.tool_calls;
+  if (Array.isArray(tcs) && tcs.length) {
+    if (!Array.isArray(assistant.tools)) assistant.tools = [];
+    for (const tc of tcs) {
+      const name = tc?.function?.name || tc?.name || 'tool';
+      const args = tc?.function?.arguments || '';
+      assistant.tools.push({
+        id: tc?.id,
+        name,
+        arguments: typeof args === 'string' ? args : JSON.stringify(args || {}),
+      });
+    }
     changed = true;
   }
   // Non-stream style full message (fallback)
@@ -8693,6 +8732,13 @@ async function renderChatPlayground() {
             <button type="button" class="btn ghost sm" id="chat-system-toggle" title="${escapeHtml(t('chat.systemHint'))}">
               ${escapeHtml(t('chat.systemPrompt'))}${chatUi.systemPrompt ? ' ·' : ''}
             </button>
+            <label class="chat-ctx-label" title="${escapeHtml(t('chat.resumeHint'))}">${escapeHtml(t('chat.resume'))}
+              <input type="text" id="chat-resume" value="${escapeHtml(chatUi.resumeId || '')}" placeholder="${escapeHtml(t('chat.resumePh'))}" spellcheck="false" />
+            </label>
+            <label class="check-inline" for="chat-fork">
+              <input type="checkbox" id="chat-fork" ${chatUi.forkSession ? 'checked' : ''} />
+              ${escapeHtml(t('chat.fork'))}
+            </label>
           </div>
           <div class="chat-system-wrap" id="chat-system-wrap" ${chatUi.systemOpen || chatUi.systemPrompt ? '' : 'hidden'}>
             <label class="chat-system-label" for="chat-system">${escapeHtml(t('chat.systemPrompt'))}
@@ -8785,6 +8831,12 @@ async function renderChatPlayground() {
   document.getElementById('chat-model').onchange = () => captureChatUi();
   document.getElementById('chat-reasoning').onchange = () => captureChatUi();
   document.getElementById('chat-effort')?.addEventListener('change', () =>
+    captureChatUi(),
+  );
+  document.getElementById('chat-resume')?.addEventListener('change', () =>
+    captureChatUi(),
+  );
+  document.getElementById('chat-fork')?.addEventListener('change', () =>
     captureChatUi(),
   );
   document.getElementById('chat-system').oninput = () => captureChatUi();
@@ -9050,6 +9102,9 @@ async function sendChatMessage() {
       messages: apiMessages,
     };
     if (effort) body.reasoning_effort = effort;
+    captureChatUi();
+    if (chatUi.resumeId) body.resume = chatUi.resumeId;
+    if (chatUi.forkSession) body.fork_session = true;
     // Always pass document_ids when any attachment is in the thread
     if (docIds.length) body.document_ids = docIds;
     // Only send real key UUID — session actor is already on the Bearer token
