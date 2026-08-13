@@ -36,7 +36,7 @@ Production OpenAI-compatible HTTP gateway for local **[Grok CLI](https://x.ai)**
 |------------|:----:|:---------:|:------------------:|--------------|
 | Text + stream | ✅ | ✅ | ✅ | protocol flags |
 | Vision / image parts | ✅ | ✅ | ✅ | `vision` |
-| **Images** `/v1/images/generations` + `/edits` | ✅ OpenAI-shaped | — | — | `imagesApi` + agent key |
+| **Images** `/v1/images/generations` + `/edits` | ✅ OpenAI-shaped (`b64_json` / `url`) | — | — | `imagesApi` + `tools` + agent key |
 | **Files** `/v1/files` (docs alias) | ✅ | — | — | `filesOpenAiAlias` |
 | **Videos** `/v1/videos` | ✅ Grok `image_to_video` (1–15s) / `reference_to_video` + voices | — | — | `videoApi` |
 | **Audio** `/v1/audio/speech` + `/transcriptions` | ✅ mock or 503 | — | — | `audioApi` + provider env |
@@ -316,7 +316,7 @@ gctoac logs clear
 | Encryption | AES-256-GCM for prompts, responses, files |
 | Chat history | Multi-turn conversations, context modes (full / summary / recent) |
 | Admin Panel | OTP session login; **tabbed** pages (queue / media / system / PM2 / DDoS / API features); compact EN/ZH copy |
-| Media library | Studio (gen/edit/**1–15s video**/voices), assets & jobs, multi-format preview lightbox (`blob:` CSP-safe) |
+| Media library | Studio (gen/edit/**1–15s video**/voices), assets & jobs, multi-format preview lightbox (`blob:` CSP-safe). Generate harvests Imagine session `images/` when sandbox `output.png` is missing |
 | Chat queue | Durable SQLite jobs, fair RR, pause/drain, DLQ, Idempotency-Key, `QUEUE_BACKEND`, offline stream fallback |
 | DDoS center | Live connections, blacklist, auto-ban rules, presets, runtime policy (tabbed) |
 | Reverse proxy | Trust hops + CF / nginx / X-Forwarded-For client IP |
@@ -392,6 +392,61 @@ const r = await client.responses.create({
 ```
 
 Supported: `input` string or message items (text), `instructions`, `stream`, `tools` (→ Grok tools when enabled), `previous_response_id` (context chain), `GET/DELETE /v1/responses/:id` (encrypted store).
+
+### Images (OpenAI-shaped)
+
+`POST /v1/images/generations` and `POST /v1/images/edits` return the official Images object. Requires **`imagesApi` + `tools`** and an **agent** (or admin) key — safe keys get **403**.
+
+```bash
+curl -s http://127.0.0.1:3847/v1/images/generations \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "a red square",
+    "n": 1,
+    "aspect_ratio": "16:9",
+    "response_format": "b64_json"
+  }'
+```
+
+```json
+{
+  "created": 1710000000,
+  "data": [{ "b64_json": "iVBOR…" }],
+  "grok": { "provider": "grok-tools", "asset_ids": ["uuid"] }
+}
+```
+
+| Field / topic | Behavior |
+|---------------|----------|
+| `response_format` | `b64_json` (default, same as GPT image models) or `url` |
+| `size` | OpenAI pixels (`1024x1024`, …) **or** a Grok aspect (`16:9`) |
+| `aspect_ratio` | Grok Imagine (`1:1`, `16:9`, …) — preferred over pixel sizes |
+| `n` | 1–4; Grok has no batch generate — gateway may loop. `n=1` returns one image |
+| `data[].url` | Gateway-local `/v1/media/assets/:id/content` (same API key). Not an OpenAI CDN |
+| `grok` | Gateway extension (`provider`, `asset_ids`). OpenAI SDKs ignore unknown fields |
+
+**How generate actually gets a file (v1.7.3+):** Grok Imagine always writes to  
+`~/.grok/sessions/<encodeURIComponent(sandbox-cwd)>/<session-uuid>/images/`  
+(e.g. `1.jpg`). The media-run sandbox has **no bash**, so the agent cannot `cp` that file to `output.png`. The gateway copies the newest image for **this run’s session only** into sandbox `output.jpg|png|webp` as soon as `image_gen` succeeds (and again when Grok exits).
+
+Collect order:
+
+1. Sandbox-root `output.png` / `output.jpg` / `output.webp` / `output.jpeg`
+2. Recursive scan of the sandbox (realpath; never follows links out of the run dir)
+3. This run’s Grok session `images/` only — never the rest of `~/.grok/sessions`
+
+Prefer the newest file. Ignore `input.png`, `mask.png`, `frame.png`, `ref-*.png`. **502** `no_image_in_sandbox` only if nothing exists — that is **not** an `imagesApi` or API-key failure. Edit uses `--tools image_edit` + `input.png`. Video collect can also take this run’s session `videos/` / `images/` plus sandbox `output.mp4`.
+
+```ts
+const img = await client.images.generate({
+  model: 'grok-4.6',
+  prompt: 'a red square',
+  n: 1,
+  response_format: 'b64_json',
+});
+const b64 = img.data[0].b64_json;
+```
 
 ### Anthropic Messages
 
@@ -513,6 +568,10 @@ POST /admin/api/queue/purge-dead
 | POST | `/v1/responses` | OpenAI Responses (text + store) |
 | GET/DELETE | `/v1/responses/:id` | Retrieve / soft-delete stored response |
 | POST | `/v1/messages` | Anthropic Messages (Bearer or `x-api-key`) |
+| POST | `/v1/images/generations` | OpenAI Images generate (`b64_json` / `url`; harvests session `images/` if sandbox is empty) |
+| POST | `/v1/images/edits` | OpenAI Images edit (multipart `image` + optional `mask`) |
+| GET | `/v1/media/assets/:id` | Stored asset metadata |
+| GET | `/v1/media/assets/:id/content` | Stored asset bytes (same API key) |
 | POST | `/v1/videos` | Grok video job (`seconds` 1–15; `voices[]` → `reference_to_video`) |
 | GET | `/v1/videos/:id` | Poll video job |
 | GET | `/admin/api/grok/inspect` | Local `grok inspect --json` snapshot |

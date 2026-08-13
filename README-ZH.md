@@ -36,7 +36,7 @@
 |------|:----:|:---------:|:------------------:|------------|
 | 文字 + stream | ✅ | ✅ | ✅ | 協議開關 |
 | Vision / 圖片 | ✅ | ✅ | ✅ | `vision` |
-| Images `/v1/images/generations` + `/edits` | ✅ | — | — | `imagesApi` + agent key |
+| Images `/v1/images/generations` + `/edits` | ✅ OpenAI 形狀（`b64_json` / `url`） | — | — | `imagesApi` + `tools` + agent key |
 | Files `/v1/files` | ✅ | — | — | `filesOpenAiAlias` |
 | Videos `/v1/videos` | ✅ Grok `image_to_video`（1–15 秒）／`reference_to_video` + voices | — | — | `videoApi` |
 | Audio speech / transcriptions | ✅ mock 或 503 | — | — | `audioApi` + provider env |
@@ -314,7 +314,7 @@ gctoac logs clear
 | 加密 | AES-256-GCM 加密 prompt、response、檔案 |
 | 對話歷史 | 多輪對話、上下文模式（full / summary / recent） |
 | Admin Panel | OTP session 登入；**分 tab** 頁面（佇列／媒體／系統／PM2／DDoS／API 能力）；精簡 EN／繁中文案 |
-| 媒體庫 | 工作室（生成／編輯／**1–15 秒影片**／配音）、資產與工作、多格式預覽 lightbox（`blob:` CSP 安全） |
+| 媒體庫 | 工作室（生成／編輯／**1–15 秒影片**／配音）、資產與工作、多格式預覽 lightbox（`blob:` CSP 安全）。沙箱沒有 `output.png` 時，會從今次 Imagine session 的 `images/` 收圖 |
 | 對話佇列 | 持久化 SQLite 工作、公平輪詢、暫停／排空、死信、Idempotency-Key、`QUEUE_BACKEND`、離線串流 fallback |
 | DDoS 中心 | 即時連線、黑名單、自動封鎖、可配置策略與預設檔（分 tab） |
 | 反向代理 | 信任層數 + CF / nginx / X-Forwarded-For 真實 IP |
@@ -366,6 +366,61 @@ const res = await client.chat.completions.create({
   messages: [{ role: 'user', content: 'Hello' }],
 });
 console.log(res.choices[0].message.content);
+```
+
+### Images（OpenAI 形狀）
+
+`POST /v1/images/generations` 與 `POST /v1/images/edits` 回傳官方 Images 物件。需要 **`imagesApi` + `tools`**，以及 **agent**（或管理員）金鑰；safe 金鑰會得 **403**。
+
+```bash
+curl -s http://127.0.0.1:3847/v1/images/generations \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "紅色方塊",
+    "n": 1,
+    "aspect_ratio": "16:9",
+    "response_format": "b64_json"
+  }'
+```
+
+```json
+{
+  "created": 1710000000,
+  "data": [{ "b64_json": "iVBOR…" }],
+  "grok": { "provider": "grok-tools", "asset_ids": ["uuid"] }
+}
+```
+
+| 欄位／主題 | 行為 |
+|------------|------|
+| `response_format` | `b64_json`（預設，與 GPT image 模型相同）或 `url` |
+| `size` | OpenAI 像素（`1024x1024` 等）**或** Grok 比例（`16:9`） |
+| `aspect_ratio` | Grok Imagine（`1:1`、`16:9` 等）——優先於像素尺寸 |
+| `n` | 1–4；Grok 無批次生成，Gateway 或會循環。`n=1` 只交一張 |
+| `data[].url` | Gateway 本機 `/v1/media/assets/:id/content`（同一把 API 金鑰），不是 OpenAI CDN |
+| `grok` | Gateway 擴充（`provider`、`asset_ids`）。OpenAI SDK 會忽略未知欄位 |
+
+**生成如何真正收到檔案（v1.7.3+）：** Grok Imagine 永遠寫到  
+`~/.grok/sessions/<encodeURIComponent(sandbox-cwd)>/<session-uuid>/images/`  
+（例如 `1.jpg`）。media-run 沙箱**沒有 bash**，agent 無法自行 `cp` 到 `output.png`。Gateway 只把**今次 run 對應 session** 最新一張圖，在 `image_gen` 成功時（以及 Grok 結束後）複製到沙箱 `output.jpg|png|webp`。
+
+收圖順序：
+
+1. 沙箱根目錄 `output.png` / `output.jpg` / `output.webp` / `output.jpeg`
+2. 遞歸掃描沙箱（realpath；不會跟隨 symlink 離開今次 run）
+3. 只收今次 run 的 Grok session `images/`——**不會**掃描整個 `~/.grok/sessions`
+
+優先最新一張。忽略 `input.png`、`mask.png`、`frame.png`、`ref-*.png`。只有完全找不到圖像時才會回 **502** `no_image_in_sandbox`——**不是** `imagesApi` 或 API 金鑰問題。編輯使用 `--tools image_edit` + `input.png`。影片收檔同樣可取今次 session 的 `videos/`／`images/` 以及沙箱 `output.mp4`。
+
+```ts
+const img = await client.images.generate({
+  model: 'grok-4.6',
+  prompt: '紅色方塊',
+  n: 1,
+  response_format: 'b64_json',
+});
+const b64 = img.data[0].b64_json;
 ```
 
 ### Chat body 擴充欄位
@@ -452,6 +507,10 @@ POST /admin/api/queue/purge-dead
 | POST | `/v1/chat/completions` | OpenAI Chat（佇列；可選 `Idempotency-Key`） |
 | POST | `/v1/responses` | OpenAI Responses 文字子集 |
 | POST | `/v1/messages` | Anthropic Messages（Bearer 或 `x-api-key`） |
+| POST | `/v1/images/generations` | OpenAI Images 生成（`b64_json`／`url`；沙箱為空時會收今次 session `images/`） |
+| POST | `/v1/images/edits` | OpenAI Images 編輯（multipart `image` + 可選 `mask`） |
+| GET | `/v1/media/assets/:id` | 已存資產中繼資料 |
+| GET | `/v1/media/assets/:id/content` | 已存資產內容（同一把 API 金鑰） |
 | POST | `/v1/videos` | Grok 影片 job（`seconds` 1–15；`voices[]` → `reference_to_video`） |
 | GET | `/v1/videos/:id` | 查影片 job |
 | GET | `/admin/api/grok/inspect` | 本機 `grok inspect --json` 快照 |
