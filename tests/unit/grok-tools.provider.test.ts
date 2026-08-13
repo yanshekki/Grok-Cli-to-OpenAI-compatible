@@ -14,8 +14,14 @@ vi.mock('../../src/services/grok-cli.service', () => ({
 }));
 
 import {
+  copyNewestSessionMediaToSandbox,
+  eventSessionId,
+  findRunSessionDir,
+  grokSessionGroupDir,
   grokToolsMediaProvider,
+  isSuccessfulMediaToolEvent,
   listMediaFiles,
+  listRunSessionMedia,
   selectCollectedMedia,
 } from '../../src/services/media/providers/grok-tools.provider';
 
@@ -206,6 +212,281 @@ describe('listMediaFiles / selectCollectedMedia', () => {
       expect([...found].join(' ')).not.toContain('secret.jpg');
     } finally {
       await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+const SESSION_ID = '019ffbd0-6dca-7c13-8eb2-c79f4afb3617';
+
+async function writeSessionImage(
+  grokHome: string,
+  sandboxAbs: string,
+  sessionId: string,
+  name: string,
+  bytes: Buffer,
+): Promise<string> {
+  const dest = path.join(
+    grokSessionGroupDir(sandboxAbs, grokHome),
+    sessionId,
+    'images',
+    name,
+  );
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  await fs.writeFile(dest, bytes);
+  return dest;
+}
+
+describe('session image harvest (image_gen writes ~/.grok/sessions/…/images/)', () => {
+  let sandbox = '';
+  let grokHome = '';
+
+  beforeEach(async () => {
+    sandbox = await fs.mkdtemp(path.join(os.tmpdir(), 'gctoac-media-'));
+    grokHome = await fs.mkdtemp(path.join(os.tmpdir(), 'gctoac-grokhome-'));
+    isAvailableMock.mockReset();
+    isAvailableMock.mockResolvedValue(true);
+    streamMock.mockReset();
+    streamMock.mockImplementation(() => emptyStream());
+  });
+
+  afterEach(async () => {
+    await fs.rm(sandbox, { recursive: true, force: true });
+    await fs.rm(grokHome, { recursive: true, force: true });
+  });
+
+  it('eventSessionId / isSuccessfulMediaToolEvent parse grok CLI events', () => {
+    expect(
+      eventSessionId({ type: 'turn_started', session_id: SESSION_ID }),
+    ).toBe(SESSION_ID);
+    expect(
+      eventSessionId({ type: 'end', sessionId: SESSION_ID }),
+    ).toBe(SESSION_ID);
+    expect(
+      isSuccessfulMediaToolEvent({
+        type: 'tool_completed',
+        tool_name: 'image_gen',
+        outcome: 'success',
+      }),
+    ).toBe(true);
+    expect(
+      isSuccessfulMediaToolEvent({
+        type: 'tool_completed',
+        tool_name: 'use_tool',
+        outcome: 'error',
+      }),
+    ).toBe(false);
+  });
+
+  it('finds only this cwd session, not a sibling sandbox session', async () => {
+    const other = await fs.mkdtemp(path.join(os.tmpdir(), 'gctoac-other-'));
+    try {
+      await writeSessionImage(
+        grokHome,
+        other,
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        '1.jpg',
+        Buffer.from('other'),
+      );
+      await writeSessionImage(
+        grokHome,
+        sandbox,
+        SESSION_ID,
+        '1.jpg',
+        Buffer.from('mine'),
+      );
+      const dir = await findRunSessionDir(sandbox, SESSION_ID, grokHome);
+      expect(dir).toBeTruthy();
+      expect(dir).toContain(SESSION_ID);
+      const files = await listRunSessionMedia({
+        sandbox,
+        sessionId: SESSION_ID,
+        collect: 'image',
+        grokHome,
+      });
+      expect([...files].every((f) => f.endsWith(`${path.sep}1.jpg`))).toBe(true);
+      expect([...files].join(' ')).not.toContain('other');
+      const bytes = await fs.readFile([...files][0]!);
+      expect(bytes.toString()).toBe('mine');
+    } finally {
+      await fs.rm(other, { recursive: true, force: true });
+    }
+  });
+
+  it('selectCollectedMedia prefers sandbox output.png over session images/2.jpg', async () => {
+    const sessionFile = await writeSessionImage(
+      grokHome,
+      sandbox,
+      SESSION_ID,
+      '2.jpg',
+      Buffer.from('session-newer'),
+    );
+    await fs.writeFile(path.join(sandbox, 'output.png'), Buffer.from('sandbox-out'));
+    const after = new Set<string>([
+      ...(await listMediaFiles(sandbox, IMAGE_EXTS)),
+      sessionFile,
+    ]);
+    const picked = await selectCollectedMedia({
+      sandbox,
+      before: new Set(),
+      after,
+      collect: 'image',
+      n: 1,
+    });
+    expect(picked).toHaveLength(1);
+    expect(path.basename(picked[0]!)).toBe('output.png');
+    expect((await fs.readFile(picked[0]!)).toString()).toBe('sandbox-out');
+  });
+
+  it('copyNewestSessionMediaToSandbox does not overwrite existing output.png', async () => {
+    await writeSessionImage(
+      grokHome,
+      sandbox,
+      SESSION_ID,
+      '2.jpg',
+      Buffer.from('session-2'),
+    );
+    await fs.writeFile(path.join(sandbox, 'output.png'), Buffer.from('keep-me'));
+    const dest = await copyNewestSessionMediaToSandbox({
+      sandbox,
+      sessionId: SESSION_ID,
+      collect: 'image',
+      grokHome,
+      overwrite: false,
+    });
+    expect(dest && path.basename(dest)).toBe('output.png');
+    expect((await fs.readFile(path.join(sandbox, 'output.png'))).toString()).toBe(
+      'keep-me',
+    );
+  });
+
+  it('copyNewestSessionMediaToSandbox writes output.jpg from session images/1.jpg', async () => {
+    await writeSessionImage(
+      grokHome,
+      sandbox,
+      SESSION_ID,
+      '1.jpg',
+      Buffer.from('jpg-bytes'),
+    );
+    const dest = await copyNewestSessionMediaToSandbox({
+      sandbox,
+      sessionId: SESSION_ID,
+      collect: 'image',
+      grokHome,
+      overwrite: false,
+    });
+    expect(dest && path.basename(dest)).toBe('output.jpg');
+    expect((await fs.readFile(path.join(sandbox, 'output.jpg'))).toString()).toBe(
+      'jpg-bytes',
+    );
+  });
+
+  it('generateImage returns session images/1.jpg when sandbox root is empty', async () => {
+    const prevHome = process.env.GROK_HOME;
+    process.env.GROK_HOME = grokHome;
+    try {
+      streamMock.mockImplementation(async function* (opts: { cwd: string }) {
+        await writeSessionImage(
+          grokHome,
+          opts.cwd,
+          SESSION_ID,
+          '1.jpg',
+          Buffer.from('from-session'),
+        );
+        yield { type: 'turn_started', session_id: SESSION_ID };
+        yield {
+          type: 'tool_completed',
+          tool_name: 'image_gen',
+          outcome: 'success',
+        };
+      });
+      const arts = await grokToolsMediaProvider.generateImage({
+        prompt: 'character sheet',
+        apiKeyId: 'k1',
+        n: 1,
+      });
+      expect(arts).toHaveLength(1);
+      expect(arts[0]!.bytes.toString()).toBe('from-session');
+      expect(arts[0]!.mime).toBe('image/jpeg');
+    } finally {
+      if (prevHome === undefined) delete process.env.GROK_HOME;
+      else process.env.GROK_HOME = prevHome;
+    }
+  });
+
+  it('generateImage prefers sandbox output.png when session images/2.jpg also exists', async () => {
+    const prevHome = process.env.GROK_HOME;
+    process.env.GROK_HOME = grokHome;
+    try {
+      streamMock.mockImplementation(async function* (opts: { cwd: string }) {
+        await fs.writeFile(path.join(opts.cwd, 'output.png'), Buffer.from('root-out'));
+        await writeSessionImage(
+          grokHome,
+          opts.cwd,
+          SESSION_ID,
+          '2.jpg',
+          Buffer.from('session-2'),
+        );
+      });
+      const arts = await grokToolsMediaProvider.generateImage({
+        prompt: 'character sheet',
+        apiKeyId: 'k1',
+        n: 1,
+      });
+      expect(arts).toHaveLength(1);
+      expect(arts[0]!.originalName).toBe('output.png');
+      expect(arts[0]!.bytes.toString()).toBe('root-out');
+    } finally {
+      if (prevHome === undefined) delete process.env.GROK_HOME;
+      else process.env.GROK_HOME = prevHome;
+    }
+  });
+
+  it('generateImage throws no_image_in_sandbox only when nothing exists', async () => {
+    const prevHome = process.env.GROK_HOME;
+    process.env.GROK_HOME = grokHome;
+    try {
+      streamMock.mockImplementation(() => emptyStream());
+      await expect(
+        grokToolsMediaProvider.generateImage({
+          prompt: 'nothing',
+          apiKeyId: 'k1',
+        }),
+      ).rejects.toMatchObject({
+        statusCode: 502,
+        details: { reason: 'no_image_in_sandbox' },
+      });
+    } finally {
+      if (prevHome === undefined) delete process.env.GROK_HOME;
+      else process.env.GROK_HOME = prevHome;
+    }
+  });
+
+  it('does not harvest a different media-run session under ~/.grok/sessions', async () => {
+    const prevHome = process.env.GROK_HOME;
+    process.env.GROK_HOME = grokHome;
+    const otherSandbox = await fs.mkdtemp(path.join(os.tmpdir(), 'gctoac-other-'));
+    try {
+      await writeSessionImage(
+        grokHome,
+        otherSandbox,
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        '1.jpg',
+        Buffer.from('not-this-run'),
+      );
+      streamMock.mockImplementation(() => emptyStream());
+      await expect(
+        grokToolsMediaProvider.generateImage({
+          prompt: 'nothing',
+          apiKeyId: 'k1',
+        }),
+      ).rejects.toMatchObject({
+        statusCode: 502,
+        details: { reason: 'no_image_in_sandbox' },
+      });
+    } finally {
+      await fs.rm(otherSandbox, { recursive: true, force: true });
+      if (prevHome === undefined) delete process.env.GROK_HOME;
+      else process.env.GROK_HOME = prevHome;
     }
   });
 });

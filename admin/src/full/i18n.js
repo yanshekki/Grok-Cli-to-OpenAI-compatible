@@ -1267,9 +1267,9 @@ const dict = {
         source_must_be_image:
           'The selected source must be an image for edit or video generation.',
         no_image_in_sandbox:
-          'Grok finished but no image file was found. Ensure imagesApi and tools are enabled, and the key is agent-mode or admin.',
+          'Grok finished but no image file was found in the sandbox or this run\'s session images/. This is not an imagesApi or API-key problem.',
         no_video_in_sandbox:
-          'Grok finished but no video file was found in the sandbox.',
+          'Grok finished but no video file was found in the sandbox or this run\'s session.',
         provider_no_edit: 'The current media provider does not support image edits.',
       },
     },
@@ -2518,8 +2518,9 @@ const dict = {
         source_required: '請提供圖像檔、媒體資產或文件作為來源。',
         source_must_be_image: '編輯或生成影片時，來源必須為圖像。',
         no_image_in_sandbox:
-          'Grok 已結束，但未在沙箱中找到圖像檔。請確認已啟用 imagesApi 與 tools，且金鑰為 agent 模式或管理員。',
-        no_video_in_sandbox: 'Grok 已結束，但未在沙箱中找到影片檔。',
+          'Grok 已結束，但沙箱及今次 run 對應的 session images/ 均未找到圖像檔。這不是 imagesApi 或 API 金鑰問題。',
+        no_video_in_sandbox:
+          'Grok 已結束，但沙箱及今次 run 對應的 session 均未找到影片檔。',
         provider_no_edit: '目前媒體提供者不支援圖像編輯。',
       },
     },

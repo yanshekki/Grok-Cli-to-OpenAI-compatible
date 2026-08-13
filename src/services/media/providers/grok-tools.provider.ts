@@ -1,10 +1,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createId } from '../../../utils/id';
+import { isUuid } from '../../../utils/grok-session';
 import { logger } from '../../../utils/logger';
 import { ExceptionFactory } from '../../../exceptions/exception.factory';
 import { env } from '../../../config/env';
 import { grokCliService } from '../../grok-cli.service';
+import { resolveGrokHome } from '../../grok-sessions.service';
 import type {
   ImageEditRequest,
   ImageGenRequest,
@@ -247,6 +249,7 @@ export class GrokToolsMediaProvider implements MediaProvider {
     const permissionMode =
       req.permissionMode ??
       (alwaysApprove ? 'bypassPermissions' : null);
+    let sessionId: string | undefined;
 
     try {
       const available = await grokCliService.isAvailable();
@@ -270,7 +273,7 @@ export class GrokToolsMediaProvider implements MediaProvider {
         'Media gen: spawning Grok with policy-aligned options',
       );
 
-      for await (const _ev of grokCliService.stream({
+      for await (const ev of grokCliService.stream({
         prompt,
         model: req.model || env.GROK_DEFAULT_MODEL,
         cwd: sandbox,
@@ -283,8 +286,25 @@ export class GrokToolsMediaProvider implements MediaProvider {
         permissionMode,
         noSubagents: true,
       })) {
-        /* consume stream */
+        const rec = ev as Record<string, unknown>;
+        const sid = eventSessionId(rec);
+        if (sid) sessionId = sid;
+        if (isSuccessfulMediaToolEvent(rec)) {
+          await copyNewestSessionMediaToSandbox({
+            sandbox,
+            sessionId,
+            collect: req.collect,
+            overwrite: true,
+          });
+        }
       }
+      // After Grok exits: copy only if the sandbox still has no output.*
+      await copyNewestSessionMediaToSandbox({
+        sandbox,
+        sessionId,
+        collect: req.collect,
+        overwrite: false,
+      });
     } catch (err) {
       logger.warn({ err, sandbox, collect: req.collect }, 'Grok media gen failed');
       if (err && typeof err === 'object' && 'statusCode' in err) throw err;
@@ -294,6 +314,12 @@ export class GrokToolsMediaProvider implements MediaProvider {
     }
 
     const after = await listFn(sandbox);
+    const sessionFiles = await listRunSessionMedia({
+      sandbox,
+      sessionId,
+      collect: req.collect,
+    });
+    for (const f of sessionFiles) after.add(f);
     const candidates = await selectCollectedMedia({
       sandbox,
       before,
@@ -305,8 +331,8 @@ export class GrokToolsMediaProvider implements MediaProvider {
     if (!candidates.length) {
       throw ExceptionFactory.mediaGenerationFailed(
         req.collect === 'video'
-          ? 'Grok finished but no video file was found in the sandbox.'
-          : 'Grok finished but no image file was found in the sandbox. Ensure imagesApi/tools are enabled and the key is agent (or admin session).',
+          ? 'Grok finished but no video file was found in the sandbox or this run\'s session.'
+          : 'Grok finished but no image file was found in the sandbox or this run\'s session images/.',
         {
           reason:
             req.collect === 'video' ? 'no_video_in_sandbox' : 'no_image_in_sandbox',
@@ -358,6 +384,203 @@ export function isIgnoredMediaName(name: string): boolean {
   const lower = base.toLowerCase();
   if (IGNORED_MEDIA_BASENAMES.has(lower)) return true;
   return /^ref-.*\.png$/i.test(base);
+}
+
+const MEDIA_TOOL_NAMES = new Set([
+  'image_gen',
+  'image_edit',
+  'image_to_video',
+  'reference_to_video',
+]);
+
+export function eventSessionId(ev: Record<string, unknown>): string | null {
+  const data =
+    ev.data && typeof ev.data === 'object'
+      ? (ev.data as Record<string, unknown>)
+      : {};
+  for (const v of [ev.sessionId, ev.session_id, data.sessionId, data.session_id]) {
+    if (typeof v === 'string' && isUuid(v)) return v;
+  }
+  return null;
+}
+
+export function isSuccessfulMediaToolEvent(ev: Record<string, unknown>): boolean {
+  const data =
+    ev.data && typeof ev.data === 'object'
+      ? (ev.data as Record<string, unknown>)
+      : {};
+  const t = String(ev.type || '').toLowerCase();
+  const name = String(
+    ev.tool_name || ev.toolName || data.tool_name || data.toolName || data.name || '',
+  ).toLowerCase();
+  const outcome = String(
+    ev.outcome || ev.status || data.outcome || data.status || '',
+  ).toLowerCase();
+  if (!MEDIA_TOOL_NAMES.has(name)) return false;
+  if (t !== 'tool_completed' && t !== 'tool_result') return false;
+  return (
+    outcome === 'success' ||
+    outcome === 'ok' ||
+    outcome === 'completed' ||
+    outcome === ''
+  );
+}
+
+/** ~/.grok/sessions/<encodeURIComponent(realpath(sandbox))> */
+export function grokSessionGroupDir(sandboxAbs: string, grokHome?: string): string {
+  const home = grokHome || resolveGrokHome();
+  return path.join(home, 'sessions', encodeURIComponent(path.resolve(sandboxAbs)));
+}
+
+export async function findRunSessionDir(
+  sandboxAbs: string,
+  sessionId?: string | null,
+  grokHome?: string,
+): Promise<string | null> {
+  const home = grokHome || resolveGrokHome();
+  const sessionsRoot = path.join(home, 'sessions');
+  let sessionsReal: string;
+  try {
+    sessionsReal = await fs.realpath(sessionsRoot);
+  } catch {
+    return null;
+  }
+  const group = grokSessionGroupDir(sandboxAbs, home);
+  const pickIfSafe = async (dir: string): Promise<string | null> => {
+    try {
+      const real = await fs.realpath(dir);
+      if (
+        real === sessionsReal ||
+        !real.startsWith(sessionsReal + path.sep)
+      ) {
+        return null;
+      }
+      return real;
+    } catch {
+      return null;
+    }
+  };
+  if (sessionId && isUuid(sessionId)) {
+    const hit = await pickIfSafe(path.join(group, sessionId));
+    if (hit) return hit;
+  }
+  let names: string[] = [];
+  try {
+    names = await fs.readdir(group);
+  } catch {
+    return null;
+  }
+  const uuids = names.filter((n) => isUuid(n));
+  if (!uuids.length) return null;
+  const ranked = await rankByMtimeNewest(
+    uuids.map((id) => path.join(group, id)),
+  );
+  for (const dir of ranked) {
+    const hit = await pickIfSafe(dir);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export async function listRunSessionMedia(opts: {
+  sandbox: string;
+  sessionId?: string | null;
+  collect: 'image' | 'video';
+  grokHome?: string;
+}): Promise<Set<string>> {
+  const out = new Set<string>();
+  const sessionDir = await findRunSessionDir(
+    opts.sandbox,
+    opts.sessionId,
+    opts.grokHome,
+  );
+  if (!sessionDir) return out;
+  const exts = opts.collect === 'video' ? VIDEO_EXTS : IMAGE_EXTS;
+  const subdirs =
+    opts.collect === 'video' ? ['videos', 'images'] : ['images'];
+  for (const sub of subdirs) {
+    const listed = await listMediaFiles(path.join(sessionDir, sub), exts);
+    for (const f of listed) {
+      try {
+        const real = await fs.realpath(f);
+        if (real === sessionDir || real.startsWith(sessionDir + path.sep)) {
+          out.add(real);
+        }
+      } catch {
+        /* skip unreadable / dangling */
+      }
+    }
+  }
+  return out;
+}
+
+export async function copyNewestSessionMediaToSandbox(opts: {
+  sandbox: string;
+  sessionId?: string | null;
+  collect: 'image' | 'video';
+  grokHome?: string;
+  overwrite?: boolean;
+}): Promise<string | null> {
+  if (!opts.overwrite) {
+    const existing = await preferredSandboxOutput(opts.sandbox, opts.collect);
+    if (existing) return existing;
+  }
+  const files = [...(await listRunSessionMedia(opts))];
+  if (!files.length) return null;
+  const newest = (await rankByMtimeNewest(files))[0];
+  if (!newest) return null;
+  const ext = path.extname(newest).toLowerCase();
+  const destName =
+    opts.collect === 'video'
+      ? 'output.mp4'
+      : ext === '.jpg' || ext === '.jpeg'
+        ? 'output.jpg'
+        : ext === '.webp'
+          ? 'output.webp'
+          : 'output.png';
+  const dest = path.join(opts.sandbox, destName);
+  try {
+    await fs.copyFile(newest, dest);
+    const others =
+      opts.collect === 'video' ? VIDEO_OUTPUT_BASENAMES : IMAGE_OUTPUT_BASENAMES;
+    for (const name of others) {
+      if (name === destName) continue;
+      await fs.unlink(path.join(opts.sandbox, name)).catch(() => undefined);
+    }
+    logger.info(
+      { src: newest, dest, collect: opts.collect },
+      'Media gen: copied session artifact into sandbox',
+    );
+    return dest;
+  } catch (err) {
+    logger.warn(
+      { err, src: newest, dest },
+      'Media gen: failed to copy session artifact',
+    );
+    return newest;
+  }
+}
+
+async function preferredSandboxOutput(
+  sandbox: string,
+  collect: 'image' | 'video',
+): Promise<string | null> {
+  const after = await listMediaFiles(
+    sandbox,
+    collect === 'video' ? VIDEO_EXTS : IMAGE_EXTS,
+  );
+  let sandboxReal: string;
+  try {
+    sandboxReal = await fs.realpath(sandbox);
+  } catch {
+    sandboxReal = path.resolve(sandbox);
+  }
+  const names = collect === 'video' ? VIDEO_OUTPUT_BASENAMES : IMAGE_OUTPUT_BASENAMES;
+  for (const name of names) {
+    const hit = rootOutputPath(sandboxReal, after, name);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 function isInsideSandbox(sandboxReal: string, candidateReal: string): boolean {
