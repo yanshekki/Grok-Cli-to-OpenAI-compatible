@@ -1102,6 +1102,51 @@ function bindShell() {
       render().catch(onErr);
     };
   });
+  enhanceResponsiveTables(document);
+}
+
+/** Strip sort arrows / extra whitespace from a header cell. */
+function tableHeaderLabel(th) {
+  if (!th) return '';
+  const fromAttr = (th.getAttribute('data-label') || '').trim();
+  if (fromAttr) return fromAttr;
+  const btn = th.querySelector('.th-sort-btn');
+  const raw = btn
+    ? [...btn.childNodes]
+        .filter((n) => n.nodeType === Node.TEXT_NODE)
+        .map((n) => n.textContent || '')
+        .join('')
+    : th.textContent || '';
+  return raw.replace(/[▲▼]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Map thead labels onto tbody cells so the mobile card-table can show a caption.
+ * Safe to call after any tbody rewrite (queue poll, DDoS soft refresh).
+ */
+function enhanceResponsiveTables(root) {
+  const scope = root || document;
+  scope.querySelectorAll('table.data-table').forEach((table) => {
+    const labels = [...table.querySelectorAll('thead th')].map(tableHeaderLabel);
+    table.querySelectorAll('tbody tr').forEach((tr) => {
+      if (tr.classList.contains('empty-row')) return;
+      [...tr.children].forEach((td, i) => {
+        const kids = [...td.children];
+        const isActions =
+          td.classList.contains('row-actions') ||
+          Boolean(td.querySelector(':scope > .row-actions')) ||
+          (kids.length > 0 &&
+            kids.every((el) => el.matches('button, .btn, .row-actions')));
+        td.classList.toggle('is-actions', isActions);
+        td.classList.toggle('is-primary', i === 0 && !isActions);
+        if (isActions) {
+          td.removeAttribute('data-label');
+          return;
+        }
+        if (labels[i]) td.setAttribute('data-label', labels[i]);
+      });
+    });
+  });
 }
 
 function onErr(e) {
@@ -1219,7 +1264,7 @@ function sortThHtml({
   const aria =
     active && dir === 'asc' ? 'ascending' : active && dir === 'desc' ? 'descending' : 'none';
   const indicator = active ? (dir === 'asc' ? ' ▲' : ' ▼') : '';
-  return `<th class="th-sort${active ? ' is-sorted' : ''}" data-sort-field="${escapeHtml(field)}" data-sort-by-key="${escapeHtml(sortByKey)}" data-sort-dir-key="${escapeHtml(sortDirKey)}" aria-sort="${aria}" title="${escapeHtml(t('common.sortHint') || 'Sort')}"><button type="button" class="th-sort-btn">${escapeHtml(label)}<span class="th-sort-ind" aria-hidden="true">${indicator}</span></button></th>`;
+  return `<th class="th-sort${active ? ' is-sorted' : ''}" data-label="${escapeHtml(label)}" data-sort-field="${escapeHtml(field)}" data-sort-by-key="${escapeHtml(sortByKey)}" data-sort-dir-key="${escapeHtml(sortDirKey)}" aria-sort="${aria}" title="${escapeHtml(t('common.sortHint') || 'Sort')}"><button type="button" class="th-sort-btn">${escapeHtml(label)}<span class="th-sort-ind" aria-hidden="true">${indicator}</span></button></th>`;
 }
 
 /** Bind click on [data-sort-field] headers; toggles sort on filterRef and reloads. */
@@ -5842,6 +5887,7 @@ async function renderDdos(opts = {}) {
     set('ddos-ban-body', banRows || emptyBan);
     set('ddos-top-body', topIps || emptyTop);
     set('ddos-events-body', eventRows);
+    enhanceResponsiveTables(document);
     if (stats.policySummary) {
       updateDdosAutoBadge(Boolean(stats.policySummary.autoBanEnabled));
     }
@@ -8763,7 +8809,7 @@ async function renderChatPlayground() {
         <div class="chat-history-backdrop" id="chat-history-backdrop"></div>
         <div class="chat-shell">
           <div class="chat-toolbar">
-            <label>${escapeHtml(t('chat.keySelect'))}
+            <label class="chat-field-full">${escapeHtml(t('chat.keySelect'))}
               <select id="chat-key-select">${chatKeySelectOptions()}</select>
             </label>
             <label>${escapeHtml(t('chats.model'))}
@@ -8796,12 +8842,13 @@ async function renderChatPlayground() {
             <label class="chat-ctx-label chat-ctx-n-label">${escapeHtml(t('chat.ctxRecentN'))}
               <input type="number" id="chat-ctx-n" min="2" max="40" value="${chatContext.recentN}" />
             </label>
-            <button type="button" class="btn ghost sm" id="chat-system-toggle" title="${escapeHtml(t('chat.systemHint'))}">
+            <button type="button" class="btn ghost sm chat-field-full" id="chat-system-toggle" title="${escapeHtml(t('chat.systemHint'))}">
               ${escapeHtml(t('chat.systemPrompt'))}${chatUi.systemPrompt ? ' ·' : ''}
             </button>
-            <label class="chat-ctx-label" title="${escapeHtml(t('chat.resumeHint'))}">${escapeHtml(t('chat.resume'))}
+            <label class="chat-ctx-label chat-field-full" title="${escapeHtml(t('chat.resumeHint'))}">${escapeHtml(t('chat.resume'))}
               <input type="text" id="chat-resume" value="${escapeHtml(chatUi.resumeId || '')}" placeholder="${escapeHtml(t('chat.resumePh'))}" spellcheck="false" />
             </label>
+            <div class="chat-checks">
             <label class="check-inline" for="chat-fork">
               <input type="checkbox" id="chat-fork" ${chatUi.forkSession ? 'checked' : ''} />
               ${escapeHtml(t('chat.fork'))}
@@ -8814,7 +8861,8 @@ async function renderChatPlayground() {
               <input type="checkbox" id="chat-no-plan" ${chatUi.noPlan ? 'checked' : ''} />
               ${escapeHtml(t('chat.noPlan'))}
             </label>
-            <label class="chat-ctx-label">${escapeHtml(t('chat.permission'))}
+            </div>
+            <label class="chat-ctx-label chat-field-full">${escapeHtml(t('chat.permission'))}
               <select id="chat-perm">
                 ${['', 'default', 'acceptEdits', 'auto', 'dontAsk', 'bypassPermissions', 'plan']
                   .map((v) => {
@@ -9344,7 +9392,7 @@ async function renderSupport() {
       <tr>
         <td>${escapeHtml(net)}</td>
         <td><code class="cell-code">${escapeHtml(addr)}</code></td>
-        <td><button type="button" class="btn secondary sm" data-copy="${escapeHtml(addr)}">${escapeHtml(t('support.copy'))}</button></td>
+        <td class="row-actions"><button type="button" class="btn secondary sm" data-copy="${escapeHtml(addr)}">${escapeHtml(t('support.copy'))}</button></td>
       </tr>`,
     )
     .join('');
@@ -10011,6 +10059,7 @@ function applyQueueSoftUpdate({ s, pol, jobs, total, by }) {
       tbody.dataset.qsig = sig;
       tbody.innerHTML = nextBody;
       bindQueueRowActions();
+      enhanceResponsiveTables(document.querySelector('#queue-jobs-table') || document);
       if (wrap) wrap.scrollLeft = sx;
     } else {
       // Only refresh live wait ages in-place (no full reflow)
