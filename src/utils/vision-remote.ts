@@ -13,7 +13,7 @@ type ChatMessage = CreateChatCompletionDto['messages'][number];
 
 export type VisionFetchImpl = (
   url: string,
-  init: { signal: AbortSignal; redirect?: RequestRedirect },
+  init: { signal: AbortSignal; redirect?: 'follow' | 'error' | 'manual' },
 ) => Promise<{
   ok: boolean;
   status: number;
