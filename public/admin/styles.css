@@ -2529,6 +2529,79 @@ button.dash-kpi:hover {
 .system-inspect-panel .error-box {
   margin-top: 12px;
 }
+
+/* Support / donate */
+.support-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.support-pills .seg-tab {
+  text-decoration: none;
+}
+.support-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.support-panel > .panel-h {
+  padding: 16px 18px 0;
+  border-bottom: 0;
+  background: none;
+}
+.support-panel > .panel-h strong {
+  font-size: 1.05rem;
+}
+.support-prose {
+  margin: 0 0 12px;
+  color: var(--text-main);
+  line-height: 1.6;
+}
+.support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.support-wallets {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-white);
+}
+.support-wallets-h {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-light);
+}
+.support-wallets .data-table {
+  margin: 0;
+}
+.support-list {
+  margin: 0 0 12px;
+  padding-left: 1.2rem;
+  line-height: 1.65;
+}
+.support-email-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  background: linear-gradient(90deg, #3b82f6, #14b8a6);
+  color: #fff !important;
+  font-weight: 800;
+}
+.support-email-btn:hover {
+  filter: brightness(1.04);
+}
+.support-docs {
+  margin: 14px 0 0;
+}
 .system-tab-pane-package,
 .system-tab-pane-env {
   padding: 14px 16px 16px;

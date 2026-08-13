@@ -12,6 +12,7 @@ import { renderDocumentsPage } from './pages/documents.page';
 import { renderChatsPage } from './pages/chats.page';
 import { renderChatPage } from './pages/chat.page';
 import { makeApiExplorerPage } from './pages/generic-api.page';
+import { renderSupportPage } from './pages/support.page';
 import { endpoints } from './config/endpoints';
 import { t } from './i18n';
 
@@ -78,6 +79,7 @@ export const pageRegistry: Record<Exclude<PageId, 'login'>, PageRenderer> = {
   queue: renderQueue,
   pm2: renderPm2,
   system: renderSystem,
+  support: renderSupportPage,
 };
 
 export async function renderPage(

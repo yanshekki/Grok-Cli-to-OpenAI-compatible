@@ -580,6 +580,7 @@ Admin **JSON API** (`/admin/api/*`) accepts either:
 | **API features** | **Tabs:** Protocols · Media · Capabilities · Emulation. KPI enabled counts. Presets: open / locked / dev |
 | **PM2** | **Tabs:** Runner · Port · Config · Logs. KPI process strip. Runner switch (gctoac ↔ PM2), listen port (default 3847), config, clear logs + auto-trim |
 | **System** | **Tabs:** Software · Package · Environment · **Grok sessions**. Software tab has a **Grok inspect** card (version / channel / models / skills / MCP). Sessions tab lists `~/.grok/sessions` (search + delete). One-click update & restart |
+| **Support** | Donate / GitHub Sponsors / Linktree / crypto addresses, YSK Limited services, **email@ysk.hk** |
 
 Shared Admin UX: segmented tabs + top KPI cards, compact formal EN/ZH strings, table action buttons centered; only operational pages keep a top-right **Refresh** (dashboard / usage / DDoS / PM2).
 

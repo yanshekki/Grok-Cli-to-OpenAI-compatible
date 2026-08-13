@@ -237,6 +237,7 @@ const PAGE_FROM_HASH = {
   queue: 'queue',
   pm2: 'pm2',
   system: 'system',
+  support: 'support',
 };
 
 function pageToHash(page) {
@@ -1008,6 +1009,7 @@ function pageTitle() {
     queue: t('nav.queue'),
     pm2: t('nav.pm2'),
     system: t('nav.system'),
+    support: t('nav.support'),
   };
   return map[state.page] || t('brand');
 }
@@ -1054,6 +1056,7 @@ function shell(content) {
         ${nav('queue', t('nav.queue'))}
         ${nav('pm2', t('nav.pm2'))}
         ${nav('system', t('nav.system'))}
+        ${nav('support', t('nav.support'))}
         <div class="sidebar-foot">
           <button class="btn secondary sm logout-btn" id="btn-logout">${escapeHtml(t('logout'))}</button>
         </div>
@@ -9320,6 +9323,112 @@ async function sendChatMessage() {
   }
 }
 
+const SUPPORT_EMAIL = 'email@ysk.hk';
+const SUPPORT_SPONSORS = 'https://github.com/sponsors/yanshekki';
+const SUPPORT_LINKTREE = 'https://linktr.ee/yanshekki';
+const SUPPORT_SITE = 'https://ysk.hk/';
+const SUPPORT_DOCS =
+  'https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible#readme';
+
+async function renderSupport() {
+  const wallets = [
+    [t('support.netEvm'), 'yanshekki.eth'],
+    [t('support.netNear'), 'yanshekki.near'],
+    [t('support.netAda'), '$yanshekki'],
+  ];
+  const walletRows = wallets
+    .map(
+      ([net, addr]) => `
+      <tr>
+        <td>${escapeHtml(net)}</td>
+        <td><code class="cell-code">${escapeHtml(addr)}</code></td>
+        <td><button type="button" class="btn secondary sm" data-copy="${escapeHtml(addr)}">${escapeHtml(t('support.copy'))}</button></td>
+      </tr>`,
+    )
+    .join('');
+
+  document.getElementById('app').innerHTML = shell(`
+    <div class="topbar">
+      <h2>${escapeHtml(t('support.title'))}</h2>
+    </div>
+    ${pageMetaHtml([t('support.subtitle')])}
+    <div class="support-pills" role="navigation">
+      <button type="button" class="seg-tab is-active" data-jump="support-creator">${escapeHtml(t('support.pillSupport'))}</button>
+      <button type="button" class="seg-tab" data-jump="support-sponsor">${escapeHtml(t('support.pillSponsor'))}</button>
+      <a class="seg-tab" href="mailto:${SUPPORT_EMAIL}">${escapeHtml(t('support.pillHelp'))}</a>
+    </div>
+    <div class="support-stack">
+      <section class="panel support-panel" id="support-creator">
+        <div class="panel-h"><strong>${escapeHtml(t('support.creatorTitle'))}</strong></div>
+        <div class="panel-pad"><p class="support-prose">${escapeHtml(t('support.creatorBody'))}</p></div>
+      </section>
+      <section class="panel support-panel" id="support-sponsor">
+        <div class="panel-h"><strong>${escapeHtml(t('support.sponsorTitle'))}</strong></div>
+        <div class="panel-pad">
+          <p class="support-prose">${escapeHtml(t('support.sponsorBody'))}</p>
+          <div class="support-actions">
+            <a class="btn" href="${SUPPORT_SPONSORS}" target="_blank" rel="noopener noreferrer">${escapeHtml(t('support.githubSponsors'))}</a>
+            <a class="btn secondary" href="${SUPPORT_LINKTREE}" target="_blank" rel="noopener noreferrer">${escapeHtml(t('support.linktree'))}</a>
+          </div>
+          <div class="support-wallets">
+            <div class="support-wallets-h">
+              <strong>${escapeHtml(t('support.walletsTitle'))}</strong>
+              <span class="muted">${escapeHtml(t('support.walletsHint'))}</span>
+            </div>
+            <table class="data-table">
+              <thead><tr>
+                <th>${escapeHtml(t('support.net'))}</th>
+                <th>${escapeHtml(t('support.addr'))}</th>
+                <th></th>
+              </tr></thead>
+              <tbody>${walletRows}</tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      <section class="panel support-panel" id="support-ysk">
+        <div class="panel-h"><strong>${escapeHtml(t('support.yskTitle'))}</strong></div>
+        <div class="panel-pad">
+          <p class="support-prose">${escapeHtml(t('support.yskBody'))}</p>
+          <ul class="support-list">
+            <li>${escapeHtml(t('support.yskLi1'))}</li>
+            <li>${escapeHtml(t('support.yskLi2'))}</li>
+            <li>${escapeHtml(t('support.yskLi3'))}</li>
+            <li>${escapeHtml(t('support.yskLi4'))}</li>
+          </ul>
+          <p class="muted">${escapeHtml(t('support.yskPrice'))}</p>
+          <a class="btn secondary sm" href="${SUPPORT_SITE}" target="_blank" rel="noopener noreferrer">${escapeHtml(t('support.site'))}</a>
+        </div>
+      </section>
+      <section class="panel support-panel" id="support-help">
+        <div class="panel-h"><strong>${escapeHtml(t('support.helpTitle'))}</strong></div>
+        <div class="panel-pad">
+          <p class="support-prose">${escapeHtml(t('support.helpBody'))}</p>
+          <a class="btn support-email-btn" href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>
+          <p class="support-docs"><a href="${SUPPORT_DOCS}" target="_blank" rel="noopener noreferrer">${escapeHtml(t('support.docs'))}</a></p>
+        </div>
+      </section>
+    </div>
+  `);
+  bindShell();
+  document.querySelectorAll('[data-jump]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-jump');
+      if (id) document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+  document.querySelectorAll('[data-copy]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const v = btn.getAttribute('data-copy') || '';
+      const ok = await copyTextToClipboard(v);
+      btn.textContent = ok ? t('chat.copied') : t('support.copy');
+      setTimeout(() => {
+        btn.textContent = t('support.copy');
+      }, 1400);
+    });
+  });
+}
+
 async function render() {
   const app = document.getElementById('app');
   try {
@@ -9342,6 +9451,7 @@ async function render() {
     else if (state.page === 'queue') await renderQueue();
     else if (state.page === 'pm2') await renderPm2();
     else if (state.page === 'system') await renderSystem();
+    else if (state.page === 'support') await renderSupport();
     else await renderDashboard();
   } catch (e) {
     app.innerHTML = shell(`<div class="error-box">${escapeHtml(e.message)}</div>`);

@@ -22,7 +22,8 @@ export type PageId =
   | 'ddos'
   | 'queue'
   | 'pm2'
-  | 'system';
+  | 'system'
+  | 'support';
 
 /** Hash-route map: #/media → page id */
 export const PAGE_HASH: Record<string, PageId> = {
@@ -42,6 +43,7 @@ export const PAGE_HASH: Record<string, PageId> = {
   queue: 'queue',
   pm2: 'pm2',
   system: 'system',
+  support: 'support',
 };
 
 export function pageToHash(page: PageId): string {
@@ -65,4 +67,8 @@ export const NAV_ITEMS: { id: PageId; labelKey: string }[] = [
   { id: 'queue', labelKey: 'nav.queue' },
   { id: 'pm2', labelKey: 'nav.pm2' },
   { id: 'system', labelKey: 'nav.system' },
+  { id: 'support', labelKey: 'nav.support' },
 ];
+
+/** Pages with no Admin API — skip pagePrimaryGetPath / route matrix. */
+export const STATIC_NAV_PAGES: readonly PageId[] = ['support'];

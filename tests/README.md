@@ -27,7 +27,7 @@ npm run test:coverage    # coverage report
 ### New Admin page
 
 1. Add `PageId` + `PAGE_HASH` + `NAV_ITEMS` in `admin/src/config/constants.ts`
-2. Add `pagePrimaryGetPath` in `admin/src/pages/page-api.ts`
+2. Add `pagePrimaryGetPath` in `admin/src/pages/page-api.ts` (skip for static pages listed in `STATIC_NAV_PAGES`)
 3. Register renderer in `admin/src/router.ts`
 4. Add L3: `tests/admin/unit/l3/<page>.page.test.ts`
 5. Ensure primary GET is covered in `tests/integration/admin/routes.registry.test.ts` `ADMIN_COVERAGE`

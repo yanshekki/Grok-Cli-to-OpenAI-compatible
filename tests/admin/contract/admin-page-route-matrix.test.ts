@@ -4,7 +4,11 @@
 import { describe, expect, it } from 'vitest';
 import adminRoutes from '../../../src/routes/admin.routes';
 import { pagePrimaryGetPath } from '../../../admin/src/pages/page-api';
-import { NAV_ITEMS, PAGE_HASH } from '../../../admin/src/config/constants';
+import {
+  NAV_ITEMS,
+  PAGE_HASH,
+  STATIC_NAV_PAGES,
+} from '../../../admin/src/config/constants';
 import { listRouterRoutes } from '../../helpers/route-registry';
 
 describe('admin page ↔ route matrix', () => {
@@ -14,6 +18,7 @@ describe('admin page ↔ route matrix', () => {
 
   it('NAV_ITEMS covers all non-login pages in pagePrimaryGetPath', () => {
     for (const item of NAV_ITEMS) {
+      if ((STATIC_NAV_PAGES as readonly string[]).includes(item.id)) continue;
       expect(pagePrimaryGetPath[item.id], item.id).toBeTruthy();
     }
   });

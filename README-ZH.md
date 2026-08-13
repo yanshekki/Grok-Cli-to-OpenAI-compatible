@@ -517,6 +517,7 @@ Admin **JSON API**（`/admin/api/*`）可用：
 | **API 能力** | **分 tab：** 協議 · 媒體 · 能力 · 模擬。KPI 啟用計數。預設：開放／鎖定／開發 |
 | **PM2** | **分 tab：** 運行方式 · 連接埠 · 設定 · 日誌。KPI 進程條。Runner 切換（gctoac ↔ PM2）、監聽 port（預設 3847）、設定、清除日誌 + 自動裁剪 |
 | **系統狀態** | **分 tab：** 軟件 · 套件 · 環境 · **Grok sessions**。Software tab 有 **Grok inspect** 卡（version／channel／models／skills／MCP）。Sessions tab 列出 `~/.grok/sessions`（搜尋 + 刪除）。一鍵更新並重啟 |
+| **支持** | 捐助／GitHub Sponsors／Linktree／加密地址、YSK Limited 服務、**email@ysk.hk** |
 
 Admin 共用 UX：分段 tab + 頂部 KPI 卡片、精簡正式 EN／繁中文案、table 操作按鈕置中；僅需運維刷新的頁面保留右上角 **重新整理**（儀表板／用量／DDoS／PM2）。
 
