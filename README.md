@@ -177,7 +177,7 @@ npm link          # optional: put gctoac on PATH
 ```bash
 npm install -g grok-cli-to-openai-compatible@latest
 # or
-gctoac update              # self-update + schedule restart
+gctoac update              # self-update + migrate + schedule restart
 gctoac update --check      # check only
 gctoac update --no-restart
 ```

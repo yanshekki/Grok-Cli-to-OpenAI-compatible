@@ -174,7 +174,7 @@ npm link          # 可選：把 gctoac 掛到 PATH
 ```bash
 npm install -g grok-cli-to-openai-compatible@latest
 # 或
-gctoac update              # 自我更新並排程重啟
+gctoac update              # 自我更新 + migrate + 排程重啟
 gctoac update --check      # 只檢查
 gctoac update --no-restart
 ```
@@ -223,7 +223,7 @@ PORT=4000
 | `gctoac doctor` | 環境全面檢查 |
 | `gctoac logs` / `logs clear` | 日誌 |
 | `gctoac migrate` / `seed` | DB migrate／seed |
-| `gctoac update` / `update --check` | 自我更新 |
+| `gctoac update` / `update --check` | 自我更新（含錯誤時仍會執行 `gctoac migrate`） |
 | `gctoac open` / `version` | URL／版本 |
 
 ### Admin 登入與面板
