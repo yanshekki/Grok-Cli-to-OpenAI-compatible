@@ -4,7 +4,7 @@ import { updateService } from '../../services/update.service';
 import { fail, info, ok, warn } from '../lib/print';
 import { ensureHomeDirs, resolveRuntimePaths } from '../lib/paths';
 import { ensureEnvFile, loadEnvIntoProcess } from '../lib/env-file';
-import { runPrisma } from '../lib/run-prisma';
+import { tryAutoMigrate } from '../lib/auto-migrate';
 import { Spinner, stepBanner } from '../lib/spinner';
 
 /**
@@ -26,28 +26,16 @@ function applyMigrations(
   packageRoot: string,
   databaseUrl: string,
   spinner: Spinner,
-): void {
-  const env = {
-    ...process.env,
-    DATABASE_URL: databaseUrl,
-  };
-  spinner.start('prisma generate…');
-  try {
-    runPrisma(['generate'], { cwd: packageRoot, packageRoot, env });
-    spinner.succeed('prisma generate');
-  } catch (e) {
-    spinner.fail(
-      `prisma generate: ${e instanceof Error ? e.message : String(e)}`,
-    );
+): boolean {
+  spinner.start('gctoac migrate (prisma deploy)…');
+  const result = tryAutoMigrate({ packageRoot, databaseUrl });
+  if (result.ok) {
+    spinner.succeed('gctoac migrate');
+    ok('Database migrations applied');
+    return true;
   }
-  spinner.start('prisma migrate deploy…');
-  runPrisma(['migrate', 'deploy'], {
-    cwd: packageRoot,
-    packageRoot,
-    env,
-  });
-  spinner.succeed('prisma migrate deploy');
-  ok('Database migrations applied');
+  spinner.fail(`gctoac migrate: ${result.error || 'failed'}`);
+  return false;
 }
 
 /**
@@ -157,15 +145,9 @@ export async function cmdUpdate(opts: {
     ok(result.message);
     info(`Version: ${result.fromVersion} → ${result.toVersion ?? '?'}`);
 
-    try {
-      info('');
-      info('── Final DB migrate (data home) ──');
-      applyMigrations(paths.packageRoot, databaseUrl, spinner);
-    } catch (e) {
-      spinner.stopSilent();
-      warn(
-        `Auto-migrate failed: ${e instanceof Error ? e.message : String(e)}`,
-      );
+    info('');
+    info('── Final DB migrate (data home) ──');
+    if (!applyMigrations(paths.packageRoot, databaseUrl, spinner)) {
       warn('Retry: gctoac migrate');
       code = 1;
     }
@@ -197,6 +179,27 @@ export async function cmdUpdate(opts: {
     spinner.stopSilent();
     fail(e instanceof Error ? e.message : String(e));
     code = 1;
+    // Update failed (git/npm/build) — still apply pending Prisma migrations.
+    try {
+      const paths = resolveRuntimePaths({
+        home: opts.home,
+        forceHome: opts.forceHome ?? Boolean(opts.home),
+      });
+      const envFile = ensureEnvFile(paths);
+      loadEnvIntoProcess(paths.envFile);
+      const databaseUrl = envFile.DATABASE_URL || paths.databaseUrl;
+      info('');
+      info('── Update errored; still running gctoac migrate ──');
+      if (!applyMigrations(paths.packageRoot, databaseUrl, spinner)) {
+        warn('Retry: gctoac migrate');
+      }
+    } catch (migrateErr) {
+      warn(
+        `Auto-migrate after update error failed: ${
+          migrateErr instanceof Error ? migrateErr.message : String(migrateErr)
+        }`,
+      );
+    }
   } finally {
     spinner.stopSilent();
     exitCli(code);

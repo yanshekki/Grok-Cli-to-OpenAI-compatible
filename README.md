@@ -226,7 +226,7 @@ Most control commands talk to the **local DB** (same `DATABASE_URL` as the gatew
 | `gctoac doctor` | Full env check |
 | `gctoac logs` / `logs clear` | Logs |
 | `gctoac migrate` / `seed` | DB migrate / seed |
-| `gctoac update` / `update --check` | Self-update |
+| `gctoac update` / `update --check` | Self-update (always runs `gctoac migrate`, including on error) |
 | `gctoac open` / `version` | URLs / version |
 
 ### Admin login & panel

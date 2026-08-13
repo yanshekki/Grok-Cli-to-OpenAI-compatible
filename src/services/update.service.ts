@@ -230,8 +230,20 @@ export function runPostUpdateMigrate(
   } catch (e) {
     log.push(`prisma generate warn: ${e instanceof Error ? e.message : e}`);
   }
-  runPrisma(['migrate', 'deploy'], packageRoot, log, env, live);
-  log.push('Database migrations applied (migrate deploy)');
+  try {
+    runPrisma(['migrate', 'deploy'], packageRoot, log, env, live);
+    log.push('Database migrations applied (migrate deploy)');
+  } catch (e) {
+    log.push(`migrate deploy warn: ${e instanceof Error ? e.message : e}`);
+    run(
+      `npx --yes prisma@${PRISMA_VERSION} migrate deploy`,
+      packageRoot,
+      log,
+      env,
+      live,
+    );
+    log.push('Database migrations applied (npx fallback)');
+  }
 }
 
 export class UpdateService {
@@ -460,6 +472,21 @@ export class UpdateService {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       log.push(msg);
+      // Code update failed — still try DB migrate so new tables land.
+      try {
+        const dbUrl =
+          options?.databaseUrl ||
+          process.env.DATABASE_URL ||
+          `file:${path.join(packageRoot, 'data', 'gateway.db')}`;
+        log.push('── update error: still running prisma migrate deploy ──');
+        runPostUpdateMigrate(packageRoot, dbUrl, log, live);
+      } catch (migrateErr) {
+        log.push(
+          `migrate after update error: ${
+            migrateErr instanceof Error ? migrateErr.message : migrateErr
+          }`,
+        );
+      }
       throw ExceptionFactory.internal(`Update failed: ${msg}`, { log });
     } finally {
       this.updating = false;
@@ -490,6 +517,7 @@ export class UpdateService {
     const script = [
       'sleep 2',
       `node ${JSON.stringify(cli)} update${homeFlag} || true`,
+      `node ${JSON.stringify(cli)} migrate${homeFlag} || true`,
       `node ${JSON.stringify(cli)} restart${homeFlag}${portFlag} || true`,
     ].join(' && ');
 

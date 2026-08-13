@@ -19,6 +19,7 @@ import {
   stopGateway,
 } from '../lib/process-mgr';
 import { startGatewayWithPm2, stopPm2App } from '../lib/pm2-runner';
+import { tryAutoMigrate } from '../lib/auto-migrate';
 import { baseUrls, fail, info, ok, warn } from '../lib/print';
 
 function tailLog(file: string, maxLines = 30): string {
@@ -51,6 +52,18 @@ export async function cmdStart(opts: {
     envFile = setEnvPort(paths.envFile, opts.port);
   }
   loadEnvIntoProcess(paths.envFile);
+
+  const migrated = tryAutoMigrate({
+    packageRoot: paths.packageRoot,
+    databaseUrl: envFile.DATABASE_URL || paths.databaseUrl,
+  });
+  if (migrated.ok) {
+    ok('Database migrations applied');
+  } else {
+    warn(
+      `Auto-migrate skipped/failed: ${migrated.error || 'unknown'}. Run: gctoac migrate`,
+    );
+  }
 
   const port = Number(opts.port || envFile.PORT || DEFAULT_PORT);
 

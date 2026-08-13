@@ -17,3 +17,22 @@ describe('UpdateService', () => {
     expect(updateService.isUpdating()).toBe(false);
   });
 });
+
+describe('update migrate-on-error wiring', () => {
+  it('Admin one-click script always runs migrate after update', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(
+      join(process.cwd(), 'src/services/update.service.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/update\$\{homeFlag\} \|\| true/);
+    expect(src).toMatch(/migrate\$\{homeFlag\} \|\| true/);
+    expect(src.indexOf('update${homeFlag} || true')).toBeLessThan(
+      src.indexOf('migrate${homeFlag} || true'),
+    );
+    expect(src.indexOf('migrate${homeFlag} || true')).toBeLessThan(
+      src.indexOf('restart${homeFlag}'),
+    );
+  });
+});
