@@ -2299,6 +2299,9 @@ button.dash-kpi:hover {
   background: rgba(59, 130, 246, 0.15);
   color: var(--brand-blue);
 }
+.seg-tab-count:empty {
+  display: none;
+}
 .usage-tab-pane {
   padding: 0;
 }
@@ -2487,11 +2490,44 @@ button.dash-kpi:hover {
   border-bottom: 1px solid var(--border-light);
   background: linear-gradient(180deg, #fff 0%, #fafbfc 100%);
 }
-.system-tabs-panel .system-tab-pane-software .data-table-panel {
+.system-tabs-panel .system-tab-pane-software .data-table-panel,
+.system-tabs-panel .system-tab-pane-sessions .data-table-panel {
   margin: 0;
   border: 0;
   border-radius: 0;
   box-shadow: none;
+}
+.system-inspect-panel {
+  margin: 12px 16px 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+.system-inspect-panel > .panel-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-light);
+  background: linear-gradient(180deg, #fff 0%, #fafbfc 100%);
+}
+.system-inspect-panel .panel-h-sub {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.4;
+}
+.system-inspect-grid {
+  margin-bottom: 0;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+}
+.system-inspect-grid .card {
+  padding: 12px 14px;
+}
+.system-inspect-panel .error-box {
+  margin-top: 12px;
 }
 .system-tab-pane-package,
 .system-tab-pane-env {

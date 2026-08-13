@@ -4892,18 +4892,16 @@ async function renderSystem() {
   state.systemTab = tab;
 
   let sessionPack = { data: [], total: 0 };
-  if (tab === 'sessions') {
-    try {
-      const qs = new URLSearchParams({
-        limit: '50',
-        offset: '0',
-      });
-      if (state.grokSessionQ) qs.set('q', state.grokSessionQ);
-      const sess = await api(`/grok/sessions?${qs}`);
-      sessionPack = { data: sess.data || [], total: sess.total || 0 };
-    } catch (e) {
-      sessionPack = { data: [], total: 0, error: e.message || String(e) };
-    }
+  try {
+    const qs = new URLSearchParams({
+      limit: tab === 'sessions' ? '50' : '1',
+      offset: '0',
+    });
+    if (tab === 'sessions' && state.grokSessionQ) qs.set('q', state.grokSessionQ);
+    const sess = await api(`/grok/sessions?${qs}`);
+    sessionPack = { data: sess.data || [], total: sess.total || 0 };
+  } catch (e) {
+    sessionPack = { data: [], total: 0, error: e.message || String(e) };
   }
 
   const softBody = checks
@@ -4977,23 +4975,40 @@ async function renderSystem() {
     </div>`;
 
   const gi = data.grokInspect;
+  const inspectStats = gi
+    ? [
+        [t('system.grokVersion'), gi.grokVersion || '—'],
+        [t('system.inspectChannel'), gi.channel || '—'],
+        [t('system.inspectDefaultModel'), gi.defaultModel || '—'],
+        [t('system.inspectModels'), String(gi.models?.length ?? 0)],
+        [t('system.inspectSkills'), String(gi.skills ?? 0)],
+        [t('system.inspectMcp'), String(gi.mcpServers ?? 0)],
+        [t('system.inspectPlugins'), String(gi.plugins ?? 0)],
+        [t('system.inspectHooks'), String(gi.hooks ?? 0)],
+      ]
+    : [];
   const inspectCard = gi
     ? `
-    <div class="panel data-table-panel" style="margin-bottom:1rem">
-      <div class="panel-h">${escapeHtml(t('system.grokInspect'))}</div>
-      <div class="panel-b">
-        <div class="muted" style="margin-bottom:0.5rem">${escapeHtml(t('system.grokInspectHint'))}</div>
-        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">
-          <div><div class="label">${escapeHtml(t('system.grokVersion'))}</div><div>${escapeHtml(gi.grokVersion || '—')}</div></div>
-          <div><div class="label">${escapeHtml(t('system.inspectChannel'))}</div><div>${escapeHtml(gi.channel || '—')}</div></div>
-          <div><div class="label">${escapeHtml(t('system.inspectDefaultModel'))}</div><div>${escapeHtml(gi.defaultModel || '—')}</div></div>
-          <div><div class="label">${escapeHtml(t('system.inspectModels'))}</div><div>${gi.models?.length ?? 0}</div></div>
-          <div><div class="label">${escapeHtml(t('system.inspectSkills'))}</div><div>${gi.skills ?? 0}</div></div>
-          <div><div class="label">${escapeHtml(t('system.inspectMcp'))}</div><div>${gi.mcpServers ?? 0}</div></div>
-          <div><div class="label">${escapeHtml(t('system.inspectPlugins'))}</div><div>${gi.plugins ?? 0}</div></div>
-          <div><div class="label">${escapeHtml(t('system.inspectHooks'))}</div><div>${gi.hooks ?? 0}</div></div>
+    <div class="panel system-inspect-panel">
+      <div class="panel-h">
+        <div class="panel-h-text">
+          <strong>${escapeHtml(t('system.grokInspect'))}</strong>
+          <span class="muted panel-h-sub">${escapeHtml(t('system.grokInspectHint'))}</span>
         </div>
-        ${gi.error ? `<div class="error-box" style="margin-top:0.75rem">${escapeHtml(gi.error)}</div>` : ''}
+      </div>
+      <div class="panel-pad">
+        <div class="grid system-inspect-grid">
+          ${inspectStats
+            .map(
+              ([label, value]) => `
+            <div class="card">
+              <div class="label">${escapeHtml(label)}</div>
+              <div class="value value-sm">${escapeHtml(value)}</div>
+            </div>`,
+            )
+            .join('')}
+        </div>
+        ${gi.error ? `<div class="error-box">${escapeHtml(gi.error)}</div>` : ''}
       </div>
     </div>`
     : '';
@@ -5101,7 +5116,7 @@ async function renderSystem() {
         </button>
         <button type="button" role="tab" class="seg-tab ${tab === 'sessions' ? 'is-active' : ''}" data-system-tab="sessions" aria-selected="${tab === 'sessions'}">
           ${escapeHtml(t('system.tabSessions'))}
-          <span class="seg-tab-count">${tab === 'sessions' ? sessionPack.total : ''}</span>
+          <span class="seg-tab-count">${sessionPack.total}</span>
         </button>
       </div>
       <div class="usage-tab-body">
