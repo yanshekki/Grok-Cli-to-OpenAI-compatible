@@ -16,7 +16,7 @@ const envSchema = z.object({
 
   GROK_BIN: z.string().default('grok'),
   GROK_DEFAULT_MODEL: z.string().default('grok-4.6'),
-  GROK_DEFAULT_CWD: z.string().default('.'),
+  GROK_DEFAULT_CWD: z.string().default(''),
   GROK_CWD_ALLOWLIST: z.string().default(''),
   GROK_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
   GROK_MAX_CONCURRENT: z.coerce.number().int().positive().default(4),
@@ -118,12 +118,17 @@ if (!parsed.success) {
 const data = parsed.data;
 const encryptionKey = parseEncryptionKey(data.ENCRYPTION_KEY);
 
+const storageDir = path.resolve(data.STORAGE_DIR);
+const defaultCwd = data.GROK_DEFAULT_CWD.trim()
+  ? path.resolve(data.GROK_DEFAULT_CWD)
+  : path.join(storageDir, 'workspaces', 'default');
+
 const cwdAllowlist = data.GROK_CWD_ALLOWLIST
   ? data.GROK_CWD_ALLOWLIST.split(',')
       .map((s) => s.trim())
       .filter(Boolean)
       .map((p) => path.resolve(p))
-  : [path.resolve(data.GROK_DEFAULT_CWD)];
+  : [defaultCwd];
 
 export const env = {
   ...data,
@@ -132,8 +137,8 @@ export const env = {
     .map((s) => s.trim())
     .filter(Boolean),
   cwdAllowlist,
-  storageDir: path.resolve(data.STORAGE_DIR),
-  defaultCwd: path.resolve(data.GROK_DEFAULT_CWD),
+  storageDir,
+  defaultCwd,
   isProd: data.NODE_ENV === 'production',
   isDev: data.NODE_ENV === 'development',
   /** Number of trusted reverse-proxy hops (0 = off). */

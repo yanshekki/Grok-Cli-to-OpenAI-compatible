@@ -18,11 +18,14 @@ export const logger = pino({
   redact: {
     paths: [
       'req.headers.authorization',
+      'req.headers["x-api-key"]',
       'apiKey',
       'api_key',
       'key',
+      'token',
       'password',
       'ENCRYPTION_KEY',
+      'gog_sess',
     ],
     remove: true,
   },

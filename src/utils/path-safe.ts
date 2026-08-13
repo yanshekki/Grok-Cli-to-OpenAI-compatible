@@ -1,12 +1,23 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { env } from '../config/env';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 
+function resolveMaybeReal(p: string): string {
+  const abs = path.resolve(p);
+  try {
+    if (fs.existsSync(abs)) return fs.realpathSync(abs);
+  } catch {
+    /* ignore */
+  }
+  return abs;
+}
+
 export function resolveSafeCwd(input?: string | null): string {
-  const candidate = path.resolve(input?.trim() || env.defaultCwd);
+  const candidate = resolveMaybeReal(input?.trim() || env.defaultCwd);
 
   const allowed = env.cwdAllowlist.some((root) => {
-    const resolvedRoot = path.resolve(root);
+    const resolvedRoot = resolveMaybeReal(root);
     return candidate === resolvedRoot || candidate.startsWith(resolvedRoot + path.sep);
   });
 

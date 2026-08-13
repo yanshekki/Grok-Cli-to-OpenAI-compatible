@@ -637,7 +637,7 @@ See [`.env.example`](./.env.example). Fresh `gctoac setup` writes **`NODE_ENV=pr
 | `ADMIN_BOOTSTRAP_KEY` | Optional seed admin key on first setup |
 | `GROK_BIN` | Default `grok` |
 | `GROK_DEFAULT_MODEL` | Default model id (`grok-4.6`) |
-| `GROK_DEFAULT_CWD` / `GROK_CWD_ALLOWLIST` | Agent cwd policy |
+| `GROK_DEFAULT_CWD` / `GROK_CWD_ALLOWLIST` | Agent cwd (empty default = `<STORAGE_DIR>/workspaces/default`, not the gateway repo) |
 | `GROK_TIMEOUT_MS` | Default agent timeout (ms) |
 | `GROK_ALWAYS_APPROVE` | Agent only; off in safe mode |
 | `GROK_SAFE_MODE` | Force all keys to safe |

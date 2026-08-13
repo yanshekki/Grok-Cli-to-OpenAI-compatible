@@ -5,6 +5,7 @@ import execa from 'execa';
 import { env } from '../config/env';
 import { isUuid } from '../utils/grok-session';
 import { logger } from '../utils/logger';
+import { grokCliService } from './grok-cli.service';
 
 export type GrokSessionRow = {
   id: string;
@@ -137,7 +138,7 @@ export class GrokSessionsService {
     const result = await execa(env.GROK_BIN, ['sessions', 'delete', id], {
       timeout: 20_000,
       reject: false,
-      env: process.env,
+      env: grokCliService.sanitizedEnv(),
     });
     if (result.exitCode !== 0) {
       const stderr = (result.stderr || result.stdout || '').slice(0, 500);

@@ -217,6 +217,82 @@ function runPrisma(
   );
 }
 
+function gitInstallAndBuild(
+  packageRoot: string,
+  log: string[],
+  live: boolean,
+  doStep: (title: string, fn: () => void) => void,
+): void {
+  const allowDev = process.env.GCTOAC_UPDATE_DEV === '1';
+  if (allowDev) {
+    doStep('npm install --include=dev', () => {
+      run(
+        'npm install --include=dev',
+        packageRoot,
+        log,
+        { NODE_ENV: 'development' },
+        live,
+      );
+    });
+    doStep('npm run build (compile)', () => {
+      run(
+        'npm run build',
+        packageRoot,
+        log,
+        { NODE_ENV: 'development' },
+        live,
+      );
+    });
+    return;
+  }
+  doStep('npm install (production)', () => {
+    run(
+      'npm install --omit=dev',
+      packageRoot,
+      log,
+      { NODE_ENV: 'production' },
+      live,
+    );
+  });
+  doStep('compile with npx (no local devDependencies)', () => {
+    run(
+      `node scripts/generate-allowed-extensions.cjs`,
+      packageRoot,
+      log,
+      undefined,
+      live,
+    );
+    run(
+      `npx --yes prisma@${PRISMA_VERSION} generate`,
+      packageRoot,
+      log,
+      undefined,
+      live,
+    );
+    run(
+      'npx --yes --package typescript@5.8 tsc -p tsconfig.json',
+      packageRoot,
+      log,
+      undefined,
+      live,
+    );
+    run(
+      'node -e "require(\'fs\').chmodSync(\'dist/cli/index.js\',0o755)"',
+      packageRoot,
+      log,
+      undefined,
+      live,
+    );
+    run(
+      'npx --yes --package vite@6.4.3 vite build --config admin/vite.config.ts',
+      packageRoot,
+      log,
+      undefined,
+      live,
+    );
+  });
+}
+
 /** Generate client + migrate deploy against the given DATABASE_URL. */
 export function runPostUpdateMigrate(
   packageRoot: string,
@@ -360,26 +436,7 @@ export class UpdateService {
         doStep('git pull --ff-only', () => {
           run('git pull --ff-only', packageRoot, log, undefined, live);
         });
-        doStep('npm install (dependencies)', () => {
-          // .env defaults NODE_ENV=production; that makes npm omit @types/*
-          // and vite, so the following `tsc` / Admin build fails.
-          run(
-            'npm install --include=dev',
-            packageRoot,
-            log,
-            { NODE_ENV: 'development' },
-            live,
-          );
-        });
-        doStep('npm run build (compile)', () => {
-          run(
-            'npm run build',
-            packageRoot,
-            log,
-            { NODE_ENV: 'development' },
-            live,
-          );
-        });
+        gitInstallAndBuild(packageRoot, log, live, doStep);
       } else if (channel === 'npm-global') {
         doStep(`npm install -g ${NPM_PACKAGE}@latest`, () => {
           run(
@@ -404,24 +461,7 @@ export class UpdateService {
         doStep('git pull --ff-only', () => {
           run('git pull --ff-only', packageRoot, log, undefined, live);
         });
-        doStep('npm install (dependencies)', () => {
-          run(
-            'npm install --include=dev',
-            packageRoot,
-            log,
-            { NODE_ENV: 'development' },
-            live,
-          );
-        });
-        doStep('npm run build (compile)', () => {
-          run(
-            'npm run build',
-            packageRoot,
-            log,
-            { NODE_ENV: 'development' },
-            live,
-          );
-        });
+        gitInstallAndBuild(packageRoot, log, live, doStep);
       } else {
         doStep(`npm install -g ${NPM_PACKAGE}@latest`, () => {
           run(

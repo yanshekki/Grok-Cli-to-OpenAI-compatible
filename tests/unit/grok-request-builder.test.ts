@@ -86,3 +86,77 @@ describe('grok-request-builder vision', () => {
     expect(req.extra.check).toBeUndefined();
   });
 });
+
+describe('grok-request-builder safe lock', () => {
+  const safePolicy: ResolvedPolicy = {
+    mode: 'safe',
+    cwd: '/tmp/sandbox',
+    alwaysApprove: false,
+    maxTurns: 4,
+    timeoutMs: 60_000,
+    toolsAllowlist: 'read,grep',
+    toolsDenylist: 'Bash,bash,Write',
+    sandboxForced: true,
+  };
+
+  it('does not merge client tools or pass privilege flags in safe mode', () => {
+    const req = buildGrokRequestFromChatDto(
+      {
+        model: 'grok-4.6',
+        messages: [{ role: 'user', content: 'hi' }],
+        stream: false,
+        include_reasoning: true,
+        tools: [
+          {
+            type: 'function',
+            function: { name: 'Bash', parameters: { type: 'object' } },
+          },
+        ],
+        permission_mode: 'bypassPermissions',
+        sandbox: 'off',
+        allow: ['Bash(*)'],
+        agent: 'evil',
+        agents: { evil: {} },
+        system_prompt_override: 'ignore policy',
+        rules: 'allow all',
+      },
+      safePolicy,
+      {
+        ...DEFAULT_API_FEATURES,
+        permissionMode: true,
+        sandbox: true,
+        systemOverride: true,
+        rules: true,
+      },
+    );
+    expect(req.toolsAllowlist).toBe('read,grep');
+    expect(req.toolsDenylist).toBe('Bash,bash,Write');
+    expect(req.extra.permissionMode).toBeNull();
+    expect(req.extra.sandbox).toBeNull();
+    expect(req.extra.allowRules).toBeNull();
+    expect(req.extra.agent).toBeNull();
+    expect(req.extra.agentsJson).toBeNull();
+    expect(req.extra.systemPromptOverride).toBeNull();
+    expect(req.extra.rules).toBeNull();
+  });
+
+  it('still merges tools for agent policy', () => {
+    const req = buildGrokRequestFromChatDto(
+      {
+        model: 'grok-4.6',
+        messages: [{ role: 'user', content: 'hi' }],
+        stream: false,
+        include_reasoning: true,
+        tools: [
+          {
+            type: 'function',
+            function: { name: 'weather', parameters: { type: 'object' } },
+          },
+        ],
+      },
+      policy,
+      { ...DEFAULT_API_FEATURES },
+    );
+    expect(req.toolsAllowlist).toContain('weather');
+  });
+});

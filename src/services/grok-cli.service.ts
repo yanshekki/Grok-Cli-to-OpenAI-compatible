@@ -443,14 +443,38 @@ export class GrokCliService {
     }
   }
 
-  private sanitizedEnv(): NodeJS.ProcessEnv {
-    const {
-      DATABASE_URL: _db,
-      ENCRYPTION_KEY: _enc,
-      ADMIN_BOOTSTRAP_KEY: _admin,
-      ...rest
-    } = process.env;
-    return rest;
+  sanitizedEnv(): NodeJS.ProcessEnv {
+    const allow = new Set([
+      'PATH',
+      'HOME',
+      'USER',
+      'LOGNAME',
+      'SHELL',
+      'LANG',
+      'LC_ALL',
+      'LC_CTYPE',
+      'TERM',
+      'TMPDIR',
+      'TMP',
+      'TEMP',
+      'TZ',
+      'GROK_HOME',
+      'GROK_BIN',
+      'XDG_CONFIG_HOME',
+      'XDG_CACHE_HOME',
+      'XDG_DATA_HOME',
+    ]);
+    const out: NodeJS.ProcessEnv = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v == null) continue;
+      if (allow.has(k) || k.startsWith('GROK_') || k.startsWith('XAI_')) {
+        if (k === 'ENCRYPTION_KEY' || k === 'DATABASE_URL' || k === 'ADMIN_BOOTSTRAP_KEY') {
+          continue;
+        }
+        out[k] = v;
+      }
+    }
+    return out;
   }
 }
 

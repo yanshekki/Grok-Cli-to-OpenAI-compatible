@@ -1,5 +1,9 @@
 import type { CreateChatCompletionDto } from '../dto/chat.dto';
 import { logger } from './logger';
+import {
+  assertResolvedPublicHost,
+  parsePublicHttpUrl,
+} from './ssrf';
 
 export const VISION_FETCH_TIMEOUT_MS = 10_000;
 export const VISION_FETCH_MAX_BYTES = 8 * 1024 * 1024;
@@ -8,7 +12,7 @@ type ChatMessage = CreateChatCompletionDto['messages'][number];
 
 export type VisionFetchImpl = (
   url: string,
-  init: { signal: AbortSignal },
+  init: { signal: AbortSignal; redirect?: RequestRedirect },
 ) => Promise<{
   ok: boolean;
   status: number;
@@ -17,7 +21,12 @@ export type VisionFetchImpl = (
 }>;
 
 function isHttpUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url.trim());
+  try {
+    parsePublicHttpUrl(url);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function sniffImageMime(bytes: Buffer, headerMime: string): string | null {
@@ -63,12 +72,38 @@ async function fetchAsDataUrl(
     timeoutMs: number;
     maxBytes: number;
     fetchImpl: VisionFetchImpl;
+    resolveDns: boolean;
+    hops?: number;
   },
 ): Promise<string | null> {
+  let current: string;
+  try {
+    current = parsePublicHttpUrl(url).href;
+  } catch {
+    return null;
+  }
+  if (opts.resolveDns) {
+    try {
+      await assertResolvedPublicHost(new URL(current).hostname);
+    } catch {
+      return null;
+    }
+  }
+
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), opts.timeoutMs);
   try {
-    const res = await opts.fetchImpl(url, { signal: ac.signal });
+    const res = await opts.fetchImpl(current, {
+      signal: ac.signal,
+      redirect: 'manual',
+    });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      const hops = opts.hops ?? 0;
+      if (!loc || hops >= 3) return null;
+      const next = new URL(loc, current).href;
+      return fetchAsDataUrl(next, { ...opts, hops: hops + 1 });
+    }
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length === 0 || buf.length > opts.maxBytes) return null;
@@ -131,6 +166,7 @@ export async function inlineRemoteImageUrls(
 ): Promise<ChatMessage[]> {
   const timeoutMs = opts?.timeoutMs ?? VISION_FETCH_TIMEOUT_MS;
   const maxBytes = opts?.maxBytes ?? VISION_FETCH_MAX_BYTES;
+  const usingDefaultFetch = !opts?.fetchImpl;
   const fetchImpl = opts?.fetchImpl ?? (globalThis.fetch as VisionFetchImpl);
   if (typeof fetchImpl !== 'function') return messages;
 
@@ -156,6 +192,7 @@ export async function inlineRemoteImageUrls(
         timeoutMs,
         maxBytes,
         fetchImpl,
+        resolveDns: usingDefaultFetch,
       });
       nextParts.push(rewritePart(rec, dataUrl, url));
     }

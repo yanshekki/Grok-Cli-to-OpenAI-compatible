@@ -43,7 +43,7 @@ describe('update migrate-on-error wiring', () => {
       join(process.cwd(), 'src/services/update.service.ts'),
       'utf8',
     );
-    expect(src).toContain('npm install --include=dev');
-    expect(src).toMatch(/NODE_ENV:\s*'development'/);
+    expect(src).toContain('GCTOAC_UPDATE_DEV');
+    expect(src).toContain('npm install --omit=dev');
   });
 });

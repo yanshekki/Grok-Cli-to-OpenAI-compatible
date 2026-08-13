@@ -75,10 +75,14 @@ export class AdminAuthService {
     expiresAt: Date;
     id: string;
   }> {
-    // Invalidate unused expired OTPs
+    // One live code only: drop used, expired, and previous unused OTPs.
     await prisma.adminOtp.deleteMany({
       where: {
-        OR: [{ expiresAt: { lt: new Date() } }, { usedAt: { not: null } }],
+        OR: [
+          { expiresAt: { lt: new Date() } },
+          { usedAt: { not: null } },
+          { usedAt: null },
+        ],
       },
     });
 
@@ -114,7 +118,7 @@ export class AdminAuthService {
     const candidates = await prisma.adminOtp.findMany({
       where: { usedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
-      take: 20,
+      take: 3,
     });
 
     let matched: (typeof candidates)[0] | null = null;

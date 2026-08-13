@@ -79,6 +79,27 @@ export async function cmdDoctor(opts: {
       ok('NODE_ENV=production (or production default)');
     }
 
+    const cwd = env.GROK_DEFAULT_CWD || '(storage/workspaces/default)';
+    const allow = env.GROK_CWD_ALLOWLIST || cwd;
+    info(`GROK_DEFAULT_CWD: ${cwd}`);
+    const envDir = path.dirname(paths.envFile);
+    const roots = String(allow)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const dangerous = [paths.packageRoot, envDir];
+    if (
+      roots.some((r) =>
+        dangerous.some(
+          (d) => r === d || r.startsWith(`${d}${path.sep}`) || d.startsWith(`${r}${path.sep}`),
+        ),
+      )
+    ) {
+      warn(
+        'GROK_CWD_ALLOWLIST / GROK_DEFAULT_CWD includes the gateway root or .env directory — agent keys can read ENCRYPTION_KEY',
+      );
+    }
+
     // Proxy / reverse proxy
     const trust = env.TRUST_PROXY ?? '1';
     const src = env.PROXY_IP_SOURCE || 'auto';

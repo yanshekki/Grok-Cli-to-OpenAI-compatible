@@ -334,18 +334,22 @@ export function buildGrokRequestFromChatDto(
     }
   }
 
-  // Tools allowlist: request tool names ∪ policy allowlist
+  const safeLocked = policy.mode === 'safe' || policy.sandboxForced;
+
+  // Tools allowlist: request tool names ∪ policy allowlist.
+  // Safe mode must not let the client expand tools (P0-1).
   let toolsAllowlist = policy.toolsAllowlist;
   let toolsDenylist = policy.toolsDenylist;
-  if (features.tools && dto.tools?.length) {
+  if (features.tools && dto.tools?.length && !safeLocked) {
     const names = extractToolNames(dto.tools);
     if (names.length) {
       const existing = toolsAllowlist ? toolsAllowlist.split(',') : [];
       toolsAllowlist = [...new Set([...existing, ...names])].join(',');
     }
   }
-  if (features.forceDisableToolsInSafe && policy.mode === 'safe') {
-    // keep policy denylist / allowlist as-is (already safe)
+  if (safeLocked) {
+    toolsAllowlist = policy.toolsAllowlist;
+    toolsDenylist = policy.toolsDenylist;
   }
   if (!features.webSearch) {
     // ensure web tools denied
@@ -364,20 +368,20 @@ export function buildGrokRequestFromChatDto(
 
   const extra: Partial<GrokRunOptions> = {
     reasoningEffort: effort || null,
-    systemPromptOverride: dto.system_prompt_override || null,
-    rules: dto.rules || null,
-    permissionMode: dto.permission_mode || null,
-    sandbox: dto.sandbox || null,
-    allowRules: dto.allow || null,
+    systemPromptOverride: safeLocked ? null : dto.system_prompt_override || null,
+    rules: safeLocked ? null : dto.rules || null,
+    permissionMode: safeLocked ? null : dto.permission_mode || null,
+    sandbox: safeLocked ? null : dto.sandbox || null,
+    allowRules: safeLocked ? null : dto.allow || null,
     denyRules: dto.deny || null,
     disableWebSearch: dto.disable_web_search || !features.webSearch,
     noSubagents: dto.no_subagents ?? !features.subagents,
     noPlan: dto.no_plan ?? !features.planMode,
     noMemory: dto.no_memory ?? false,
-    experimentalMemory: dto.experimental_memory && features.memory,
+    experimentalMemory: !safeLocked && dto.experimental_memory && features.memory,
     verbatim: Boolean(dto.verbatim),
-    agent: dto.agent || null,
-    agentsJson: dto.agents ? JSON.stringify(dto.agents) : null,
+    agent: safeLocked ? null : dto.agent || null,
+    agentsJson: safeLocked ? null : dto.agents ? JSON.stringify(dto.agents) : null,
     resumeSessionId: dto.resume || null,
     continueSession: Boolean(dto.continue),
     forkSession: Boolean(dto.fork_session),

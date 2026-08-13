@@ -574,7 +574,7 @@ proxy_set_header X-Forwarded-Proto $scheme;
 | `ADMIN_BOOTSTRAP_KEY` | 可選；首次 setup 用此字串作 admin key |
 | `GROK_BIN` | 預設 `grok` |
 | `GROK_DEFAULT_MODEL` | 預設模型（`grok-4.6`） |
-| `GROK_DEFAULT_CWD` / `GROK_CWD_ALLOWLIST` | Agent cwd 政策 |
+| `GROK_DEFAULT_CWD` / `GROK_CWD_ALLOWLIST` | Agent 工作目錄（空白預設為 `<STORAGE_DIR>/workspaces/default`，不會使用 gateway 原始碼目錄） |
 | `GROK_TIMEOUT_MS` | Agent 預設 timeout（ms） |
 | `GROK_ALWAYS_APPROVE` | 只對 agent；safe 一律關閉 |
 | `GROK_SAFE_MODE` | 強制全部 key 用 safe |

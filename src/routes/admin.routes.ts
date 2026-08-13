@@ -28,6 +28,7 @@ import { asyncHandler } from '../utils/async-handler';
 import { adminAuthHandlers } from '../controllers/admin/auth.handlers';
 import { adminOtpLoginSchema } from '../dto/admin-auth.dto';
 import {
+  adminApiLimiter,
   chatBurstLimiter,
   chatRateLimiter,
 } from '../middlewares/rate-limit.middleware';
@@ -46,6 +47,7 @@ const ensureAdminPanel = asyncHandler(async (_req, _res, next) => {
 });
 
 router.use(ensureAdminPanel);
+router.use(adminApiLimiter);
 
 // Public: OTP → session (rate-limited via global + burst helpers)
 router.post(

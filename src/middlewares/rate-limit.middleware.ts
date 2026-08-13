@@ -85,6 +85,20 @@ function buildChatLimiter(): RateLimitRequestHandler {
   });
 }
 
+function buildAdminLimiter(): RateLimitRequestHandler {
+  return rateLimit({
+    windowMs: 60_000,
+    max: 180,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req: Request) => `admin-ip:${clientIp(req)}`,
+    handler: (req) => {
+      onRateLimited(req, 'Admin API rate limit exceeded');
+    },
+    validate: { xForwardedForHeader: false },
+  });
+}
+
 function buildBurstLimiter(): RateLimitRequestHandler {
   const p = ddosPolicyService.getSync();
   return rateLimit({
@@ -106,11 +120,13 @@ function buildBurstLimiter(): RateLimitRequestHandler {
 let _global: RateLimitRequestHandler = buildGlobalLimiter();
 let _chat: RateLimitRequestHandler = buildChatLimiter();
 let _burst: RateLimitRequestHandler = buildBurstLimiter();
+let _admin: RateLimitRequestHandler = buildAdminLimiter();
 
 export function rebuildRateLimiters(): void {
   _global = buildGlobalLimiter();
   _chat = buildChatLimiter();
   _burst = buildBurstLimiter();
+  _admin = buildAdminLimiter();
 }
 
 /** Wrappers so app.use / routes always hit the latest limiter instances. */
@@ -145,6 +161,14 @@ export function chatBurstLimiter(
   next: NextFunction,
 ): void {
   _burst(req, res, next);
+}
+
+export function adminApiLimiter(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  _admin(req, res, next);
 }
 
 // Rebuild when Admin saves policy

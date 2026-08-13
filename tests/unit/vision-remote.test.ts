@@ -87,4 +87,34 @@ describe('inlineRemoteImageUrls', () => {
     const part = (out[0]!.content as Array<Record<string, unknown>>)[0];
     expect((part as { type?: string }).type).toBe('text');
   });
+
+  it('does not fetch loopback, metadata, or file URLs', async () => {
+    let fetched = 0;
+    const fetchImpl = async () => {
+      fetched += 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'image/png' },
+        arrayBuffer: async () => PNG_1X1,
+      };
+    };
+    const blocked = [
+      'http://127.0.0.1/secret.png',
+      'http://169.254.169.254/latest/meta-data',
+      'http://[::1]/a.png',
+      'file:///etc/passwd',
+      'http://localhost/x.png',
+    ];
+    for (const url of blocked) {
+      fetched = 0;
+      const out = await inlineRemoteImageUrls(
+        [{ role: 'user', content: [{ type: 'image_url', image_url: { url } }] }],
+        { fetchImpl },
+      );
+      expect(fetched).toBe(0);
+      const part = (out[0]!.content as Array<Record<string, unknown>>)[0];
+      expect(part).toMatchObject({ type: 'image_url' });
+    }
+  });
 });
