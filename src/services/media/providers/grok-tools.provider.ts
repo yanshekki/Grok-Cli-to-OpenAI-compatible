@@ -14,6 +14,31 @@ import type {
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
 const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.mkv']);
+const IMAGE_OUTPUT_BASENAMES = [
+  'output.png',
+  'output.jpg',
+  'output.webp',
+  'output.jpeg',
+] as const;
+const VIDEO_OUTPUT_BASENAMES = ['output.mp4'] as const;
+const IGNORED_MEDIA_BASENAMES = new Set([
+  'input.png',
+  'mask.png',
+  'frame.png',
+]);
+
+const GENERATE_HARD_RULES = [
+  'HARD RULES (override everything in Prompt below):',
+  '- The first tool call MUST be image_gen.',
+  '- Save the result as output.png in the sandbox root (current working directory). Do not write only under refs/ and do not leave the file only in session images/.',
+  '- Forbidden: web_search, web_fetch, browsing Wikipedia, curl, wget, or downloading reference photos.',
+  '- There are NO attached stills and NO workspace references. Even if Prompt says to check the workspace or lock to attached stills, treat as no refs.',
+  '- Do not start an image_edit loop unless output.png already exists.',
+  '- Do not only describe the image.',
+].join('\n');
+
+const NO_WEB_RULE =
+  'Do not use web_search, web_fetch, Wikipedia, curl, or wget.';
 
 function mimeFromExt(ext: string): string {
   switch (ext.toLowerCase()) {
@@ -55,6 +80,7 @@ export class GrokToolsMediaProvider implements MediaProvider {
       ? ` If multi-image edit needs a canvas, use aspect_ratio="${req.aspectRatio}".`
       : ' Preserve the source image aspect ratio unless the instruction requires otherwise.';
     const prompt =
+      `${NO_WEB_RULE}\n` +
       `Edit the image ./${srcName} according to the instruction and save the result as output.png in the current working directory.\n` +
       `Use the image_edit tool with the source file path.${aspectHint}\n` +
       `Instruction: ${req.prompt}\n` +
@@ -63,6 +89,7 @@ export class GrokToolsMediaProvider implements MediaProvider {
       ...req,
       prompt,
       sandbox,
+      toolsAllowlist: 'image_edit',
     });
   }
 
@@ -75,14 +102,15 @@ export class GrokToolsMediaProvider implements MediaProvider {
       req.size ||
       '1:1';
     const prompt =
-      `Generate an image for the following prompt and save it as a real PNG file in the current working directory as output.png.\n` +
+      `${GENERATE_HARD_RULES}\n\n` +
       `Prompt: ${req.prompt}\n` +
       `Use the image_gen tool with aspect_ratio="${aspect}" (Grok Imagine).\n` +
-      `You must produce a real image file on disk (output.png). Do not only describe the image.`;
+      `You must produce a real image file on disk (output.png).`;
     return this.runGrokCollectImages({
       ...req,
       prompt,
       sandbox,
+      toolsAllowlist: 'image_gen',
     });
   }
 
@@ -235,6 +263,7 @@ export class GrokToolsMediaProvider implements MediaProvider {
           maxTurns,
           alwaysApprove,
           permissionMode,
+          toolsAllowlist: req.toolsAllowlist ?? null,
           collect: req.collect,
           sandbox,
         },
@@ -264,9 +293,14 @@ export class GrokToolsMediaProvider implements MediaProvider {
       );
     }
 
-    const afterList = [...(await listFn(sandbox))];
-    const newFiles = afterList.filter((f) => !before.has(f));
-    const candidates = newFiles.length ? newFiles : afterList;
+    const after = await listFn(sandbox);
+    const candidates = await selectCollectedMedia({
+      sandbox,
+      before,
+      after,
+      collect: req.collect,
+      n: req.n ?? 1,
+    });
 
     if (!candidates.length) {
       throw ExceptionFactory.mediaGenerationFailed(
@@ -319,21 +353,142 @@ async function listVideoFiles(dir: string): Promise<Set<string>> {
   return listMediaFiles(dir, VIDEO_EXTS);
 }
 
-async function listMediaFiles(
+export function isIgnoredMediaName(name: string): boolean {
+  const base = path.basename(name);
+  const lower = base.toLowerCase();
+  if (IGNORED_MEDIA_BASENAMES.has(lower)) return true;
+  return /^ref-.*\.png$/i.test(base);
+}
+
+function isInsideSandbox(sandboxReal: string, candidateReal: string): boolean {
+  return (
+    candidateReal === sandboxReal ||
+    candidateReal.startsWith(sandboxReal + path.sep)
+  );
+}
+
+async function resolveInsideSandbox(
+  sandboxReal: string,
+  candidate: string,
+): Promise<string | null> {
+  try {
+    const real = await fs.realpath(candidate);
+    return isInsideSandbox(sandboxReal, real) ? real : null;
+  } catch {
+    const abs = path.resolve(candidate);
+    return isInsideSandbox(sandboxReal, abs) ? abs : null;
+  }
+}
+
+/** Recursive sandbox scan. Never follows links out of `dir` (not ~/.grok/sessions). */
+export async function listMediaFiles(
   dir: string,
   exts: Set<string>,
 ): Promise<Set<string>> {
   const out = new Set<string>();
+  let root: string;
   try {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
+    root = await fs.realpath(dir);
+  } catch {
+    return out;
+  }
+
+  const walk = async (current: string): Promise<void> => {
+    const contained = await resolveInsideSandbox(root, current);
+    if (!contained) return;
+    let entries: Awaited<ReturnType<typeof fs.readdir>>;
+    try {
+      entries = await fs.readdir(contained, { withFileTypes: true });
+    } catch {
+      return;
+    }
     for (const e of entries) {
-      if (!e.isFile()) continue;
+      const full = path.join(contained, e.name);
+      const next = await resolveInsideSandbox(root, full);
+      if (!next) continue;
+      try {
+        const st = await fs.stat(next);
+        if (st.isDirectory()) {
+          await walk(next);
+          continue;
+        }
+        if (!st.isFile()) continue;
+      } catch {
+        continue;
+      }
+      if (isIgnoredMediaName(e.name)) continue;
       const ext = path.extname(e.name).toLowerCase();
       if (!exts.has(ext)) continue;
-      out.add(path.join(dir, e.name));
+      out.add(next);
     }
+  };
+
+  await walk(root);
+  return out;
+}
+
+async function rankByMtimeNewest(files: string[]): Promise<string[]> {
+  const scored = await Promise.all(
+    files.map(async (file) => {
+      try {
+        const st = await fs.stat(file);
+        return { file, mtime: st.mtimeMs };
+      } catch {
+        return { file, mtime: 0 };
+      }
+    }),
+  );
+  scored.sort((a, b) => b.mtime - a.mtime);
+  return scored.map((s) => s.file);
+}
+
+function rootOutputPath(
+  sandboxReal: string,
+  after: Set<string>,
+  name: string,
+): string | null {
+  const want = path.join(sandboxReal, name);
+  for (const file of after) {
+    if (path.resolve(file) === want) return file;
+  }
+  return null;
+}
+
+/** Prefer root output.*, then files new this run, then newest mtime in sandbox. */
+export async function selectCollectedMedia(opts: {
+  sandbox: string;
+  before: Set<string>;
+  after: Set<string>;
+  collect: 'image' | 'video';
+  n?: number;
+}): Promise<string[]> {
+  const n = Math.min(Math.max(opts.n ?? 1, 1), 4);
+  let sandboxReal: string;
+  try {
+    sandboxReal = await fs.realpath(opts.sandbox);
   } catch {
-    /* empty */
+    sandboxReal = path.resolve(opts.sandbox);
+  }
+
+  const preferred: string[] = [];
+  const outputNames =
+    opts.collect === 'video' ? VIDEO_OUTPUT_BASENAMES : IMAGE_OUTPUT_BASENAMES;
+  for (const name of outputNames) {
+    const hit = rootOutputPath(sandboxReal, opts.after, name);
+    if (hit) preferred.push(hit);
+  }
+
+  const afterList = [...opts.after];
+  const newFiles = afterList.filter((f) => !opts.before.has(f));
+  const fillPool = newFiles.length ? newFiles : afterList;
+  const ranked = await rankByMtimeNewest(
+    fillPool.filter((f) => !preferred.includes(f)),
+  );
+
+  const out: string[] = [];
+  for (const file of [...preferred, ...ranked]) {
+    if (out.length >= n) break;
+    if (!out.includes(file)) out.push(file);
   }
   return out;
 }
