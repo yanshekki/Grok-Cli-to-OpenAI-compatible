@@ -57,10 +57,24 @@ describe('client-ip security', () => {
     expect(getClientIp(req)).toBe('198.51.100.10');
   });
 
-  it('trusts CF-Connecting-IP only from loopback proxy', () => {
+  it('ignores client-injected CF-Connecting-IP behind nginx (no CF-Ray)', () => {
     const req = mockReq({
       remoteAddress: '127.0.0.1',
-      headers: { 'cf-connecting-ip': '8.8.8.8' },
+      headers: {
+        'cf-connecting-ip': '8.8.8.8',
+        'x-real-ip': '203.0.113.20',
+      },
+    });
+    expect(getClientIp(req)).toBe('203.0.113.20');
+  });
+
+  it('trusts CF-Connecting-IP from loopback only when CF-Ray is present', () => {
+    const req = mockReq({
+      remoteAddress: '127.0.0.1',
+      headers: {
+        'cf-connecting-ip': '8.8.8.8',
+        'cf-ray': 'abc123-SJC',
+      },
     });
     expect(getClientIp(req)).toBe('8.8.8.8');
   });

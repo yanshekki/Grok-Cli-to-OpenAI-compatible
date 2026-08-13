@@ -7,7 +7,15 @@ export const corsOptions: CorsOptions = {
       callback(null, true);
       return;
     }
-    if (env.corsOrigins.includes('*') || env.corsOrigins.includes(origin)) {
+    if (env.corsOrigins.includes('*')) {
+      if (env.isProd) {
+        callback(new Error('CORS origin * is not allowed in production'));
+        return;
+      }
+      callback(null, true);
+      return;
+    }
+    if (env.corsOrigins.includes(origin)) {
       callback(null, true);
       return;
     }

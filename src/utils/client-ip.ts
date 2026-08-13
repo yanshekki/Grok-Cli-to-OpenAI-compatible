@@ -176,8 +176,13 @@ export function getClientIp(
     return ip && ip !== 'unknown' ? ip : null;
   };
 
-  // Cloudflare (only from trusted peer)
-  if (cfg.source === 'cloudflare' || cfg.source === 'auto') {
+  // Cloudflare headers only when explicitly selected, or auto + CF-Ray
+  // (nginx on loopback must not honor a client-injected CF-Connecting-IP).
+  const looksLikeCloudflare = Boolean(header(req, 'cf-ray'));
+  if (
+    cfg.source === 'cloudflare' ||
+    (cfg.source === 'auto' && looksLikeCloudflare)
+  ) {
     const cf =
       pickHeader('cf-connecting-ip') || pickHeader('true-client-ip');
     if (cf) return cf;

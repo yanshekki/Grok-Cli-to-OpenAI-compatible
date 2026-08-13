@@ -1543,12 +1543,14 @@ async function renderDashboard() {
       : t('dash.kpiSafeOff')
     : '—';
   const safeKpiSub = safety
-    ? tf('dash.kpiSafeSub', {
-        tools: safety.safeToolsMode || '—',
-        turns: safety.safeMaxTurns ?? '—',
-        model: safety.defaultModel || '—',
-      })
-    : t('dash.kpiSafeSubEmpty');
+    ? escapeHtml(
+        tf('dash.kpiSafeSub', {
+          tools: safety.safeToolsMode || '—',
+          turns: safety.safeMaxTurns ?? '—',
+          model: safety.defaultModel || '—',
+        }),
+      )
+    : escapeHtml(t('dash.kpiSafeSubEmpty'));
 
   const bodyHtml = (d.recentChats || [])
     .map(
