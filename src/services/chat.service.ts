@@ -77,19 +77,20 @@ function policyToRunOpts(
   },
 ): GrokRunOptions {
   return {
+    ...(base.extra || {}),
     prompt: base.prompt,
     model: base.model,
-    cwd: policy.cwd,
     stream: base.stream,
     sessionId: base.sessionId,
+    promptJson: base.promptJson,
+    jsonSchema: base.jsonSchema,
+    toolsAllowlist: base.toolsAllowlist ?? policy.toolsAllowlist,
+    toolsDenylist: base.toolsDenylist ?? policy.toolsDenylist,
+    // Policy always wins — client extra must not override jail / approve.
+    cwd: policy.cwd,
     timeoutMs: policy.timeoutMs,
     alwaysApprove: policy.alwaysApprove,
     maxTurns: policy.maxTurns,
-    toolsAllowlist: base.toolsAllowlist ?? policy.toolsAllowlist,
-    toolsDenylist: base.toolsDenylist ?? policy.toolsDenylist,
-    promptJson: base.promptJson,
-    jsonSchema: base.jsonSchema,
-    ...(base.extra || {}),
   };
 }
 
@@ -360,17 +361,21 @@ export class ChatService {
       }
 
       const extra: Partial<GrokRunOptions> = { ...builtReq.extra };
-      if (
-        dto.session_id?.trim() &&
-        !extra.resumeSessionId &&
-        !extra.continueSession
-      ) {
+      // Never pass raw client resume / OS-global --continue (cross-tenant).
+      extra.continueSession = false;
+      const sessionHint =
+        dto.session_id?.trim() || extra.resumeSessionId || '';
+      extra.resumeSessionId = undefined;
+      extra.sessionId = extra.sessionId;
+      extra.forkSession = Boolean(extra.forkSession && sessionHint);
+      if (sessionHint) {
         const binding = await grokSessionMapService.resolve(
           ctx.apiKey.id,
-          dto.session_id,
+          sessionHint,
         );
         if (binding.mode === 'resume') {
           extra.resumeSessionId = binding.grokSessionId;
+          extra.sessionId = undefined;
         } else {
           extra.sessionId = binding.grokSessionId;
         }

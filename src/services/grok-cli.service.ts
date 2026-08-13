@@ -264,6 +264,7 @@ export class GrokCliService {
       const result = await execa(env.GROK_BIN, args, {
         timeout,
         reject: false,
+        cwd: await this.ensureRunCwd(options.cwd),
         env: this.sanitizedEnv(),
         maxBuffer: 20 * 1024 * 1024,
       });
@@ -336,6 +337,7 @@ export class GrokCliService {
     const proc = execa(env.GROK_BIN, args, {
       timeout,
       reject: false,
+      cwd: await this.ensureRunCwd(options.cwd),
       env: this.sanitizedEnv(),
       buffer: false,
     });
@@ -441,6 +443,12 @@ export class GrokCliService {
       // Fallback: treat entire stdout as plain text
       return { text: trimmed };
     }
+  }
+
+  private async ensureRunCwd(cwd?: string): Promise<string> {
+    const dir = cwd?.trim() || env.defaultCwd;
+    await fs.mkdir(dir, { recursive: true });
+    return dir;
   }
 
   sanitizedEnv(): NodeJS.ProcessEnv {

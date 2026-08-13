@@ -186,39 +186,26 @@ export class MediaJobsService {
       const { settingsService } = await import('../settings.service');
       const { env } = await import('../../config/env');
       const { resolveGrokAspectRatio } = await import('../../config/constants');
-      const pathMod = await import('node:path');
-      const fsMod = await import('node:fs/promises');
 
       let sourceBytes: Buffer | null = opts.sourceBytes?.length
         ? opts.sourceBytes
         : null;
       if (!sourceBytes && opts.sourceAssetId) {
-        try {
-          const got = await mediaStoreService.readBytes(
-            opts.sourceAssetId,
-            apiKeyId,
-          );
-          sourceBytes = got.bytes;
-        } catch {
-          const row = await prisma.mediaAsset.findFirst({
-            where: { id: opts.sourceAssetId, deletedAt: null },
-          });
-          if (row) {
-            const full = pathMod.join(env.storageDir, 'media', row.storagePath);
-            sourceBytes = await fsMod.readFile(full);
-          }
-        }
+        const got = await mediaStoreService.readBytes(
+          opts.sourceAssetId,
+          apiKeyId,
+        );
+        sourceBytes = got.bytes;
       } else if (opts.sourceDocumentId) {
-        const doc = await prisma.document.findFirst({
-          where: { id: opts.sourceDocumentId, deletedAt: null },
-        });
-        if (doc) {
-          const { documentService } = await import('../document.service');
-          sourceBytes = await documentService.readDecryptedContent(
-            doc.apiKeyId,
-            doc.id,
-          );
-        }
+        const { documentService } = await import('../document.service');
+        const doc = await documentService.getOwned(
+          apiKeyId,
+          opts.sourceDocumentId,
+        );
+        sourceBytes = await documentService.readDecryptedContent(
+          doc.apiKeyId,
+          doc.id,
+        );
       }
 
       const settings = await settingsService.getAll();

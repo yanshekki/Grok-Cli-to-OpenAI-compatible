@@ -7,6 +7,7 @@ import {
 
 export const VISION_FETCH_TIMEOUT_MS = 10_000;
 export const VISION_FETCH_MAX_BYTES = 8 * 1024 * 1024;
+export const VISION_FETCH_MAX_URLS = 8;
 
 type ChatMessage = CreateChatCompletionDto['messages'][number];
 
@@ -18,7 +19,45 @@ export type VisionFetchImpl = (
   status: number;
   headers: { get(name: string): string | null };
   arrayBuffer(): Promise<ArrayBuffer>;
+  body?: ReadableStream<Uint8Array> | null;
 }>;
+
+async function readCappedBody(
+  res: {
+    headers: { get(name: string): string | null };
+    arrayBuffer(): Promise<ArrayBuffer>;
+    body?: ReadableStream<Uint8Array> | null;
+  },
+  maxBytes: number,
+): Promise<Buffer | null> {
+  const cl = Number(res.headers.get('content-length'));
+  if (Number.isFinite(cl) && cl > maxBytes) return null;
+  const stream = res.body;
+  if (stream && typeof stream.getReader === 'function') {
+    const reader = stream.getReader();
+    const chunks: Buffer[] = [];
+    let n = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        n += value.byteLength;
+        if (n > maxBytes) {
+          await reader.cancel().catch(() => undefined);
+          return null;
+        }
+        chunks.push(Buffer.from(value));
+      }
+    } catch {
+      return null;
+    }
+    return Buffer.concat(chunks);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > maxBytes) return null;
+  return buf;
+}
 
 function isHttpUrl(url: string): boolean {
   try {
@@ -105,8 +144,8 @@ async function fetchAsDataUrl(
       return fetchAsDataUrl(next, { ...opts, hops: hops + 1 });
     }
     if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length === 0 || buf.length > opts.maxBytes) return null;
+    const buf = await readCappedBody(res, opts.maxBytes);
+    if (!buf || buf.length === 0) return null;
     const mime = sniffImageMime(buf, res.headers.get('content-type') || '');
     if (!mime) return null;
     return `data:${mime};base64,${buf.toString('base64')}`;
@@ -171,6 +210,7 @@ export async function inlineRemoteImageUrls(
   if (typeof fetchImpl !== 'function') return messages;
 
   const out: ChatMessage[] = [];
+  let fetched = 0;
   for (const msg of messages) {
     if (!Array.isArray(msg.content)) {
       out.push(msg);
@@ -188,6 +228,11 @@ export async function inlineRemoteImageUrls(
         nextParts.push(part);
         continue;
       }
+      if (fetched >= VISION_FETCH_MAX_URLS) {
+        nextParts.push(rewritePart(rec, null, url));
+        continue;
+      }
+      fetched += 1;
       const dataUrl = await fetchAsDataUrl(url, {
         timeoutMs,
         maxBytes,
