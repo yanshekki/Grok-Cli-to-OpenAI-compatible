@@ -326,7 +326,8 @@ const HITS: Hit[] = [
     method: 'POST',
     path: '/admin/api/system/update',
     dangerous: true,
-    body: {},
+    // Must not schedule a real git/npm update — that rewrites node_modules mid-suite.
+    body: { restart: false },
     ok: [200, 400, 500, 501, 503],
   },
   {

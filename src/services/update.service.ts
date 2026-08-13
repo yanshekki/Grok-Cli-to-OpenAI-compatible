@@ -380,6 +380,11 @@ export class UpdateService {
     live?: boolean;
     progress?: UpdateProgress;
   }): Promise<UpdateResult> {
+    if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+      throw ExceptionFactory.validation(
+        'Refusing system update while NODE_ENV=test / VITEST',
+      );
+    }
     if (this.updating) {
       throw ExceptionFactory.validation('Update already in progress');
     }
@@ -567,6 +572,11 @@ export class UpdateService {
     home?: string;
     port?: number;
   }): { scheduled: true; message: string } {
+    if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+      throw ExceptionFactory.validation(
+        'Refusing scheduled update/restart while NODE_ENV=test / VITEST',
+      );
+    }
     if (this.updating) {
       throw ExceptionFactory.validation('Update already in progress');
     }
