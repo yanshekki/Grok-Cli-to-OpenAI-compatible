@@ -35,4 +35,15 @@ describe('update migrate-on-error wiring', () => {
       src.indexOf('restart${homeFlag}'),
     );
   });
+
+  it('git-channel update installs devDependencies so tsc can compile', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(
+      join(process.cwd(), 'src/services/update.service.ts'),
+      'utf8',
+    );
+    expect(src).toContain('npm install --include=dev');
+    expect(src).toMatch(/NODE_ENV:\s*'development'/);
+  });
 });

@@ -361,10 +361,24 @@ export class UpdateService {
           run('git pull --ff-only', packageRoot, log, undefined, live);
         });
         doStep('npm install (dependencies)', () => {
-          run('npm install', packageRoot, log, undefined, live);
+          // .env defaults NODE_ENV=production; that makes npm omit @types/*
+          // and vite, so the following `tsc` / Admin build fails.
+          run(
+            'npm install --include=dev',
+            packageRoot,
+            log,
+            { NODE_ENV: 'development' },
+            live,
+          );
         });
         doStep('npm run build (compile)', () => {
-          run('npm run build', packageRoot, log, undefined, live);
+          run(
+            'npm run build',
+            packageRoot,
+            log,
+            { NODE_ENV: 'development' },
+            live,
+          );
         });
       } else if (channel === 'npm-global') {
         doStep(`npm install -g ${NPM_PACKAGE}@latest`, () => {
@@ -391,10 +405,22 @@ export class UpdateService {
           run('git pull --ff-only', packageRoot, log, undefined, live);
         });
         doStep('npm install (dependencies)', () => {
-          run('npm install', packageRoot, log, undefined, live);
+          run(
+            'npm install --include=dev',
+            packageRoot,
+            log,
+            { NODE_ENV: 'development' },
+            live,
+          );
         });
         doStep('npm run build (compile)', () => {
-          run('npm run build', packageRoot, log, undefined, live);
+          run(
+            'npm run build',
+            packageRoot,
+            log,
+            { NODE_ENV: 'development' },
+            live,
+          );
         });
       } else {
         doStep(`npm install -g ${NPM_PACKAGE}@latest`, () => {
