@@ -24,10 +24,10 @@ Production OpenAI-compatible HTTP gateway for local **[Grok CLI](https://x.ai)**
 - Per-key **safe** / **agent** policy + global safety overrides
 - AES-256-GCM encryption + full chat audit
 - **Admin Panel** — OTP login (`gctoac admin otp`), dashboard, chats, keys, documents, audit, usage, **media library**, **chat queue**, **DDoS center**, Safety settings, **API features**, PM2, system update — pages use a consistent **KPI + segmented tabs** layout
-- **Media library** — studio (generate / edit / image-to-video), assets & jobs tabs, browser preview lightbox (image / video / audio / PDF / text)
+- **Media library** — studio (generate / edit / **image-to-video 1–15s** / **reference-to-video + preset voices**), assets & jobs tabs, browser preview lightbox (image / video / audio / PDF / text)
 - **Durable chat queue** — every conversation is enqueued with leases, then consumed by an in-process worker; Admin pause / drain / cancel / DLQ; optional `Idempotency-Key`; offline stream collect when no live Response
 - **DDoS / abuse protection** — configurable rate limits, multi-rule auto-ban, reverse-proxy client IP (nginx / Cloudflare)
-- Control CLI: lifecycle + **settings / api features / queue / ddos / keys / docs / chats / stats / models / admin sessions**
+- Control CLI: lifecycle + **settings / api features / queue / ddos / keys / docs / chats / stats / models / admin sessions / grok inspect / grok sessions**
 - **API features** (Admin tabs + `gctoac api features`): protocol + Grok CLI capability gates (tools, vision, json-schema, effort, …)
 
 ### Capability parity (Grok CLI–backed “100%”)
@@ -38,7 +38,7 @@ Production OpenAI-compatible HTTP gateway for local **[Grok CLI](https://x.ai)**
 | Vision / image parts | ✅ | ✅ | ✅ | `vision` |
 | **Images** `/v1/images/generations` + `/edits` | ✅ OpenAI-shaped | — | — | `imagesApi` + agent key |
 | **Files** `/v1/files` (docs alias) | ✅ | — | — | `filesOpenAiAlias` |
-| **Videos** `/v1/videos` (async job) | ✅ mock / poll | — | — | `videoApi` |
+| **Videos** `/v1/videos` | ✅ Grok `image_to_video` (1–15s) / `reference_to_video` + voices | — | — | `videoApi` |
 | **Audio** `/v1/audio/speech` + `/transcriptions` | ✅ mock or 503 | — | — | `audioApi` + provider env |
 | Tools (allowlist → Grok) | ✅ | ✅ | ✅ (incl. `tool_use`/`tool_result`) | `tools` |
 | tool_calls in response | ✅* | text+meta | ✅ `tool_use` blocks | `tools` |
@@ -182,6 +182,8 @@ gctoac update --check      # check only
 gctoac update --no-restart
 ```
 
+Git checkouts: update runs `npm install --include=dev` then `npm run build` (so `NODE_ENV=production` in `.env` does not strip TypeScript types). Always runs `gctoac migrate`, including if compile fails.
+
 Or Admin → **System** → one-click update.
 
 ---
@@ -314,12 +316,12 @@ gctoac logs clear
 | Encryption | AES-256-GCM for prompts, responses, files |
 | Chat history | Multi-turn conversations, context modes (full / summary / recent) |
 | Admin Panel | OTP session login; **tabbed** pages (queue / media / system / PM2 / DDoS / API features); compact EN/ZH copy |
-| Media library | Studio (gen/edit/video), assets & jobs, multi-format preview lightbox (`blob:` CSP-safe) |
+| Media library | Studio (gen/edit/**1–15s video**/voices), assets & jobs, multi-format preview lightbox (`blob:` CSP-safe) |
 | Chat queue | Durable SQLite jobs, fair RR, pause/drain, DLQ, Idempotency-Key, `QUEUE_BACKEND`, offline stream fallback |
 | DDoS center | Live connections, blacklist, auto-ban rules, presets, runtime policy (tabbed) |
 | Reverse proxy | Trust hops + CF / nginx / X-Forwarded-For client IP |
 | Auth | API keys: **scrypt** hashes (legacy SHA-256 auto-migrates); Admin SPA: OTP → session token |
-| CLI | Full control plane: lifecycle, settings, queue, DDoS, keys, docs, chats, stats, `admin otp` |
+| CLI | Full control plane: lifecycle, settings, queue, DDoS, keys, docs, chats, stats, `admin otp`, `grok inspect`, `grok sessions` |
 | Ops | SQLite, PM2, log auto-trim (>5 MB), GitHub Actions CI |
 
 ---
@@ -407,8 +409,7 @@ curl -s http://127.0.0.1:3847/v1/messages \
 ```
 
 Also accepts `Authorization: Bearer $API_KEY`.  
-Supported: text `system` + user/assistant messages, stream SSE (`message_start` … `message_stop`).  
-Not supported: image blocks, `tool_use` / `tool_result`.
+Supported: text `system` + user/assistant messages, **image blocks** (ACP `--prompt-json`), `tool_use` / `tool_result`, stream SSE (`message_start` … `message_stop`).
 
 ### API compatibility matrix
 
@@ -444,9 +445,15 @@ Not supported: image blocks, `tool_use` / `tool_result`.
 | `include_reasoning` | Default `true`. Maps Grok `thought` → `reasoning_content` |
 | `cwd` | **agent** only (allowlist); **safe** forces sandbox |
 | `session_id` | Mapped to a per-key Grok UUID: first call uses `-s`, later calls `--resume` (Grok 1.0+). |
+| `resume` | Grok session UUID (`--resume`). Admin playground Resume field. |
+| `fork_session` | Fork that session instead of continuing it. |
+| `reasoning_effort` / `effort` | Grok `--reasoning-effort` (`none`…`max`). Gate: `reasoningEffort`. |
+| `experimental_memory` / `no_memory` | Grok memory flags. Gate: `memory`. |
+| `no_plan` | Disable plan mode. Gate: `planMode`. |
+| `permission_mode` | `default` / `acceptEdits` / `auto` / `dontAsk` / `bypassPermissions` / `plan`. Gate: `permissionMode`. |
 | `document_ids` | Inject decrypted documents as context |
 | `temperature`, `top_p`, `stop`, `user` | Accepted for SDK compatibility; **not applied** by Grok CLI |
-| `tools` / `functions` | Rejected with 400 |
+| `tools` / `functions` | Mapped to Grok when **`tools`** is enabled (otherwise 400) |
 | `response_format: json_object` | Best-effort system hint only |
 
 ### Thinking mapping
@@ -455,6 +462,8 @@ Not supported: image blocks, `tool_use` / `tool_result`.
 |------------|-------------------------|--------|
 | `thought` | `reasoning_content` / `delta.reasoning_content` | `thought` alias |
 | `text` | `content` / `delta.content` | — |
+| `tool_call` / `tool_call_update` / `plan` | extra `grok_event` on the chunk | OpenAI SDK ignores unknown fields |
+| `usage` / `cost` | `usage` (+ cache / cost when Grok sends them) | — |
 | `end` | `finish_reason` | `grok.sessionId`, `grok.stopReason` |
 
 ### Durable chat queue
@@ -477,7 +486,7 @@ Stream preview:
 ```text
 data: {"object":"gog.queue","status":"queued","job_id":"…","position":2}
 data: {"object":"gog.queue","status":"queued","job_id":"…","position":1}
-data: {"id":"chatcmpl-…","object":"chat.completion.chunk",…}
+data: {"id":"chatcmpl-…","object":"chat.completion.chunk","grok_event":{"type":"tool_call",…},…}
 ```
 
 Admin ops (OTP **session** token or admin API key):
@@ -504,6 +513,10 @@ POST /admin/api/queue/purge-dead
 | POST | `/v1/responses` | OpenAI Responses (text + store) |
 | GET/DELETE | `/v1/responses/:id` | Retrieve / soft-delete stored response |
 | POST | `/v1/messages` | Anthropic Messages (Bearer or `x-api-key`) |
+| POST | `/v1/videos` | Grok video job (`seconds` 1–15; `voices[]` → `reference_to_video`) |
+| GET | `/v1/videos/:id` | Poll video job |
+| GET | `/admin/api/grok/inspect` | Local `grok inspect --json` snapshot |
+| GET/DELETE | `/admin/api/grok/sessions`… | List / delete `~/.grok/sessions` |
 | POST/GET/DELETE | `/v1/assistants`… | Assistants-lite (feature `assistantsEmulation`) |
 | POST/GET | `/v1/threads`… | Threads + messages + runs (Assistants-lite) |
 | POST | `/v1/documents` | Upload (`file` field) |
@@ -554,19 +567,19 @@ Admin **JSON API** (`/admin/api/*`) accepts either:
 | Page | Features |
 |------|----------|
 | **Dashboard** | 24h KPIs, success rate, **queue depth**, protection snapshot, models, runtime (port / encryption) |
-| **Chat** | Multi-turn playground, history, context modes, attachments (also goes through the durable queue when enabled) |
+| **Chat** | Multi-turn playground: effort, resume/fork UUID, memory / no-plan / permission, tool chips + cost, history, context modes, attachments (queued when enabled) |
 | **Chat logs** | Search / filter / pager; full **decrypted** prompt / reasoning / response |
 | **API Keys** | Create / edit mode / role / rate limit / IP whitelist; revoke |
 | **Documents** | Search / filter / pager; preview, download, delete; storage DB vs filesystem |
 | **Audit Logs** | Search / filter / pager; human-readable actions |
 | **Usage & limits** | 24h stats, by-model / by-key tabs, gateway limit summary |
-| **Media** | **Tabs:** Studio · Assets · Jobs. KPI strip. Studio modes: generate / edit / image-to-video (Grok aspect ratios). Library picker + drag-drop source. Preview lightbox (image/video/audio/PDF/text) |
+| **Media** | **Tabs:** Studio · Assets · Jobs. KPI strip. Studio: generate / edit / **image-to-video (1–15s)** / **voice** (`ara` `eve` `leo` `rex` `sal` `mio` → `reference_to_video`). Library picker + drag-drop. Preview lightbox |
 | **Queue** | **Tabs:** Overview · Jobs · Policy. KPI strip (auto soft-refresh). Pause/drain, DLQ filter, cancel/requeue/priority/purge, concurrency & fairness presets |
 | **DDoS center** | **Tabs:** Policy · Traffic · Blacklist · Events. KPI strip. Live connections, recent requests, auto-ban events, top IPs, **runtime protection policy** (relaxed / balanced / strict / custom), reverse-proxy IP |
 | **Safety settings** | Global safe mode, tools / turns / timeout, default model, concise presets, disable Admin panel (re-enable only via CLI) |
 | **API features** | **Tabs:** Protocols · Media · Capabilities · Emulation. KPI enabled counts. Presets: open / locked / dev |
 | **PM2** | **Tabs:** Runner · Port · Config · Logs. KPI process strip. Runner switch (gctoac ↔ PM2), listen port (default 3847), config, clear logs + auto-trim |
-| **System** | **Tabs:** Software · Package · Environment. KPI runtime strip (DB / Grok CLI / concurrency / encryption). One-click update & restart |
+| **System** | **Tabs:** Software · Package · Environment · **Grok sessions**. Software tab has a **Grok inspect** card (version / channel / models / skills / MCP). Sessions tab lists `~/.grok/sessions` (search + delete). One-click update & restart |
 
 Shared Admin UX: segmented tabs + top KPI cards, compact formal EN/ZH strings, table action buttons centered; only operational pages keep a top-right **Refresh** (dashboard / usage / DDoS / PM2).
 
@@ -622,7 +635,7 @@ See [`.env.example`](./.env.example). Fresh `gctoac setup` writes **`NODE_ENV=pr
 | `ENCRYPTION_KEY` | 32-byte key: `openssl rand -base64 32` |
 | `ADMIN_BOOTSTRAP_KEY` | Optional seed admin key on first setup |
 | `GROK_BIN` | Default `grok` |
-| `GROK_DEFAULT_MODEL` | Default model id |
+| `GROK_DEFAULT_MODEL` | Default model id (`grok-4.6`) |
 | `GROK_DEFAULT_CWD` / `GROK_CWD_ALLOWLIST` | Agent cwd policy |
 | `GROK_TIMEOUT_MS` | Default agent timeout (ms) |
 | `GROK_ALWAYS_APPROVE` | Agent only; off in safe mode |

@@ -24,10 +24,10 @@
 - 每把 key 的 **safe** / **agent** 政策 + 全域安全覆寫
 - AES-256-GCM 加密 + 完整 chat 稽核
 - **Admin Panel** — OTP 登入（`gctoac admin otp`）、儀表板、對話、金鑰、文件、稽核、用量、**媒體庫**、**對話佇列**、**DDoS 中心**、安全設定、**API 能力**、PM2、系統更新；各頁統一 **KPI + 分 tab** 版面
-- **媒體庫** — 工作室（生成／編輯／圖生影片）、資產與工作列表、瀏覽器預覽 lightbox（圖／片／聲／PDF／文字）
+- **媒體庫** — 工作室（生成／編輯／**圖生影片 1–15 秒**／**reference-to-video + 預設配音**）、資產與工作列表、瀏覽器預覽 lightbox（圖／片／聲／PDF／文字）
 - **持久化對話佇列** — 每個對話先入隊（租約認領）再由進程內 worker 消費；Admin 可暫停／排空／取消／死信；可選 `Idempotency-Key`；無 live Response 時離線收集串流結果
 - **DDoS／防濫用** — 可配置限流、多規則自動封鎖、反向代理真實客戶端 IP（nginx / Cloudflare）
-- 控制 CLI：生命週期 + **settings / api features / queue / ddos / keys / docs / chats / stats / models / admin sessions**（與 Admin 對齊，見下方 CLI 表）
+- 控制 CLI：生命週期 + **settings / api features / queue / ddos / keys / docs / chats / stats / models / admin sessions / grok inspect / grok sessions**（與 Admin 對齊，見下方 CLI 表）
 - **API features**（Admin 分 tab + `gctoac api features`）：協議與 Grok 能力閘（tools / vision / schema / effort…）
 
 ### Grok CLI 能力對齊（產品「100%」定義）
@@ -38,12 +38,13 @@
 | Vision / 圖片 | ✅ | ✅ | ✅ | `vision` |
 | Images `/v1/images/generations` + `/edits` | ✅ | — | — | `imagesApi` + agent key |
 | Files `/v1/files` | ✅ | — | — | `filesOpenAiAlias` |
-| Videos `/v1/videos`（async job） | ✅ mock | — | — | `videoApi` |
+| Videos `/v1/videos` | ✅ Grok `image_to_video`（1–15 秒）／`reference_to_video` + voices | — | — | `videoApi` |
 | Audio speech / transcriptions | ✅ mock 或 503 | — | — | `audioApi` + provider env |
 | Tools | ✅ | ✅ | ✅（含 `tool_use`/`tool_result`） | `tools` |
 | 回應 tool_calls | ✅* | 文字 | ✅ `tool_use` | `tools` |
 | JSON schema | ✅ | ✅ | 可透傳 | `structuredOutput` |
 | Reasoning effort | ✅ | ✅ | thinking→effort | `reasoningEffort` |
+| Session resume / fork | ✅ | — | — | `sessionResume` |
 | Assistants-lite | — | — | — | `assistantsEmulation` |
 | temperature 等採樣 | 接受† | 接受† | 接受† | `strictSampling` |
 
@@ -76,7 +77,7 @@ Client (OpenAI SDK / curl / Open WebUI)
 ### 1. 前置要求
 
 - **Node.js** ≥ 20  
-- 已安裝並登入 **Grok CLI**：
+- **Grok CLI**（Grok Build **1.0+**）已安裝並登入：
 
 ```bash
 curl -fsSL https://x.ai/cli/install.sh | bash
@@ -179,6 +180,8 @@ gctoac update --check      # 只檢查
 gctoac update --no-restart
 ```
 
+Git 工作目錄：update 會跑 `npm install --include=dev` 再 `npm run build`（避免 `.env` 的 `NODE_ENV=production` 令 tsc 缺 `@types`）。compile 失敗仍會執行 `gctoac migrate`。
+
 亦可在 Admin → **系統狀態** → 一鍵更新。
 
 ---
@@ -276,6 +279,9 @@ PORT=4000
 | 指令 | 說明 |
 |------|------|
 | `gctoac stats` | 儀表板式摘要 |
+| `gctoac grok inspect` | 本機 Grok Build 快照（version、models、skills、MCP） |
+| `gctoac grok sessions` | 列出本機 Grok CLI sessions |
+| `gctoac grok sessions delete <id> --yes` | 永久刪除一個 Grok session |
 | `gctoac models [--refresh]` | 本機 Grok 模型列表 |
 | `gctoac docs list\|show\|delete` | 文件（delete 需 `--yes`） |
 | `gctoac chats list\|show` | API 對話請求（meta） |
@@ -308,12 +314,12 @@ gctoac logs clear
 | 加密 | AES-256-GCM 加密 prompt、response、檔案 |
 | 對話歷史 | 多輪對話、上下文模式（full / summary / recent） |
 | Admin Panel | OTP session 登入；**分 tab** 頁面（佇列／媒體／系統／PM2／DDoS／API 能力）；精簡 EN／繁中文案 |
-| 媒體庫 | 工作室（生成／編輯／影片）、資產與工作、多格式預覽 lightbox（`blob:` CSP 安全） |
+| 媒體庫 | 工作室（生成／編輯／**1–15 秒影片**／配音）、資產與工作、多格式預覽 lightbox（`blob:` CSP 安全） |
 | 對話佇列 | 持久化 SQLite 工作、公平輪詢、暫停／排空、死信、Idempotency-Key、`QUEUE_BACKEND`、離線串流 fallback |
 | DDoS 中心 | 即時連線、黑名單、自動封鎖、可配置策略與預設檔（分 tab） |
 | 反向代理 | 信任層數 + CF / nginx / X-Forwarded-For 真實 IP |
 | 認證 | API key：**scrypt** hash（舊 SHA-256 登入時自動升級）；Admin SPA：OTP → session |
-| CLI | 生命週期、preferred runner、日誌、自我更新、`admin otp` |
+| CLI | 生命週期、preferred runner、日誌、自我更新、`admin otp`、`grok inspect`、`grok sessions` |
 | 運維 | SQLite、PM2、日誌自動裁剪（>5 MB）、GitHub Actions CI |
 
 ---
@@ -381,7 +387,14 @@ console.log(res.choices[0].message.content);
 | `include_reasoning` | 預設 `true`；Grok `thought` → `reasoning_content` |
 | `cwd` | 僅 **agent**（allowlist 內）；**safe** 強制 sandbox |
 | `session_id` | 按 API key 映射成 Grok UUID：第一次 `-s`，之後 `--resume`（Grok 1.0+） |
+| `resume` | Grok session UUID（`--resume`）。Admin playground Resume 欄。 |
+| `fork_session` | 由該 session 分支出去。 |
+| `reasoning_effort` / `effort` | Grok `--reasoning-effort`（`none`…`max`）。閘：`reasoningEffort`。 |
+| `experimental_memory` / `no_memory` | Grok memory。閘：`memory`。 |
+| `no_plan` | 關閉 plan mode。閘：`planMode`。 |
+| `permission_mode` | `default` / `acceptEdits` / `auto` / `dontAsk` / `bypassPermissions` / `plan`。閘：`permissionMode`。 |
 | `document_ids` | 注入已解密文件內容 |
+| `tools` / `functions` | **`tools`** 開啟時映射到 Grok（否則 400） |
 
 ### Thinking 對應
 
@@ -389,6 +402,8 @@ console.log(res.choices[0].message.content);
 |-----------|------------------------|------|
 | `thought` | `reasoning_content` / `delta.reasoning_content` | `thought` 別名 |
 | `text` | `content` / `delta.content` | — |
+| `tool_call` / `tool_call_update` / `plan` | chunk 上的 `grok_event` | OpenAI SDK 會忽略未知欄位 |
+| `usage` / `cost` | `usage`（Grok 有回 cache／cost 就帶上） | — |
 | `end` | `finish_reason` | `grok.sessionId`、`grok.stopReason` |
 
 ### 持久化對話佇列
@@ -411,7 +426,7 @@ Stream 預覽：
 ```text
 data: {"object":"gog.queue","status":"queued","job_id":"…","position":2}
 data: {"object":"gog.queue","status":"queued","job_id":"…","position":1}
-data: {"id":"chatcmpl-…","object":"chat.completion.chunk",…}
+data: {"id":"chatcmpl-…","object":"chat.completion.chunk","grok_event":{"type":"tool_call",…},…}
 ```
 
 Admin 操作（OTP **session** token 或 admin API key）：
@@ -437,6 +452,10 @@ POST /admin/api/queue/purge-dead
 | POST | `/v1/chat/completions` | OpenAI Chat（佇列；可選 `Idempotency-Key`） |
 | POST | `/v1/responses` | OpenAI Responses 文字子集 |
 | POST | `/v1/messages` | Anthropic Messages（Bearer 或 `x-api-key`） |
+| POST | `/v1/videos` | Grok 影片 job（`seconds` 1–15；`voices[]` → `reference_to_video`） |
+| GET | `/v1/videos/:id` | 查影片 job |
+| GET | `/admin/api/grok/inspect` | 本機 `grok inspect --json` 快照 |
+| GET/DELETE | `/admin/api/grok/sessions`… | 列出／刪除 `~/.grok/sessions` |
 | POST | `/v1/documents` | 上傳（欄位 `file`） |
 | GET/DELETE | `/v1/documents`… | 列表 / 軟刪除 |
 | POST/GET/DELETE | `/v1/api-keys`… | Admin 管理 key |
@@ -485,19 +504,19 @@ Admin **JSON API**（`/admin/api/*`）可用：
 | 頁面 | 功能 |
 |------|------|
 | **儀表板** | 24h KPI、成功率、**佇列深度**、防護摘要、模型用量、運行狀態（port／加密） |
-| **對話** | 多輪 playground、歷史、上下文模式、附件（佇列啟用時同樣先入隊） |
+| **對話** | 多輪 playground：effort、resume/fork UUID、memory／no-plan／permission、tool chip + cost、歷史、上下文模式、附件（佇列啟用時同樣先入隊） |
 | **對話記錄** | 搜尋／篩選／分頁；**完整解密** prompt／reasoning／response |
 | **API 金鑰** | 建立／編輯 mode／role／限流／IP 白名單；撤銷 |
 | **文件** | 搜尋／篩選／分頁；預覽、下載、刪除；DB 與檔案系統儲存 |
 | **稽核日誌** | 搜尋／篩選／分頁；可讀動作標籤 |
 | **用量與防護** | 24h 統計、按模型／按金鑰分 tab、限流摘要 |
-| **媒體庫** | **分 tab：** 工作室 · 資產 · 工作。KPI 條。工作室模式：生成／編輯／圖生影片（Grok 長寬比）。素材庫選取 + 拖放來源。預覽 lightbox（圖／片／聲／PDF／文字） |
+| **媒體庫** | **分 tab：** 工作室 · 資產 · 工作。KPI 條。工作室：生成／編輯／**圖生影片（1–15 秒）**／**配音**（`ara` `eve` `leo` `rex` `sal` `mio` → `reference_to_video`）。素材庫選取 + 拖放。預覽 lightbox |
 | **佇列** | **分 tab：** 總覽 · 工作列表 · 政策。KPI 條（自動 soft-refresh）。暫停／排空、死信篩選、取消／重新入隊／優先級／清理、併發與公平預設 |
 | **DDoS 中心** | **分 tab：** 政策 · 流量 · 黑名單 · 事件。KPI 條。即時連線、最近請求、自動封鎖事件、熱門 IP、**運行時防護策略**（寬鬆／均衡／嚴格／自訂）、反向代理 IP |
 | **安全設定** | 全域 safe、工具／turns／timeout、預設模型、精簡預設方案、關閉 Admin 面板（只能用 CLI 重開） |
 | **API 能力** | **分 tab：** 協議 · 媒體 · 能力 · 模擬。KPI 啟用計數。預設：開放／鎖定／開發 |
 | **PM2** | **分 tab：** 運行方式 · 連接埠 · 設定 · 日誌。KPI 進程條。Runner 切換（gctoac ↔ PM2）、監聽 port（預設 3847）、設定、清除日誌 + 自動裁剪 |
-| **系統狀態** | **分 tab：** 軟件 · 套件 · 環境。KPI 運行條（DB／Grok CLI／併發／加密）。一鍵更新並重啟 |
+| **系統狀態** | **分 tab：** 軟件 · 套件 · 環境 · **Grok sessions**。Software tab 有 **Grok inspect** 卡（version／channel／models／skills／MCP）。Sessions tab 列出 `~/.grok/sessions`（搜尋 + 刪除）。一鍵更新並重啟 |
 
 Admin 共用 UX：分段 tab + 頂部 KPI 卡片、精簡正式 EN／繁中文案、table 操作按鈕置中；僅需運維刷新的頁面保留右上角 **重新整理**（儀表板／用量／DDoS／PM2）。
 
@@ -553,7 +572,7 @@ proxy_set_header X-Forwarded-Proto $scheme;
 | `ENCRYPTION_KEY` | 32-byte key：`openssl rand -base64 32` |
 | `ADMIN_BOOTSTRAP_KEY` | 可選；首次 setup 用此字串作 admin key |
 | `GROK_BIN` | 預設 `grok` |
-| `GROK_DEFAULT_MODEL` | 預設模型 |
+| `GROK_DEFAULT_MODEL` | 預設模型（`grok-4.6`） |
 | `GROK_DEFAULT_CWD` / `GROK_CWD_ALLOWLIST` | Agent cwd 政策 |
 | `GROK_TIMEOUT_MS` | Agent 預設 timeout（ms） |
 | `GROK_ALWAYS_APPROVE` | 只對 agent；safe 一律關閉 |
