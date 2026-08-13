@@ -87,7 +87,7 @@ export class GrokToolsMediaProvider implements MediaProvider {
   }
 
   /**
-   * Grok image_to_video: animate a source frame (duration 6 or 10 only).
+   * Grok image_to_video: animate a source frame (duration 1–15s).
    */
   async generateVideoFromImage(req: {
     prompt: string;
@@ -106,10 +106,12 @@ export class GrokToolsMediaProvider implements MediaProvider {
     await fs.mkdir(sandbox, { recursive: true });
     const srcName = 'frame.png';
     await fs.writeFile(path.join(sandbox, srcName), req.imageBytes);
-    const seconds = req.seconds === 10 ? 10 : 6;
+    const raw = Number(req.seconds);
+    const seconds =
+      Number.isFinite(raw) && raw >= 1 && raw <= 15 ? Math.round(raw) : 6;
     const prompt =
       `Animate the image ./${srcName} into a short video and save it as output.mp4 in the current working directory.\n` +
-      `Use the image_to_video tool with duration=${seconds} (Grok only supports 6 or 10 seconds).\n` +
+      `Use the image_to_video tool with duration=${seconds} (Grok supports 1–15 seconds).\n` +
       `Motion / camera instruction: ${req.prompt}\n` +
       `You must produce a real video file on disk (output.mp4).`;
     return this.runGrokCollectMedia({

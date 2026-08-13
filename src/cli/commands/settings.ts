@@ -82,7 +82,7 @@ async function readSettings(
       safeToolsMode: map.get(SETTING_KEYS.SAFE_TOOLS_MODE) || 'readonly',
       safeMaxTurns: parseIntOr(map.get(SETTING_KEYS.SAFE_MAX_TURNS), 4),
       safeTimeoutMs: parseIntOr(map.get(SETTING_KEYS.SAFE_TIMEOUT_MS), 120_000),
-      defaultModel: map.get(SETTING_KEYS.DEFAULT_MODEL) || envDefaultModel || 'grok-4.5',
+      defaultModel: map.get(SETTING_KEYS.DEFAULT_MODEL) || envDefaultModel || 'grok-4.6',
       adminPanelEnabled: parseBool(map.get(SETTING_KEYS.ADMIN_PANEL_ENABLED), true),
     };
   });

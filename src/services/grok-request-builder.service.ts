@@ -40,41 +40,150 @@ function toolsToSystemHint(tools: unknown[] | undefined): string {
   }
 }
 
-function buildPromptJson(
+/** Keep --prompt-json off argv when it would blow ARG_MAX. */
+export const PROMPT_JSON_ARGV_MAX = 32_000;
+
+export type GrokVisionBuild = {
+  promptJson: string;
+  files: Array<{ filename: string; mimeType: string; bytes: Buffer }>;
+  tooLargeForArgv: boolean;
+};
+
+function extForMime(mime: string): string {
+  const m = mime.toLowerCase();
+  if (m.includes('jpeg') || m.includes('jpg')) return '.jpg';
+  if (m.includes('webp')) return '.webp';
+  if (m.includes('gif')) return '.gif';
+  if (m.includes('png')) return '.png';
+  return '.png';
+}
+
+function parseDataUrl(url: string): { mimeType: string; data: string } | null {
+  const m = url.match(/^data:([^;,]+)?(?:;charset=[^;,]+)?;base64,(.+)$/s);
+  if (m) {
+    return { mimeType: (m[1] || 'image/png').trim(), data: m[2]! };
+  }
+  if (url.startsWith('data:')) {
+    const raw = url.replace(/^data:[^,]*,/, '');
+    return { mimeType: 'image/png', data: raw };
+  }
+  return null;
+}
+
+function acpImageBlock(
+  mimeType: string,
+  data: string,
+): { type: 'image'; mimeType: string; data: string } {
+  return { type: 'image', mimeType, data };
+}
+
+function visionFromPart(
+  p: Record<string, unknown>,
+  fileIndex: number,
+): {
+  block: unknown;
+  file?: { filename: string; mimeType: string; bytes: Buffer };
+} | null {
+  if (p.type === 'text' || (typeof p.text === 'string' && !p.type)) {
+    return { block: { type: 'text', text: String(p.text ?? '') } };
+  }
+
+  // Anthropic: { type:'image', source:{ type:'base64', media_type, data } }
+  if (p.type === 'image' && p.source && typeof p.source === 'object') {
+    const src = p.source as {
+      type?: string;
+      media_type?: string;
+      data?: string;
+      url?: string;
+    };
+    if (src.type === 'base64' && typeof src.data === 'string') {
+      const mime = src.media_type || 'image/png';
+      return {
+        block: acpImageBlock(mime, src.data),
+        file: {
+          filename: `vision-${fileIndex}${extForMime(mime)}`,
+          mimeType: mime,
+          bytes: Buffer.from(src.data, 'base64'),
+        },
+      };
+    }
+    if (typeof src.url === 'string' && src.url) {
+      return { block: { type: 'text', text: `[image: ${src.url}]` } };
+    }
+  }
+
+  const imageUrl =
+    p.image_url ??
+    (p.type === 'input_image' ? (p.image_url ?? p.url) : undefined);
+  if (p.type === 'image_url' || p.type === 'input_image' || p.image_url) {
+    const img =
+      typeof imageUrl === 'object' && imageUrl
+        ? (imageUrl as { url?: string })
+        : { url: String(imageUrl || '') };
+    const url = String(img.url || '');
+    const parsed = parseDataUrl(url);
+    if (parsed) {
+      return {
+        block: acpImageBlock(parsed.mimeType, parsed.data),
+        file: {
+          filename: `vision-${fileIndex}${extForMime(parsed.mimeType)}`,
+          mimeType: parsed.mimeType,
+          bytes: Buffer.from(parsed.data, 'base64'),
+        },
+      };
+    }
+    if (url) {
+      return { block: { type: 'text', text: `[image: ${url}]` } };
+    }
+  }
+
+  if (p.type === 'image' && typeof p.data === 'string') {
+    const mime = typeof p.mimeType === 'string' ? p.mimeType : 'image/png';
+    return {
+      block: acpImageBlock(mime, p.data),
+      file: {
+        filename: `vision-${fileIndex}${extForMime(mime)}`,
+        mimeType: mime,
+        bytes: Buffer.from(p.data, 'base64'),
+      },
+    };
+  }
+
+  return null;
+}
+
+/** Build ACP `--prompt-json` blocks from OpenAI / Anthropic image parts. */
+export function buildVisionPromptJson(
   messages: CreateChatCompletionDto['messages'],
-): string {
+): GrokVisionBuild {
   const blocks: unknown[] = [];
+  const files: GrokVisionBuild['files'] = [];
+  let fileIndex = 0;
   for (const m of messages) {
     const role = m.role || 'user';
     if (typeof m.content === 'string') {
       blocks.push({ type: 'text', text: `${role}: ${m.content}` });
       continue;
     }
-    if (Array.isArray(m.content)) {
-      blocks.push({ type: 'text', text: `${role}:` });
-      for (const part of m.content) {
-        if (!part || typeof part !== 'object') continue;
-        const p = part as Record<string, unknown>;
-        if (p.type === 'text' || typeof p.text === 'string') {
-          blocks.push({ type: 'text', text: String(p.text ?? '') });
-        } else if (p.type === 'image_url' || p.image_url) {
-          const img =
-            typeof p.image_url === 'object' && p.image_url
-              ? (p.image_url as { url?: string })
-              : { url: String(p.image_url || '') };
-          blocks.push({
-            type: 'image',
-            source: img.url?.startsWith('data:')
-              ? { type: 'base64', data: img.url }
-              : { type: 'url', url: img.url },
-          });
-        } else if (p.type === 'image' || p.type === 'input_image') {
-          blocks.push(p);
-        }
+    if (!Array.isArray(m.content)) continue;
+    blocks.push({ type: 'text', text: `${role}:` });
+    for (const part of m.content) {
+      if (!part || typeof part !== 'object') continue;
+      const parsed = visionFromPart(part as Record<string, unknown>, fileIndex);
+      if (!parsed) continue;
+      blocks.push(parsed.block);
+      if (parsed.file) {
+        files.push(parsed.file);
+        fileIndex += 1;
       }
     }
   }
-  return JSON.stringify(blocks);
+  const promptJson = JSON.stringify(blocks);
+  return {
+    promptJson,
+    files,
+    tooLargeForArgv: promptJson.length > PROMPT_JSON_ARGV_MAX,
+  };
 }
 
 /**
@@ -202,8 +311,13 @@ export function buildGrokRequestFromChatDto(
   const estimatedPromptTokens = Math.max(1, Math.ceil(prompt.length / 4));
 
   let promptJson: string | undefined;
+  let visionFiles: BuiltGrokRequest['visionFiles'];
   if (hasImages && features.vision) {
-    promptJson = buildPromptJson(dto.messages);
+    const vision = buildVisionPromptJson(dto.messages);
+    visionFiles = vision.files;
+    if (!vision.tooLargeForArgv) {
+      promptJson = vision.promptJson;
+    }
   }
 
   let jsonSchema: string | undefined;
@@ -261,8 +375,6 @@ export function buildGrokRequestFromChatDto(
     noPlan: dto.no_plan ?? !features.planMode,
     noMemory: dto.no_memory ?? false,
     experimentalMemory: dto.experimental_memory && features.memory,
-    bestOfN: features.bestOfN ? dto.best_of_n ?? null : null,
-    check: Boolean(dto.check && features.checkLoop),
     verbatim: Boolean(dto.verbatim),
     agent: dto.agent || null,
     agentsJson: dto.agents ? JSON.stringify(dto.agents) : null,
@@ -279,6 +391,7 @@ export function buildGrokRequestFromChatDto(
     toolsDenylist,
     extra,
     estimatedPromptTokens,
+    visionFiles,
   };
 }
 

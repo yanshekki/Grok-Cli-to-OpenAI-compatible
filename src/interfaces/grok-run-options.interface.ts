@@ -39,12 +39,20 @@ export interface GrokRunOptions {
   noMemory?: boolean;
   /** --experimental-memory */
   experimentalMemory?: boolean;
-  /** --best-of-n */
+  /**
+   * @deprecated Removed in Grok Build 1.0+. Ignored by the CLI runner.
+   */
   bestOfN?: number | null;
-  /** --check */
+  /**
+   * @deprecated Removed in Grok Build 1.0+. Ignored by the CLI runner.
+   */
   check?: boolean;
   /** --verbatim */
   verbatim?: boolean;
+  /** --no-auto-update (default on for gateway spawns) */
+  noAutoUpdate?: boolean;
+  /** --no-ask-user (default on — headless must not block on questions) */
+  noAskUser?: boolean;
   /** --agent */
   agent?: string | null;
   /** --agents JSON */

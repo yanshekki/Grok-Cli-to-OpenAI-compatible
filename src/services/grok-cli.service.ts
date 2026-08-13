@@ -13,6 +13,7 @@ import type {
 } from '../interfaces';
 import { ExceptionFactory } from '../exceptions/exception.factory';
 import { logger } from '../utils/logger';
+import { isSessionAlreadyExistsError, isUuid } from '../utils/grok-session';
 
 /** Prompts longer than this always go via --prompt-file (avoid ARG_MAX). */
 const PROMPT_FILE_THRESHOLD = 2_000;
@@ -49,7 +50,8 @@ export class GrokCliService {
   ): string[] {
     const args: string[] = [];
 
-    // Resume / continue take precedence over fresh -p for session continuity
+    // Resume / continue take precedence over fresh -p for session continuity.
+    // Grok 1.0+: `-s` only *creates* a new UUID session (errors if it exists).
     if (options.continueSession) {
       args.push('--continue');
     } else if (options.resumeSessionId) {
@@ -58,6 +60,14 @@ export class GrokCliService {
 
     if (options.forkSession) {
       args.push('--fork-session');
+    }
+
+    const canCreateNamedSession =
+      Boolean(options.sessionId) &&
+      (options.forkSession ||
+        (!options.continueSession && !options.resumeSessionId));
+    if (canCreateNamedSession && options.sessionId && isUuid(options.sessionId)) {
+      args.push('-s', options.sessionId);
     }
 
     // Prompt sources: prompt-json > prompt-file > -p (only one)
@@ -87,10 +97,6 @@ export class GrokCliService {
         : env.GROK_ALWAYS_APPROVE;
     if (alwaysApprove) {
       args.push('--always-approve');
-    }
-
-    if (options.sessionId) {
-      args.push('-s', options.sessionId);
     }
 
     if (options.maxTurns != null && options.maxTurns > 0) {
@@ -161,16 +167,18 @@ export class GrokCliService {
       args.push('--experimental-memory');
     }
 
-    if (options.bestOfN != null && options.bestOfN > 1) {
-      args.push('--best-of-n', String(options.bestOfN));
-    }
-
-    if (options.check) {
-      args.push('--check');
-    }
+    // --best-of-n / --check were removed in Grok Build 1.0+ (unexpected argument).
 
     if (options.verbatim) {
       args.push('--verbatim');
+    }
+
+    if (options.noAutoUpdate !== false) {
+      args.push('--no-auto-update');
+    }
+
+    if (options.noAskUser !== false) {
+      args.push('--no-ask-user');
     }
 
     if (options.agent) {
@@ -204,7 +212,35 @@ export class GrokCliService {
     };
   }
 
+  private withResumeInsteadOfCreate(options: GrokRunOptions): GrokRunOptions {
+    const id = options.sessionId;
+    return {
+      ...options,
+      resumeSessionId: id || options.resumeSessionId,
+      sessionId: undefined,
+    };
+  }
+
   async runOnce(options: GrokRunOptions): Promise<GrokRunResult> {
+    try {
+      return await this.runOnceAttempt(options);
+    } catch (err) {
+      if (
+        options.sessionId &&
+        !options.resumeSessionId &&
+        isSessionAlreadyExistsError(err)
+      ) {
+        logger.warn(
+          { sessionId: options.sessionId },
+          'Grok session already exists; retrying with --resume',
+        );
+        return this.runOnceAttempt(this.withResumeInsteadOfCreate(options));
+      }
+      throw err;
+    }
+  }
+
+  private async runOnceAttempt(options: GrokRunOptions): Promise<GrokRunResult> {
     const { promptFile, cleanup } = await this.preparePromptFile(options.prompt);
     const args = this.buildArgs({ ...options, stream: false, promptFile });
     const timeout = options.timeoutMs ?? env.GROK_TIMEOUT_MS;
@@ -265,6 +301,28 @@ export class GrokCliService {
   }
 
   async *stream(
+    options: GrokRunOptions,
+  ): AsyncGenerator<GrokStreamEvent, void, unknown> {
+    try {
+      yield* this.streamAttempt(options);
+    } catch (err) {
+      if (
+        options.sessionId &&
+        !options.resumeSessionId &&
+        isSessionAlreadyExistsError(err)
+      ) {
+        logger.warn(
+          { sessionId: options.sessionId },
+          'Grok session already exists; retrying stream with --resume',
+        );
+        yield* this.streamAttempt(this.withResumeInsteadOfCreate(options));
+        return;
+      }
+      throw err;
+    }
+  }
+
+  private async *streamAttempt(
     options: GrokRunOptions,
   ): AsyncGenerator<GrokStreamEvent, void, unknown> {
     // Always use prompt-file for stream to avoid ARG_MAX and shell limits

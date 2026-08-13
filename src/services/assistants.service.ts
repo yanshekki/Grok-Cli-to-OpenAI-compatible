@@ -36,7 +36,7 @@ function publicAssistant(row: {
     created_at: Math.floor(row.createdAt.getTime() / 1000),
     name: row.name || null,
     description: null,
-    model: row.model || 'grok-4.5',
+    model: row.model || 'grok-4.6',
     instructions: row.instructions || null,
     tools,
     metadata,

@@ -29,5 +29,9 @@ export interface OpenAiChatCompletionChunk {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    prompt_tokens_details?: {
+      cached_tokens?: number;
+      cache_creation_tokens?: number;
+    };
   };
 }

@@ -10,7 +10,7 @@ describe('GrokCliService parsers', () => {
       model: 'grok-4.5',
       cwd: '/tmp/ws',
       stream: true,
-      sessionId: 'sess-1',
+      sessionId: '8f3c2e10-9c4a-5d6b-8e1f-2a7b6c5d4e3f',
       alwaysApprove: true,
       maxTurns: 3,
       toolsDenylist: 'web_search',
@@ -22,8 +22,12 @@ describe('GrokCliService parsers', () => {
     expect(args).toContain('--output-format');
     expect(args).toContain('streaming-json');
     expect(args).toContain('-s');
-    expect(args).toContain('sess-1');
+    expect(args).toContain('8f3c2e10-9c4a-5d6b-8e1f-2a7b6c5d4e3f');
     expect(args).toContain('--always-approve');
+    expect(args).toContain('--no-auto-update');
+    expect(args).toContain('--no-ask-user');
+    expect(args).not.toContain('--best-of-n');
+    expect(args).not.toContain('--check');
     expect(args).toContain('--max-turns');
     expect(args).toContain('3');
     expect(args).toContain('--disallowed-tools');
@@ -54,6 +58,48 @@ describe('GrokCliService parsers', () => {
       alwaysApprove: false,
     });
     expect(args).not.toContain('--always-approve');
+  });
+
+  it('buildArgs omits -s when sessionId is not a UUID', () => {
+    const args = service.buildArgs({
+      prompt: 'hello',
+      model: 'm',
+      cwd: '/tmp',
+      stream: false,
+      sessionId: 'gog_not_a_uuid',
+      alwaysApprove: false,
+    });
+    expect(args).not.toContain('-s');
+    expect(args).not.toContain('gog_not_a_uuid');
+  });
+
+  it('buildArgs uses --resume instead of -s when resumeSessionId is set', () => {
+    const args = service.buildArgs({
+      prompt: 'again',
+      model: 'grok-4.6',
+      cwd: '/tmp',
+      stream: false,
+      resumeSessionId: '8f3c2e10-9c4a-5d6b-8e1f-2a7b6c5d4e3f',
+      alwaysApprove: false,
+    });
+    expect(args).toContain('--resume');
+    expect(args).toContain('8f3c2e10-9c4a-5d6b-8e1f-2a7b6c5d4e3f');
+    expect(args).not.toContain('-s');
+    expect(args).toContain('-p');
+  });
+
+  it('buildArgs does not pass -s together with --resume unless forking', () => {
+    const args = service.buildArgs({
+      prompt: 'x',
+      model: 'm',
+      cwd: '/tmp',
+      stream: false,
+      sessionId: '8f3c2e10-9c4a-5d6b-8e1f-2a7b6c5d4e3f',
+      resumeSessionId: '8f3c2e10-9c4a-5d6b-8e1f-2a7b6c5d4e3f',
+      alwaysApprove: false,
+    });
+    expect(args).toContain('--resume');
+    expect(args).not.toContain('-s');
   });
 
   it('parseJsonResult parses last JSON object', () => {

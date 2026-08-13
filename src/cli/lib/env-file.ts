@@ -105,7 +105,7 @@ export function ensureEnvFile(
     DATABASE_URL: paths.databaseUrl,
     ENCRYPTION_KEY: encryptionKey,
     GROK_BIN: 'grok',
-    GROK_DEFAULT_MODEL: 'grok-4.5',
+    GROK_DEFAULT_MODEL: 'grok-4.6',
     GROK_DEFAULT_CWD: paths.home,
     GROK_CWD_ALLOWLIST: paths.home,
     GROK_TIMEOUT_MS: '600000',

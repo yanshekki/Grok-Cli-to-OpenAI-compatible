@@ -15,7 +15,7 @@ const envSchema = z.object({
   GCTOAC_HOME: z.string().optional(),
 
   GROK_BIN: z.string().default('grok'),
-  GROK_DEFAULT_MODEL: z.string().default('grok-4.5'),
+  GROK_DEFAULT_MODEL: z.string().default('grok-4.6'),
   GROK_DEFAULT_CWD: z.string().default('.'),
   GROK_CWD_ALLOWLIST: z.string().default(''),
   GROK_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),

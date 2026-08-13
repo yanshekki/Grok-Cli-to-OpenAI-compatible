@@ -3781,8 +3781,12 @@ async function renderMedia() {
           </label>
           <label id="mg-duration-wrap" hidden>${escapeHtml(t('media.videoDuration'))}
             <select id="mg-duration">
-              <option value="6" selected>6s</option>
-              <option value="10">10s</option>
+              ${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+                .map(
+                  (s) =>
+                    `<option value="${s}" ${s === 6 ? 'selected' : ''}>${s}s</option>`,
+                )
+                .join('')}
             </select>
             <span class="hint">${escapeHtml(t('media.videoDurationHint'))}</span>
           </label>
@@ -4919,7 +4923,11 @@ async function renderSystem() {
       <div class="card">
         <div class="label">${escapeHtml(t('system.grokCli'))}</div>
         <div class="value value-sm">${runtimeBadge(data.grokCli)}</div>
-        <div class="muted card-sub">${escapeHtml(t('system.runtime'))}</div>
+        <div class="muted card-sub">${escapeHtml(
+          data.grokInspect?.grokVersion
+            ? `${data.grokInspect.grokVersion}${data.grokInspect.channel ? ` · ${data.grokInspect.channel}` : ''}`
+            : t('system.runtime'),
+        )}</div>
       </div>
       <div class="card">
         <div class="label">${escapeHtml(t('system.concurrency'))}</div>
@@ -4937,11 +4945,34 @@ async function renderSystem() {
       </div>
     </div>`;
 
+  const gi = data.grokInspect;
+  const inspectCard = gi
+    ? `
+    <div class="panel data-table-panel" style="margin-bottom:1rem">
+      <div class="panel-h">${escapeHtml(t('system.grokInspect'))}</div>
+      <div class="panel-b">
+        <div class="muted" style="margin-bottom:0.5rem">${escapeHtml(t('system.grokInspectHint'))}</div>
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem">
+          <div><div class="label">${escapeHtml(t('system.grokVersion'))}</div><div>${escapeHtml(gi.grokVersion || '—')}</div></div>
+          <div><div class="label">${escapeHtml(t('system.inspectChannel'))}</div><div>${escapeHtml(gi.channel || '—')}</div></div>
+          <div><div class="label">${escapeHtml(t('system.inspectDefaultModel'))}</div><div>${escapeHtml(gi.defaultModel || '—')}</div></div>
+          <div><div class="label">${escapeHtml(t('system.inspectModels'))}</div><div>${gi.models?.length ?? 0}</div></div>
+          <div><div class="label">${escapeHtml(t('system.inspectSkills'))}</div><div>${gi.skills ?? 0}</div></div>
+          <div><div class="label">${escapeHtml(t('system.inspectMcp'))}</div><div>${gi.mcpServers ?? 0}</div></div>
+          <div><div class="label">${escapeHtml(t('system.inspectPlugins'))}</div><div>${gi.plugins ?? 0}</div></div>
+          <div><div class="label">${escapeHtml(t('system.inspectHooks'))}</div><div>${gi.hooks ?? 0}</div></div>
+        </div>
+        ${gi.error ? `<div class="error-box" style="margin-top:0.75rem">${escapeHtml(gi.error)}</div>` : ''}
+      </div>
+    </div>`
+    : '';
+
   const softwarePane = `
     <div class="system-tab-toolbar">
       <span class="muted">${escapeHtml(t('system.softwareHint'))}</span>
       ${softSummary}
     </div>
+    ${inspectCard}
     ${softTable}`;
 
   const packagePane = `
@@ -6839,6 +6870,8 @@ const chatUi = {
   keyId: '',
   model: '',
   reasoning: true,
+  /** Grok --reasoning-effort; empty = CLI default */
+  effort: '',
   /** optional system prompt (sent every turn, not stored in chat history bubbles) */
   systemPrompt: '',
   systemOpen: false,
@@ -7807,6 +7840,8 @@ function captureChatUi() {
   if (keyEl) chatUi.keyId = keyEl.value === 'session' ? '' : keyEl.value;
   if (modelEl) chatUi.model = modelEl.value;
   if (reasonEl) chatUi.reasoning = reasonEl.checked;
+  const effortEl = document.getElementById('chat-effort');
+  if (effortEl) chatUi.effort = effortEl.value || '';
   if (sysEl) chatUi.systemPrompt = sysEl.value;
 }
 
@@ -7935,6 +7970,10 @@ function renderChatBubbles() {
         const moreBtn = long
           ? `<button type="button" class="btn ghost sm chat-expand-btn" data-expand="${idx}">${escapeHtml(t('chat.showMore'))}</button>`
           : '';
+        const spend = formatChatSpend(m);
+        const spendHtml = spend
+          ? `<div class="muted chat-spend">${escapeHtml(spend)}</div>`
+          : '';
         const copyBtn =
           bodyText
             ? `<button type="button" class="chat-copy-btn" data-copy-msg="${idx}" title="${escapeHtml(t('chat.copy'))}">${escapeHtml(t('chat.copy'))}</button>`
@@ -7948,6 +7987,7 @@ function renderChatBubbles() {
         ${reasoning}
         <div class="${contentCls}" data-content-idx="${idx}">${bodyHtml}${m.streaming ? '<span class="chat-cursor">▍</span>' : ''}</div>
         ${moreBtn}
+        ${spendHtml}
       </div>`;
       })
       .join('');
@@ -8022,6 +8062,25 @@ function parseSseBuffer(buffer) {
   return { events, rest };
 }
 
+function formatChatSpend(m) {
+  if (!m || m.streaming) return '';
+  const parts = [];
+  const u = m.usage;
+  if (u && (u.prompt_tokens || u.completion_tokens || u.total_tokens)) {
+    const cached = u.prompt_tokens_details?.cached_tokens;
+    const cacheBit =
+      cached != null ? ` · ${t('chat.cacheTokens')}: ${cached}` : '';
+    parts.push(
+      `${t('chat.tokens')}: ${u.prompt_tokens || 0}+${u.completion_tokens || 0}=${u.total_tokens || 0}${cacheBit}`,
+    );
+  }
+  const usd = m.grok?.cost?.total_cost_usd;
+  if (typeof usd === 'number') {
+    parts.push(`${t('chat.cost')}: $${usd.toFixed(6)}`);
+  }
+  return parts.join(' · ');
+}
+
 function applyStreamDelta(assistant, json) {
   if (!json || typeof json !== 'object') return false;
   // Error payload from our server mid-stream
@@ -8047,6 +8106,14 @@ function applyStreamDelta(assistant, json) {
   }
   if (typeof delta.content === 'string' && delta.content.length) {
     assistant.content = (assistant.content || '') + delta.content;
+    changed = true;
+  }
+  if (json.usage && typeof json.usage === 'object') {
+    assistant.usage = json.usage;
+    changed = true;
+  }
+  if (json.grok && typeof json.grok === 'object') {
+    assistant.grok = { ...(assistant.grok || {}), ...json.grok };
     changed = true;
   }
   // Non-stream style full message (fallback)
@@ -8510,6 +8577,19 @@ async function renderChatPlayground() {
               <input type="checkbox" id="chat-reasoning" ${chatUi.reasoning !== false ? 'checked' : ''} />
               ${escapeHtml(t('chat.includeReasoning'))}
             </label>
+            <label class="chat-ctx-label">${escapeHtml(t('chat.effort'))}
+              <select id="chat-effort">
+                ${['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+                  .map((v) => {
+                    const label = v
+                      ? t(`chat.effort_${v}`)
+                      : t('chat.effortDefault');
+                    const sel = (chatUi.effort || '') === v ? ' selected' : '';
+                    return `<option value="${escapeHtml(v)}"${sel}>${escapeHtml(label)}</option>`;
+                  })
+                  .join('')}
+              </select>
+            </label>
             <label class="chat-ctx-label">${escapeHtml(t('chat.ctxMode'))}
               <select id="chat-ctx-mode">
                 <option value="full">${escapeHtml(t('chat.ctxModeFull'))}</option>
@@ -8614,6 +8694,9 @@ async function renderChatPlayground() {
   }
   document.getElementById('chat-model').onchange = () => captureChatUi();
   document.getElementById('chat-reasoning').onchange = () => captureChatUi();
+  document.getElementById('chat-effort')?.addEventListener('change', () =>
+    captureChatUi(),
+  );
   document.getElementById('chat-system').oninput = () => captureChatUi();
   document.getElementById('chat-system-toggle').onclick = () => {
     captureChatUi();
@@ -8827,6 +8910,8 @@ async function sendChatMessage() {
     document.getElementById('chat-model')?.value || chatUi.model || 'grok-4.5';
   const includeReasoning =
     document.getElementById('chat-reasoning')?.checked !== false;
+  const effort =
+    document.getElementById('chat-effort')?.value || chatUi.effort || '';
   const asKeyId = playgroundKeyId();
 
   // Pending for this user bubble only; API gets pending + history docs
@@ -8874,6 +8959,7 @@ async function sendChatMessage() {
       include_reasoning: includeReasoning,
       messages: apiMessages,
     };
+    if (effort) body.reasoning_effort = effort;
     // Always pass document_ids when any attachment is in the thread
     if (docIds.length) body.document_ids = docIds;
     // Only send real key UUID — session actor is already on the Bearer token

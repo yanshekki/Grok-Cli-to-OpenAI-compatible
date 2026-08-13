@@ -374,3 +374,16 @@ model MediaJob {
   @@index([status, createdAt])
   @@map("media_jobs")
 }
+
+/// Client session_id → Grok CLI UUID (create once, then --resume).
+model GrokSessionAlias {
+  id              String   @id @default(uuid())
+  apiKeyId        String
+  clientSessionId String
+  grokSessionId   String
+  createdAt       DateTime @default(now())
+
+  @@unique([apiKeyId, clientSessionId])
+  @@index([apiKeyId, grokSessionId])
+  @@map("grok_session_aliases")
+}

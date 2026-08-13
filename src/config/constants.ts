@@ -286,7 +286,7 @@ export const STORAGE_TYPES = {
 } as const;
 
 /** Fallback models if `grok models` cannot be parsed */
-export const DEFAULT_MODELS = ['grok-4.5', 'grok-composer-2.5-fast', 'grok-build'] as const;
+export const DEFAULT_MODELS = ['grok-4.6', 'grok-4.5'] as const;
 
 /**
  * Grok Imagine `aspect_ratio` values (image_gen / image_edit multi-ref).
@@ -314,7 +314,9 @@ export const OPENAI_IMAGE_SIZES = [
   '1024x1792',
 ] as const;
 
-/** Grok image_to_video / reference_to_video duration (seconds). */
+/** Grok image_to_video / reference_to_video duration (seconds). 1.0.1+ allows 1–15. */
+export const GROK_VIDEO_MIN_SECONDS = 1;
+export const GROK_VIDEO_MAX_SECONDS = 15;
 export const GROK_VIDEO_DURATIONS = [6, 10] as const;
 
 /**

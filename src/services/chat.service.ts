@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Response } from 'express';
 import { prisma } from '../config/database';
@@ -43,6 +43,7 @@ import { auditService } from './audit.service';
 import { documentService } from './document.service';
 import { encryptionService } from './encryption.service';
 import { grokCliService } from './grok-cli.service';
+import { grokSessionMapService } from './grok-session-map.service';
 import { policyService } from './policy.service';
 import { settingsService } from './settings.service';
 import { chatQueueService } from './queue/chat-queue.service';
@@ -57,20 +58,8 @@ import {
   buildGrokRequestFromChatDto,
   estimateCompletionTokens,
 } from './grok-request-builder.service';
-
-/** Namespace session ids per API key so tenants cannot resume each other's CLI sessions. */
-function namespacedSessionId(
-  apiKeyId: string,
-  clientSessionId?: string,
-): string | undefined {
-  if (!clientSessionId?.trim()) return undefined;
-  const raw = clientSessionId.trim().slice(0, 128);
-  const digest = createHash('sha256')
-    .update(`${apiKeyId}:${raw}`, 'utf8')
-    .digest('hex')
-    .slice(0, 32);
-  return `gog_${digest}`;
-}
+import { messageHasImageParts } from '../utils/message-content';
+import { inlineRemoteImageUrls } from '../utils/vision-remote';
 
 function policyToRunOpts(
   policy: ResolvedPolicy,
@@ -92,7 +81,7 @@ function policyToRunOpts(
     model: base.model,
     cwd: policy.cwd,
     stream: base.stream,
-    sessionId: namespacedSessionId(base.apiKeyId, base.sessionId),
+    sessionId: base.sessionId,
     timeoutMs: policy.timeoutMs,
     alwaysApprove: policy.alwaysApprove,
     maxTurns: policy.maxTurns,
@@ -286,6 +275,12 @@ export class ChatService {
     const policy = await policyService.resolve(ctx.apiKey, dto.cwd);
 
     // Feature gates + Grok flag mapping (tools, vision, schema, effort, …)
+    const hasRemoteImages = dto.messages.some((m) =>
+      messageHasImageParts(m.content),
+    );
+    if (hasRemoteImages && features.vision) {
+      dto.messages = await inlineRemoteImageUrls(dto.messages);
+    }
     const builtReq = buildGrokRequestFromChatDto(dto, policy, features);
 
     const documentIds = [
@@ -296,8 +291,11 @@ export class ChatService {
     // (avoids absolute host paths in the prompt). Cleaned up after the request.
     const requestSlug = (ctx.requestId || createId()).replace(/[^a-zA-Z0-9_-]/g, '');
     const attachRel = path.join('attachments', requestSlug);
+    const visionFiles = builtReq.visionFiles ?? [];
     const attachDir =
-      documentIds.length > 0 ? path.join(policy.cwd, attachRel) : '';
+      documentIds.length > 0 || visionFiles.length > 0
+        ? path.join(policy.cwd, attachRel)
+        : '';
 
     let docContext = '';
     let materializedCount = 0;
@@ -331,11 +329,28 @@ export class ChatService {
         );
       }
 
+      if (visionFiles.length > 0) {
+        await ensureDir(attachDir);
+        for (const file of visionFiles) {
+          await fs.writeFile(path.join(attachDir, file.filename), file.bytes, {
+            mode: 0o600,
+          });
+        }
+      }
+
       let prompt = builtReq.prompt;
       if (docContext) {
         prompt =
           `The user has attached the following documents for this request. ` +
           `Use their contents (and on-disk paths when tools allow) when answering.\n\n${docContext}\n\n` +
+          prompt;
+      }
+      if (visionFiles.length > 0 && !builtReq.promptJson) {
+        const listed = visionFiles
+          .map((f) => `${attachRel}/${f.filename}`)
+          .join(', ');
+        prompt =
+          `The user attached image file(s) at: ${listed}. Read those files when answering.\n\n` +
           prompt;
       }
       if (prompt.length > MAX_TOTAL_PROMPT_CHARS) {
@@ -344,17 +359,34 @@ export class ChatService {
         );
       }
 
+      const extra: Partial<GrokRunOptions> = { ...builtReq.extra };
+      if (
+        dto.session_id?.trim() &&
+        !extra.resumeSessionId &&
+        !extra.continueSession
+      ) {
+        const binding = await grokSessionMapService.resolve(
+          ctx.apiKey.id,
+          dto.session_id,
+        );
+        if (binding.mode === 'resume') {
+          extra.resumeSessionId = binding.grokSessionId;
+        } else {
+          extra.sessionId = binding.grokSessionId;
+        }
+      }
+
       const runBase = {
         prompt,
         model,
         stream: true as boolean,
-        sessionId: dto.session_id,
+        sessionId: extra.sessionId,
         apiKeyId: ctx.apiKey.id,
         toolsAllowlist: builtReq.toolsAllowlist,
         toolsDenylist: builtReq.toolsDenylist,
         promptJson: builtReq.promptJson,
         jsonSchema: builtReq.jsonSchema,
-        extra: builtReq.extra,
+        extra,
       };
 
       // Queue worker already limits concurrency; direct mode still uses in-process slots
@@ -442,6 +474,11 @@ export class ChatService {
         const collected = await this.collectFromGrokStream(
           policyToRunOpts(policy, runBase),
         );
+        await this.rememberGrokSession(
+          ctx.apiKey.id,
+          dto.session_id,
+          collected.sessionId,
+        );
 
         const auditPayload = this.buildAuditPayload(collected, includeReasoning);
         const responseEnc = encryptionService.encrypt(auditPayload);
@@ -477,7 +514,9 @@ export class ChatService {
           ip: ctx.ip,
         });
 
-        const { usageToOpenAi } = await import('../utils/grok-event-parse');
+        const { usageToOpenAi, grokUsageToMetaCost } = await import(
+          '../utils/grok-event-parse'
+        );
         let usage = usageToOpenAi(collected.usage);
         let usageEstimated = false;
         if (
@@ -511,6 +550,7 @@ export class ChatService {
               stopReason: collected.stopReason,
               requestId: collected.requestId,
               numTurns: collected.numTurns,
+              cost: grokUsageToMetaCost(collected.usage),
             },
           },
         );
@@ -528,6 +568,23 @@ export class ChatService {
       if (attachDir) {
         await rmSafe(attachDir);
       }
+    }
+  }
+
+  private async rememberGrokSession(
+    apiKeyId: string,
+    clientSessionId: string | undefined,
+    grokSessionId: string | undefined,
+  ): Promise<void> {
+    if (!clientSessionId?.trim() || !grokSessionId) return;
+    try {
+      await grokSessionMapService.remember(
+        apiKeyId,
+        clientSessionId,
+        grokSessionId,
+      );
+    } catch (err) {
+      logger.warn({ err, apiKeyId }, 'Failed to persist Grok session alias');
     }
   }
 
@@ -637,8 +694,12 @@ export class ChatService {
     const msgId = createMessageId();
     const respId = createResponseId();
     const outputItemId = `msg_${createId().replace(/-/g, '').slice(0, 20)}`;
-    const { parseGrokUsage, parseGrokToolCallEvent, usageToOpenAi } =
-      await import('../utils/grok-event-parse');
+    const {
+      parseGrokUsage,
+      parseGrokToolCallEvent,
+      usageToOpenAi,
+      grokUsageToMetaCost,
+    } = await import('../utils/grok-event-parse');
 
     res.on('close', () => {
       clientClosed = true;
@@ -804,6 +865,7 @@ export class ChatService {
             sessionId: grokSessionId,
             stopReason,
             requestId: grokRequestId,
+            cost: grokUsageToMetaCost(streamUsage),
           };
           const finishChunk = mapFinishChunk(
             model,
@@ -950,6 +1012,7 @@ export class ChatService {
         stopReason,
         requestId: grokRequestId,
       };
+      await this.rememberGrokSession(ctx.apiKey.id, dto.session_id, grokSessionId);
       const auditPayload = this.buildAuditPayload(collected, includeReasoning);
       const responseEnc = encryptionService.encrypt(auditPayload);
       const durationMs = Date.now() - started;

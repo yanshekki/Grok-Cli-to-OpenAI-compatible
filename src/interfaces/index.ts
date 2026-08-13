@@ -46,7 +46,10 @@ export type {
 export type { ChatContext } from './chat-context.interface';
 export type { ChatListQuery } from './chat-list-query.interface';
 export type { ExecuteCompletionOptions } from './execute-completion-options.interface';
-export type { BuiltGrokRequest } from './built-grok-request.interface';
+export type {
+  BuiltGrokRequest,
+  GrokVisionFile,
+} from './built-grok-request.interface';
 export type {
   ChatJobPayload,
   StreamWireFormat,

@@ -168,7 +168,10 @@ export function mapFinishChunk(
       },
     ],
   };
-  if (grok && (grok.sessionId || grok.stopReason || grok.requestId || grok.numTurns)) {
+  if (
+    grok &&
+    (grok.sessionId || grok.stopReason || grok.requestId || grok.numTurns || grok.cost)
+  ) {
     chunk.grok = grok;
   }
   return chunk;
@@ -203,8 +206,16 @@ function buildGrokMeta(
     sessionId: extra?.sessionId ?? result.sessionId,
     stopReason: extra?.stopReason ?? result.stopReason,
     requestId: extra?.requestId ?? result.requestId,
+    numTurns: extra?.numTurns,
+    cost: extra?.cost,
   };
-  if (!meta.sessionId && !meta.stopReason && !meta.requestId) {
+  if (
+    !meta.sessionId &&
+    !meta.stopReason &&
+    !meta.requestId &&
+    meta.numTurns == null &&
+    !meta.cost
+  ) {
     return undefined;
   }
   return meta;

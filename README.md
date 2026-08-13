@@ -79,7 +79,7 @@ Client (OpenAI SDK / curl / Open WebUI)
 ### 1. Prerequisites
 
 - **Node.js** ≥ 20  
-- **Grok CLI** installed and logged in:
+- **Grok CLI** (Grok Build **1.0+**) installed and logged in:
 
 ```bash
 curl -fsSL https://x.ai/cli/install.sh | bash
@@ -129,7 +129,7 @@ curl -s http://127.0.0.1:3847/v1/chat/completions \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "grok-4.5",
+    "model": "grok-4.6",
     "messages": [{"role":"user","content":"Say hi in one word"}]
   }'
 ```
@@ -339,7 +339,7 @@ curl -sN http://127.0.0.1:3847/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: my-client-req-001" \
   -d '{
-    "model": "grok-4.5",
+    "model": "grok-4.6",
     "stream": true,
     "include_reasoning": true,
     "messages": [{"role":"user","content":"Count to 3"}]
@@ -359,7 +359,7 @@ const client = new OpenAI({
 });
 
 const res = await client.chat.completions.create({
-  model: 'grok-4.5',
+  model: 'grok-4.6',
   messages: [{ role: 'user', content: 'Hello' }],
 });
 console.log(res.choices[0].message.content);
@@ -372,7 +372,7 @@ curl -s http://127.0.0.1:3847/v1/responses \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "grok-4.5",
+    "model": "grok-4.6",
     "input": "Hello",
     "stream": false
   }'
@@ -381,7 +381,7 @@ curl -s http://127.0.0.1:3847/v1/responses \
 ```ts
 // openai SDK ≥ responses support
 const r = await client.responses.create({
-  model: 'grok-4.5',
+  model: 'grok-4.6',
   input: 'Hello',
 });
 ```
@@ -396,7 +396,7 @@ curl -s http://127.0.0.1:3847/v1/messages \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "grok-4.5",
+    "model": "grok-4.6",
     "max_tokens": 1024,
     "messages": [{"role":"user","content":"Hello"}],
     "stream": false
@@ -415,8 +415,8 @@ Not supported: image blocks, `tool_use` / `tool_result`.
 | Stream | ✅ OpenAI chunks | ✅ `response.*` events | ✅ Anthropic events |
 | Models list | ✅ `/v1/models` | (use same) | (use same) |
 | Auth | Bearer | Bearer | Bearer or `x-api-key` |
-| Vision / image parts | ❌ 400 | ❌ 400 | ❌ 400 |
-| Tools / function calling | ❌ 400 | ❌ 400 | ❌ 400 |
+| Vision / image parts | ✅ (`vision` feature) | ✅ | ✅ |
+| Tools / function calling | ✅ (`tools` feature) | ✅ | ✅ |
 | `temperature` / `top_p` / `stop` | accepted, **ignored** | ignored | ignored |
 | `max_tokens` | accepted, ignored | `max_output_tokens` ignored | required field, ignored by Grok |
 | Reasoning | `include_reasoning` → `reasoning_content` | optional | off by default |
@@ -426,7 +426,7 @@ Not supported: image blocks, `tool_use` / `tool_result`.
 
 ```json
 {
-  "model": "grok-4.5",
+  "model": "grok-4.6",
   "messages": [{ "role": "user", "content": "Hello" }],
   "stream": false,
   "include_reasoning": true,
@@ -440,7 +440,7 @@ Not supported: image blocks, `tool_use` / `tool_result`.
 |-------|--------|
 | `include_reasoning` | Default `true`. Maps Grok `thought` → `reasoning_content` |
 | `cwd` | **agent** only (allowlist); **safe** forces sandbox |
-| `session_id` | Passed to `grok -s` |
+| `session_id` | Mapped to a per-key Grok UUID: first call uses `-s`, later calls `--resume` (Grok 1.0+). |
 | `document_ids` | Inject decrypted documents as context |
 | `temperature`, `top_p`, `stop`, `user` | Accepted for SDK compatibility; **not applied** by Grok CLI |
 | `tools` / `functions` | Rejected with 400 |

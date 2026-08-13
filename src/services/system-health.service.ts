@@ -163,6 +163,16 @@ export class SystemHealthService {
     const binPath = (await which(bin)) || bin;
     const r = await runVersion(binPath, ['--version']);
     const version = r.ok ? extractVersion(r.stdout) || firstLine(r.stdout) : null;
+    let detail: string | undefined;
+    if (!r.ok) {
+      detail = `Not found (${bin}). Install Grok CLI and run grok login.`;
+    } else if (version) {
+      const sem = version.match(/(\d+)\.(\d+)\.(\d+)/);
+      if (sem && Number(sem[1]) < 1) {
+        detail =
+          'Older than 1.0.0 — session and headless flags changed. Run grok update.';
+      }
+    }
     return {
       id: 'grok',
       name: 'Grok CLI',
@@ -171,9 +181,7 @@ export class SystemHealthService {
       version,
       path: r.ok ? binPath : null,
       ok: r.ok,
-      detail: r.ok
-        ? undefined
-        : `Not found (${bin}). Install Grok CLI and run grok login.`,
+      detail,
     };
   }
 

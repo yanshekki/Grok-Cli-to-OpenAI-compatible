@@ -34,7 +34,17 @@ export async function cmdDoctor(opts: {
 
   try {
     const v = execSync('grok --version', { encoding: 'utf8' }).trim();
-    ok(`Grok CLI: ${v.split('\n')[0]}`);
+    const line = v.split('\n')[0] || v;
+    ok(`Grok CLI: ${line}`);
+    const sem = line.match(/(\d+)\.(\d+)\.(\d+)/);
+    if (sem) {
+      const major = Number(sem[1]);
+      if (major < 1) {
+        warn(
+          `Grok CLI ${sem[1]}.${sem[2]}.${sem[3]} is older than 1.0.0 — session_id / --best-of-n / --check flags changed. Upgrade with: grok update`,
+        );
+      }
+    }
   } catch {
     fail('Grok CLI not found on PATH (install + grok login)');
     issues += 1;

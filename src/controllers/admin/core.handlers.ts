@@ -12,6 +12,7 @@ import { updateService } from '../../services/update.service';
 import { usageService } from '../../services/usage.service';
 import { modelsService } from '../../services/models.service';
 import { systemHealthService } from '../../services/system-health.service';
+import { grokInspectService } from '../../services/grok-inspect.service';
 import { grokCliService } from '../../services/grok-cli.service';
 import { encryptionService } from '../../services/encryption.service';
 import { requestIp } from '../../utils/client-ip';
@@ -136,11 +137,20 @@ export const adminCoreHandlers = {
     } catch {
       software = null;
     }
+    let grokInspect = null as Awaited<
+      ReturnType<typeof grokInspectService.snapshot>
+    > | null;
+    try {
+      grokInspect = await grokInspectService.snapshot();
+    } catch {
+      grokInspect = null;
+    }
     res.json({
       object: 'admin.system',
       data: {
         database: dbOk ? 'up' : 'down',
         grokCli: grokOk ? 'up' : 'down',
+        grokInspect,
         concurrency: {
           active: grokCliService.activeCount,
           max: grokCliService.maxConcurrent,
@@ -161,6 +171,11 @@ export const adminCoreHandlers = {
         },
       },
     });
+  }),
+
+  grokInspect: asyncHandler(async (_req: Request, res: Response) => {
+    const data = await grokInspectService.snapshot();
+    res.json({ object: 'admin.grok_inspect', data });
   }),
 
   checkUpdate: asyncHandler(async (req: Request, res: Response) => {

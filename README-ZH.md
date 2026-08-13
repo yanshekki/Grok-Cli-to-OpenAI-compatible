@@ -126,7 +126,7 @@ curl -s http://127.0.0.1:3847/v1/chat/completions \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "grok-4.5",
+    "model": "grok-4.6",
     "messages": [{"role":"user","content":"用一個字打招呼"}]
   }'
 ```
@@ -336,7 +336,7 @@ curl -sN http://127.0.0.1:3847/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: my-client-req-001" \
   -d '{
-    "model": "grok-4.5",
+    "model": "grok-4.6",
     "stream": true,
     "include_reasoning": true,
     "messages": [{"role":"user","content":"數到 3"}]
@@ -356,7 +356,7 @@ const client = new OpenAI({
 });
 
 const res = await client.chat.completions.create({
-  model: 'grok-4.5',
+  model: 'grok-4.6',
   messages: [{ role: 'user', content: 'Hello' }],
 });
 console.log(res.choices[0].message.content);
@@ -366,7 +366,7 @@ console.log(res.choices[0].message.content);
 
 ```json
 {
-  "model": "grok-4.5",
+  "model": "grok-4.6",
   "messages": [{ "role": "user", "content": "Hello" }],
   "stream": false,
   "include_reasoning": true,
@@ -380,7 +380,7 @@ console.log(res.choices[0].message.content);
 |------|------|
 | `include_reasoning` | 預設 `true`；Grok `thought` → `reasoning_content` |
 | `cwd` | 僅 **agent**（allowlist 內）；**safe** 強制 sandbox |
-| `session_id` | 傳給 `grok -s` |
+| `session_id` | 按 API key 映射成 Grok UUID：第一次 `-s`，之後 `--resume`（Grok 1.0+） |
 | `document_ids` | 注入已解密文件內容 |
 
 ### Thinking 對應
