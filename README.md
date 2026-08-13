@@ -426,7 +426,7 @@ curl -s http://127.0.0.1:3847/v1/images/generations \
 | `data[].url` | Gateway-local `/v1/media/assets/:id/content` (same API key). Not an OpenAI CDN |
 | `grok` | Gateway extension (`provider`, `asset_ids`). OpenAI SDKs ignore unknown fields |
 
-**How generate actually gets a file (v1.7.3+):** Grok Imagine always writes to  
+**How generate actually gets a file (v1.7.4+):** Grok Imagine always writes to  
 `~/.grok/sessions/<encodeURIComponent(sandbox-cwd)>/<session-uuid>/images/`  
 (e.g. `1.jpg`). The media-run sandbox has **no bash**, so the agent cannot `cp` that file to `output.png`. The gateway copies the newest image for **this run’s session only** into sandbox `output.jpg|png|webp` as soon as `image_gen` succeeds (and again when Grok exits).
 

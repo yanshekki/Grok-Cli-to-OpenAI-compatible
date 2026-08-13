@@ -401,7 +401,7 @@ curl -s http://127.0.0.1:3847/v1/images/generations \
 | `data[].url` | Gateway 本機 `/v1/media/assets/:id/content`（同一把 API 金鑰），不是 OpenAI CDN |
 | `grok` | Gateway 擴充（`provider`、`asset_ids`）。OpenAI SDK 會忽略未知欄位 |
 
-**生成如何真正收到檔案（v1.7.3+）：** Grok Imagine 永遠寫到  
+**生成如何真正收到檔案（v1.7.4+）：** Grok Imagine 永遠寫到  
 `~/.grok/sessions/<encodeURIComponent(sandbox-cwd)>/<session-uuid>/images/`  
 （例如 `1.jpg`）。media-run 沙箱**沒有 bash**，agent 無法自行 `cp` 到 `output.png`。Gateway 只把**今次 run 對應 session** 最新一張圖，在 `image_gen` 成功時（以及 Grok 結束後）複製到沙箱 `output.jpg|png|webp`。
 
