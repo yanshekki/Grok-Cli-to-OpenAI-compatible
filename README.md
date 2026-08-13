@@ -436,7 +436,7 @@ Collect order:
 2. Recursive scan of the sandbox (realpath; never follows links out of the run dir)
 3. This run’s Grok session `images/` only — never the rest of `~/.grok/sessions`
 
-Prefer the newest file. Ignore `input.png`, `mask.png`, `frame.png`, `ref-*.png`. **502** `no_image_in_sandbox` only if nothing exists — that is **not** an `imagesApi` or API-key failure. Edit uses `--tools image_edit` + `input.png`. Video collect can also take this run’s session `videos/` / `images/` plus sandbox `output.mp4`.
+Prefer the newest file. Ignore `input.png`, `mask.png`, `frame.png`, `ref-*.png`. **502** `no_image_in_sandbox` only if nothing exists — that is **not** an `imagesApi` or API-key failure. If Grok then burns `maxTurns` and exits `1`, the gateway still returns the already-generated file (it does not drop a successful `image_gen`). After the first image is in hand (`n=1`), the CLI process is stopped so the agent cannot keep calling `use_tool`. Edit uses `--tools image_edit` + `input.png`. Video collect can also take this run’s session `videos/` / `images/` plus sandbox `output.mp4`.
 
 ```ts
 const img = await client.images.generate({

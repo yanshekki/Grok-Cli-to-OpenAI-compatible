@@ -461,6 +461,73 @@ describe('session image harvest (image_gen writes ~/.grok/sessions/…/images/)'
     }
   });
 
+  it('generateImage returns session images/1.jpg after CLI exit 1 (maxTurns burn)', async () => {
+    const prevHome = process.env.GROK_HOME;
+    process.env.GROK_HOME = grokHome;
+    try {
+      streamMock.mockImplementation(async function* (opts: { cwd: string }) {
+        await writeSessionImage(
+          grokHome,
+          opts.cwd,
+          SESSION_ID,
+          '1.jpg',
+          Buffer.from('exit1-still-ok'),
+        );
+        yield { type: 'text', data: 'trying to copy output.png' };
+        const err = new Error('Grok CLI exited with code 1') as Error & {
+          statusCode: number;
+          code: string;
+          details: { stderr: string };
+        };
+        err.statusCode = 502;
+        err.code = 'grok_error';
+        err.details = { stderr: '' };
+        throw err;
+      });
+      const arts = await grokToolsMediaProvider.generateImage({
+        prompt: 'character sheet',
+        apiKeyId: 'k1',
+        n: 1,
+        maxTurns: 40,
+      });
+      expect(arts).toHaveLength(1);
+      expect(arts[0]!.bytes.toString()).toBe('exit1-still-ok');
+      expect(arts[0]!.mime).toBe('image/jpeg');
+    } finally {
+      if (prevHome === undefined) delete process.env.GROK_HOME;
+      else process.env.GROK_HOME = prevHome;
+    }
+  });
+
+  it('generateImage still 502 when CLI exit 1 and no image exists anywhere', async () => {
+    const prevHome = process.env.GROK_HOME;
+    process.env.GROK_HOME = grokHome;
+    try {
+      streamMock.mockImplementation(async function* () {
+        const err = new Error('Grok CLI exited with code 1') as Error & {
+          statusCode: number;
+          code: string;
+        };
+        err.statusCode = 502;
+        err.code = 'grok_error';
+        throw err;
+      });
+      await expect(
+        grokToolsMediaProvider.generateImage({
+          prompt: 'nothing',
+          apiKeyId: 'k1',
+          maxTurns: 40,
+        }),
+      ).rejects.toMatchObject({
+        statusCode: 502,
+        code: 'grok_error',
+      });
+    } finally {
+      if (prevHome === undefined) delete process.env.GROK_HOME;
+      else process.env.GROK_HOME = prevHome;
+    }
+  });
+
   it('does not harvest a different media-run session under ~/.grok/sessions', async () => {
     const prevHome = process.env.GROK_HOME;
     process.env.GROK_HOME = grokHome;

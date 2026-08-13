@@ -250,6 +250,30 @@ export class GrokToolsMediaProvider implements MediaProvider {
       req.permissionMode ??
       (alwaysApprove ? 'bypassPermissions' : null);
     let sessionId: string | undefined;
+    const want = Math.min(req.n ?? 1, 4);
+
+    const harvest = async (): Promise<string[]> => {
+      await copyNewestSessionMediaToSandbox({
+        sandbox,
+        sessionId,
+        collect: req.collect,
+        overwrite: false,
+      });
+      const after = await listFn(sandbox);
+      const sessionFiles = await listRunSessionMedia({
+        sandbox,
+        sessionId,
+        collect: req.collect,
+      });
+      for (const f of sessionFiles) after.add(f);
+      return selectCollectedMedia({
+        sandbox,
+        before,
+        after,
+        collect: req.collect,
+        n: want,
+      });
+    };
 
     try {
       const available = await grokCliService.isAvailable();
@@ -273,6 +297,7 @@ export class GrokToolsMediaProvider implements MediaProvider {
         'Media gen: spawning Grok with policy-aligned options',
       );
 
+      let lastPoll = 0;
       for await (const ev of grokCliService.stream({
         prompt,
         model: req.model || env.GROK_DEFAULT_MODEL,
@@ -289,23 +314,44 @@ export class GrokToolsMediaProvider implements MediaProvider {
         const rec = ev as Record<string, unknown>;
         const sid = eventSessionId(rec);
         if (sid) sessionId = sid;
-        if (isSuccessfulMediaToolEvent(rec)) {
-          await copyNewestSessionMediaToSandbox({
+        const toolOk = isSuccessfulMediaToolEvent(rec);
+        const now = Date.now();
+        // Poll session images/ even if streaming-json is not tool_completed.
+        // Breaking here abandons the generator → streamAttempt finally SIGTERM
+        // so the agent cannot burn maxTurns on failed use_tool copies.
+        if (toolOk || now - lastPoll >= 400) {
+          lastPoll = now;
+          const dest = await copyNewestSessionMediaToSandbox({
             sandbox,
             sessionId,
             collect: req.collect,
-            overwrite: true,
+            overwrite: toolOk,
           });
+          if (dest && want <= 1) break;
         }
       }
-      // After Grok exits: copy only if the sandbox still has no output.*
-      await copyNewestSessionMediaToSandbox({
-        sandbox,
-        sessionId,
-        collect: req.collect,
-        overwrite: false,
-      });
     } catch (err) {
+      const recovered = await harvest();
+      if (recovered.length) {
+        logger.warn(
+          {
+            err,
+            sandbox,
+            collect: req.collect,
+            recovered: recovered.length,
+          },
+          'Media gen: Grok exited with an error but artifacts were recovered',
+        );
+        return this.toArtifacts(recovered, {
+          sandbox,
+          prompt,
+          timeoutMs,
+          maxTurns,
+          alwaysApprove,
+          collect: req.collect,
+          n: want,
+        });
+      }
       logger.warn({ err, sandbox, collect: req.collect }, 'Grok media gen failed');
       if (err && typeof err === 'object' && 'statusCode' in err) throw err;
       throw ExceptionFactory.mediaGenerationFailed(
@@ -313,20 +359,7 @@ export class GrokToolsMediaProvider implements MediaProvider {
       );
     }
 
-    const after = await listFn(sandbox);
-    const sessionFiles = await listRunSessionMedia({
-      sandbox,
-      sessionId,
-      collect: req.collect,
-    });
-    for (const f of sessionFiles) after.add(f);
-    const candidates = await selectCollectedMedia({
-      sandbox,
-      before,
-      after,
-      collect: req.collect,
-      n: req.n ?? 1,
-    });
+    const candidates = await harvest();
 
     if (!candidates.length) {
       throw ExceptionFactory.mediaGenerationFailed(
@@ -340,8 +373,31 @@ export class GrokToolsMediaProvider implements MediaProvider {
       );
     }
 
+    return this.toArtifacts(candidates, {
+      sandbox,
+      prompt,
+      timeoutMs,
+      maxTurns,
+      alwaysApprove,
+      collect: req.collect,
+      n: want,
+    });
+  }
+
+  private async toArtifacts(
+    files: string[],
+    meta: {
+      sandbox: string;
+      prompt: string;
+      timeoutMs: number;
+      maxTurns: number | null;
+      alwaysApprove: boolean;
+      collect: 'image' | 'video';
+      n: number;
+    },
+  ): Promise<MediaArtifact[]> {
     const artifacts: MediaArtifact[] = [];
-    for (const file of candidates.slice(0, Math.min(req.n ?? 1, 4))) {
+    for (const file of files.slice(0, meta.n)) {
       const bytes = await fs.readFile(file);
       const ext = path.extname(file);
       artifacts.push({
@@ -351,20 +407,20 @@ export class GrokToolsMediaProvider implements MediaProvider {
         source: {
           provider: this.id,
           rawMeta: {
-            sandbox,
+            sandbox: meta.sandbox,
             file,
-            prompt,
-            timeoutMs,
-            maxTurns,
-            alwaysApprove,
-            collect: req.collect,
+            prompt: meta.prompt,
+            timeoutMs: meta.timeoutMs,
+            maxTurns: meta.maxTurns,
+            alwaysApprove: meta.alwaysApprove,
+            collect: meta.collect,
           },
         },
       });
     }
 
     if (process.env.MEDIA_KEEP_RUNS !== '1') {
-      void fs.rm(sandbox, { recursive: true, force: true }).catch(() => undefined);
+      void fs.rm(meta.sandbox, { recursive: true, force: true }).catch(() => undefined);
     }
 
     return artifacts;

@@ -411,7 +411,7 @@ curl -s http://127.0.0.1:3847/v1/images/generations \
 2. 遞歸掃描沙箱（realpath；不會跟隨 symlink 離開今次 run）
 3. 只收今次 run 的 Grok session `images/`——**不會**掃描整個 `~/.grok/sessions`
 
-優先最新一張。忽略 `input.png`、`mask.png`、`frame.png`、`ref-*.png`。只有完全找不到圖像時才會回 **502** `no_image_in_sandbox`——**不是** `imagesApi` 或 API 金鑰問題。編輯使用 `--tools image_edit` + `input.png`。影片收檔同樣可取今次 session 的 `videos/`／`images/` 以及沙箱 `output.mp4`。
+優先最新一張。忽略 `input.png`、`mask.png`、`frame.png`、`ref-*.png`。只有完全找不到圖像時才會回 **502** `no_image_in_sandbox`——**不是** `imagesApi` 或 API 金鑰問題。若 Grok 其後燒盡 `maxTurns` 並以 exit `1` 結束，Gateway 仍會交已生成的圖（不會因為後續 `use_tool` 失敗而丟棄成功的 `image_gen`）。`n=1` 收到第一張圖後會停止 CLI，避免 agent 繼續呼叫 `use_tool`。編輯使用 `--tools image_edit` + `input.png`。影片收檔同樣可取今次 session 的 `videos/`／`images/` 以及沙箱 `output.mp4`。
 
 ```ts
 const img = await client.images.generate({
