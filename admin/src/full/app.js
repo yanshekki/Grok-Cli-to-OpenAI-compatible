@@ -7050,6 +7050,8 @@ const chatUi = {
   /** optional system prompt (sent every turn, not stored in chat history bubbles) */
   systemPrompt: '',
   systemOpen: false,
+  /** mobile: full toolbar is collapsed so the transcript stays visible */
+  settingsOpen: false,
 };
 
 /**
@@ -7273,6 +7275,7 @@ function syncContextControls() {
     nEl.value = String(chatContext.recentN);
     nEl.disabled = chatContext.mode === 'full';
   }
+  paintChatSettingsBar();
 }
 
 function paintContextBanner() {
@@ -8028,6 +8031,31 @@ function captureChatUi() {
   const permEl = document.getElementById('chat-perm');
   if (permEl) chatUi.permissionMode = permEl.value || '';
   if (sysEl) chatUi.systemPrompt = sysEl.value;
+  paintChatSettingsBar();
+}
+
+function paintChatSettingsBar() {
+  const shellEl = document.querySelector('.chat-shell');
+  const btn = document.getElementById('chat-settings-toggle');
+  const sum = document.getElementById('chat-settings-summary');
+  const lab = document.getElementById('chat-settings-toggle-label');
+  if (shellEl) {
+    shellEl.classList.toggle('is-settings-open', Boolean(chatUi.settingsOpen));
+  }
+  if (btn) btn.setAttribute('aria-expanded', chatUi.settingsOpen ? 'true' : 'false');
+  if (lab) {
+    lab.textContent = chatUi.settingsOpen ? t('chat.settingsHide') : t('chat.settings');
+  }
+  if (sum) {
+    const model = chatUi.model || '—';
+    const modeKey =
+      chatContext.mode === 'summary'
+        ? 'chat.ctxModeSummary'
+        : chatContext.mode === 'recent'
+          ? 'chat.ctxModeRecent'
+          : 'chat.ctxModeFull';
+    sum.textContent = `${model} · ${t(modeKey)}`;
+  }
 }
 
 function renderChatPending() {
@@ -8807,8 +8835,14 @@ async function renderChatPlayground() {
       </div>
       <div class="chat-body">
         <div class="chat-history-backdrop" id="chat-history-backdrop"></div>
-        <div class="chat-shell">
-          <div class="chat-toolbar">
+        <div class="chat-shell${chatUi.settingsOpen ? ' is-settings-open' : ''}">
+          <div class="chat-settings-bar">
+            <button type="button" class="chat-settings-toggle" id="chat-settings-toggle" aria-expanded="${chatUi.settingsOpen ? 'true' : 'false'}" aria-controls="chat-toolbar">
+              <span class="chat-settings-summary" id="chat-settings-summary"></span>
+              <span class="chat-settings-caret" id="chat-settings-toggle-label">${escapeHtml(chatUi.settingsOpen ? t('chat.settingsHide') : t('chat.settings'))}</span>
+            </button>
+          </div>
+          <div class="chat-toolbar" id="chat-toolbar">
             <label class="chat-field-full">${escapeHtml(t('chat.keySelect'))}
               <select id="chat-key-select">${chatKeySelectOptions()}</select>
             </label>
@@ -8933,7 +8967,12 @@ async function renderChatPlayground() {
   updateChatCompressButton();
   paintContextBanner();
   syncContextControls();
+  paintChatSettingsBar();
   loadConversationList().catch(() => {});
+  document.getElementById('chat-settings-toggle')?.addEventListener('click', () => {
+    chatUi.settingsOpen = !chatUi.settingsOpen;
+    paintChatSettingsBar();
+  });
 
   document.getElementById('chat-key-select').onchange = () => captureChatUi();
   const ctxMode = document.getElementById('chat-ctx-mode');

@@ -3781,6 +3781,9 @@ button.dash-kpi:hover {
   font-size: 1.2rem;
   line-height: 1;
 }
+.chat-settings-bar {
+  display: none;
+}
 .chat-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -5237,18 +5240,101 @@ table.data-table tbody tr {
     gap: 6px;
   }
 
-  /* Chat playground: full-width stacked controls */
+  /* Chat: fill the main pane; settings collapse so the transcript is visible */
+  .main:has(.chat-page) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 8px 10px 10px;
+  }
+  .main:has(.chat-page) > .error-box {
+    flex-shrink: 0;
+  }
   .chat-page {
-    height: calc(100dvh - var(--mobile-bar-h) - 56px);
-    min-height: 0;
+    flex: 1 1 auto;
+    height: auto !important;
+    min-height: 0 !important;
     max-height: none;
   }
+  .chat-page > .topbar {
+    margin-bottom: 8px;
+    gap: 8px;
+  }
+  .chat-page > .topbar h2 {
+    display: none;
+  }
+  .chat-page > .topbar > .toolbar {
+    width: 100%;
+  }
+  .chat-page > .topbar > .toolbar .btn {
+    flex: 1 1 auto;
+    min-height: 40px;
+  }
+
+  .chat-settings-bar {
+    display: block;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-color);
+    background: linear-gradient(180deg, #fff 0%, var(--bg-subtle) 100%);
+  }
+  .chat-settings-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .chat-settings-summary {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-sm);
+    font-weight: 700;
+    color: var(--text-main);
+  }
+  .chat-settings-caret {
+    flex-shrink: 0;
+    font-size: var(--text-xs);
+    font-weight: 800;
+    color: var(--brand-blue);
+    letter-spacing: 0.02em;
+  }
+  .chat-settings-toggle[aria-expanded='true'] .chat-settings-caret::after {
+    content: ' ▴';
+  }
+  .chat-settings-toggle[aria-expanded='false'] .chat-settings-caret::after {
+    content: ' ▾';
+  }
+
   .chat-toolbar {
+    display: none !important;
+  }
+  .chat-shell.is-settings-open .chat-toolbar {
     display: grid !important;
     grid-template-columns: 1fr 1fr;
     align-items: stretch !important;
     gap: 10px;
-    padding: 12px;
+    padding: 10px 12px 12px;
+    max-height: min(36vh, 260px);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .chat-system-wrap {
+    display: none !important;
+  }
+  .chat-shell.is-settings-open .chat-system-wrap:not([hidden]) {
+    display: block !important;
+    max-height: 110px;
+    overflow: auto;
   }
   .chat-toolbar .chat-field-full,
   .chat-toolbar .chat-checks,
@@ -5283,6 +5369,33 @@ table.data-table tbody tr {
     width: auto;
     justify-content: flex-start;
     justify-self: start;
+  }
+
+  .chat-messages {
+    flex: 1 1 auto;
+    min-height: 160px;
+  }
+  .chat-composer {
+    padding: 10px 12px 12px;
+    gap: 8px;
+  }
+  .chat-composer textarea {
+    min-height: 48px;
+    max-height: 112px;
+    padding: 10px 12px;
+  }
+  .chat-composer-actions {
+    flex-direction: row !important;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .chat-composer-left,
+  .chat-composer-right {
+    width: auto;
+    flex: 1 1 auto;
+  }
+  .chat-formats-hint {
+    display: none;
   }
 
   .queue-status-row,

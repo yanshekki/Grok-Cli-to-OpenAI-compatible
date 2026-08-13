@@ -256,6 +256,8 @@ const dict = {
       historyNext: 'Next',
       historyPage: 'Page {n} / {total}',
       msgs: '{n} messages',
+      settings: 'Settings',
+      settingsHide: 'Hide settings',
       compress: 'Summarize for context',
       compressConfirm:
         'Generate a conversation summary for later turns? Your full chat history stays on screen. Only the model context is shortened. This uses one model call.',
@@ -1526,6 +1528,8 @@ const dict = {
       historyNext: '下一頁',
       historyPage: '第 {n} / {total} 頁',
       msgs: '{n} 則訊息',
+      settings: '設定',
+      settingsHide: '收起設定',
       compress: '產生語境摘要',
       compressConfirm:
         '為之後回合產生對話摘要以節省 token？畫面上的完整對話記錄不會被刪除或改寫，只影響傳送給模型的內容。此操作會呼叫模型一次。',
