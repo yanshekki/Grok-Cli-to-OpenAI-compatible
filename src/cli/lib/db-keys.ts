@@ -133,6 +133,14 @@ export async function revokeKey(
   try {
     const row = await prisma.apiKey.findUnique({ where: { id } });
     if (!row) return false;
+    if (row.isActive && row.role === 'admin') {
+      const others = await prisma.apiKey.count({
+        where: { isActive: true, role: 'admin', id: { not: id } },
+      });
+      if (others === 0) {
+        throw new Error('Cannot revoke the last active admin API key');
+      }
+    }
     await prisma.apiKey.update({
       where: { id },
       data: { isActive: false },

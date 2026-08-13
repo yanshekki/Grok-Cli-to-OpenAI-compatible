@@ -1,23 +1,15 @@
 import { config as loadDotenv } from 'dotenv';
-import { createHash } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import {
+  apiKeyPrefix,
+  createApiKeySecret,
+  hashApiKey,
+} from '../src/utils/api-key-crypto';
 
 loadDotenv();
 
 const prisma = new PrismaClient();
-
-function createApiKeySecret(): string {
-  return `gk_live_${randomBytes(24).toString('base64url')}`;
-}
-
-function hashApiKey(rawKey: string): string {
-  return createHash('sha256').update(rawKey, 'utf8').digest('hex');
-}
-
-function apiKeyPrefix(rawKey: string): string {
-  return rawKey.slice(0, 16);
-}
 
 async function main(): Promise<void> {
   const existingAdmin = await prisma.apiKey.findFirst({

@@ -4,6 +4,10 @@ import { ExceptionFactory } from '../../exceptions/exception.factory';
 import { asyncHandler } from '../../utils/async-handler';
 import { adminAuthService, isSessionToken } from '../../services/admin-auth.service';
 import { requestIp } from '../../utils/client-ip';
+import {
+  clearFailedAuth,
+  recordFailedAuth,
+} from '../../middlewares/rate-limit.middleware';
 
 function extractBearer(req: Request): string | null {
   const header = req.header('authorization');
@@ -21,18 +25,24 @@ export const adminAuthHandlers = {
     if (!parsed.success) {
       throw ExceptionFactory.validation('Login code is required');
     }
-    const result = await adminAuthService.loginWithOtp(parsed.data.code, {
-      ip: requestIp(req),
-      userAgent: req.header('user-agent') ?? undefined,
-    });
-    res.json({
-      object: 'admin.session',
-      data: {
-        token: result.token,
-        expiresAt: result.expiresAt.toISOString(),
-        tokenType: 'Bearer',
-      },
-    });
+    try {
+      const result = await adminAuthService.loginWithOtp(parsed.data.code, {
+        ip: requestIp(req),
+        userAgent: req.header('user-agent') ?? undefined,
+      });
+      clearFailedAuth(req);
+      res.json({
+        object: 'admin.session',
+        data: {
+          token: result.token,
+          expiresAt: result.expiresAt.toISOString(),
+          tokenType: 'Bearer',
+        },
+      });
+    } catch (err) {
+      recordFailedAuth(req);
+      throw err;
+    }
   }),
 
   /** POST /auth/logout — revoke current session */

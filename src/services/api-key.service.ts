@@ -302,6 +302,15 @@ export class ApiKeyService {
       input.role !== undefined
         ? normalizeApiKeyRole(input.role)
         : normalizeApiKeyRole(existing.role);
+    const willRemainAdmin =
+      nextRole === ROLES.ADMIN && input.isActive !== false && existing.isActive;
+    if (
+      existing.isActive &&
+      normalizeApiKeyRole(existing.role) === ROLES.ADMIN &&
+      !willRemainAdmin
+    ) {
+      await assertNotLastActiveAdmin(existing.id);
+    }
     const nextMode =
       input.mode !== undefined || input.role !== undefined
         ? normalizeApiKeyMode(nextRole, input.mode ?? existing.mode)
@@ -344,6 +353,12 @@ export class ApiKeyService {
     if (!existing) {
       throw ExceptionFactory.notFound('API key');
     }
+    if (
+      existing.isActive &&
+      normalizeApiKeyRole(existing.role) === ROLES.ADMIN
+    ) {
+      await assertNotLastActiveAdmin(existing.id);
+    }
 
     await prisma.apiKey.update({
       where: { id },
@@ -358,6 +373,21 @@ export class ApiKeyService {
       meta: { keyPrefix: existing.keyPrefix },
       ip,
     });
+  }
+}
+
+async function assertNotLastActiveAdmin(exceptId: string): Promise<void> {
+  const others = await prisma.apiKey.count({
+    where: {
+      isActive: true,
+      role: ROLES.ADMIN,
+      id: { not: exceptId },
+    },
+  });
+  if (others === 0) {
+    throw ExceptionFactory.validation(
+      'Cannot revoke or demote the last active admin API key',
+    );
   }
 }
 

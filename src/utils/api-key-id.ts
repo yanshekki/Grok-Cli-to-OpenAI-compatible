@@ -44,14 +44,7 @@ export async function toPersistentApiKeyId(
   });
   if (admin) return admin.id;
 
-  const any = await prisma.apiKey.findFirst({
-    where: { isActive: true },
-    orderBy: { createdAt: 'asc' },
-    select: { id: true },
-  });
-  if (any) return any.id;
-
   throw ExceptionFactory.internal(
-    'No API key available for resource ownership — create an admin API key (gctoac key create)',
+    'No admin API key available for resource ownership — create an admin API key (gctoac key create)',
   );
 }
