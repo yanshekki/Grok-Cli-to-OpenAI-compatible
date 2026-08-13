@@ -25,6 +25,17 @@ export interface OpenAiChatCompletionChunk {
   }>;
   /** Present on final chunk when available */
   grok?: GrokResponseMeta;
+  /** Live Grok ACP session update (tool_call / tool_call_update / plan). */
+  grok_event?: {
+    type: string;
+    toolCallId?: string;
+    toolName?: string;
+    status?: string;
+    kind?: string;
+    title?: string;
+    rawInput?: unknown;
+    entries?: unknown;
+  };
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;

@@ -822,6 +822,36 @@ export class ChatService {
           if (typeof event.requestId === 'string') grokRequestId = event.requestId;
           if (event.usage) streamUsage = parseGrokUsage(event.usage);
         } else {
+          const evType = String(event.type || '');
+          if (
+            wireFormat === 'openai' &&
+            (evType === 'tool_call' ||
+              evType === 'tool_call_update' ||
+              evType === 'plan')
+          ) {
+            const rec = event as Record<string, unknown>;
+            writeSseData(res, {
+              id: completionId,
+              object: 'chat.completion.chunk',
+              created,
+              model,
+              choices: [{ index: 0, delta: {}, finish_reason: null }],
+              grok_event: {
+                type: evType,
+                toolCallId:
+                  typeof rec.toolCallId === 'string'
+                    ? rec.toolCallId
+                    : undefined,
+                toolName:
+                  typeof rec.toolName === 'string' ? rec.toolName : undefined,
+                status: typeof rec.status === 'string' ? rec.status : undefined,
+                kind: typeof rec.kind === 'string' ? rec.kind : undefined,
+                title: typeof rec.title === 'string' ? rec.title : undefined,
+                rawInput: rec.rawInput,
+                entries: rec.entries,
+              },
+            });
+          }
           const tcs = parseGrokToolCallEvent(event);
           if (tcs.length && wireFormat === 'openai') {
             for (let i = 0; i < tcs.length; i++) {

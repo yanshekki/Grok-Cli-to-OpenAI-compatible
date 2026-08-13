@@ -8244,6 +8244,31 @@ function applyStreamDelta(assistant, json) {
     }
     changed = true;
   }
+  if (json.grok_event && typeof json.grok_event === 'object') {
+    const ge = json.grok_event;
+    if (!Array.isArray(assistant.tools)) assistant.tools = [];
+    if (ge.type === 'tool_call' || ge.type === 'tool_call_update') {
+      const id = ge.toolCallId;
+      const existing = id
+        ? assistant.tools.find((x) => x.id === id)
+        : null;
+      const name = ge.toolName || ge.title || existing?.name || 'tool';
+      const args =
+        ge.rawInput != null
+          ? typeof ge.rawInput === 'string'
+            ? ge.rawInput
+            : JSON.stringify(ge.rawInput)
+          : existing?.arguments || '';
+      const label = ge.status ? `${name} (${ge.status})` : name;
+      if (existing) {
+        existing.name = label;
+        if (args) existing.arguments = args;
+      } else {
+        assistant.tools.push({ id, name: label, arguments: args });
+      }
+      changed = true;
+    }
+  }
   const tcs = json.choices?.[0]?.delta?.tool_calls;
   if (Array.isArray(tcs) && tcs.length) {
     if (!Array.isArray(assistant.tools)) assistant.tools = [];
