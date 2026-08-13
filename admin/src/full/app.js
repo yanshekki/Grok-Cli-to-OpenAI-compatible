@@ -208,8 +208,9 @@ const state = {
     limit: 20,
     offset: 0,
   },
-  /** System page tab: 'software' | 'package' | 'env' */
+  /** System page tab: 'software' | 'package' | 'env' | 'sessions' */
   systemTab: 'software',
+  grokSessionQ: '',
   /** PM2 page tab: 'runner' | 'port' | 'config' | 'logs' */
   pm2Tab: 'runner',
   /** API features tab: 'protocols' | 'media' | 'caps' | 'emu' */
@@ -4870,10 +4871,27 @@ async function renderSystem() {
   const soft = data.software || { checks: [], allRequiredOk: true };
   const checks = soft.checks || [];
   const tab =
-    state.systemTab === 'package' || state.systemTab === 'env'
+    state.systemTab === 'package' ||
+    state.systemTab === 'env' ||
+    state.systemTab === 'sessions'
       ? state.systemTab
       : 'software';
   state.systemTab = tab;
+
+  let sessionPack = { data: [], total: 0 };
+  if (tab === 'sessions') {
+    try {
+      const qs = new URLSearchParams({
+        limit: '50',
+        offset: '0',
+      });
+      if (state.grokSessionQ) qs.set('q', state.grokSessionQ);
+      const sess = await api(`/grok/sessions?${qs}`);
+      sessionPack = { data: sess.data || [], total: sess.total || 0 };
+    } catch (e) {
+      sessionPack = { data: [], total: 0, error: e.message || String(e) };
+    }
+  }
 
   const softBody = checks
     .map(
@@ -5008,6 +5026,43 @@ async function renderSystem() {
       </div>
     </div>`;
 
+  const sessionRows = (sessionPack.data || [])
+    .map(
+      (s) => `
+      <tr>
+        <td><code class="cell-code">${escapeHtml(s.id)}</code></td>
+        <td><div class="cell-primary">${escapeHtml(s.title || '—')}</div>
+          <div class="cell-sub">${escapeHtml(s.summary || '')}</div></td>
+        <td class="muted">${escapeHtml(s.cwd || '—')}</td>
+        <td>${escapeHtml((s.updatedAt || '').slice(0, 19).replace('T', ' ') || '—')}</td>
+        <td>${s.messageCount != null ? s.messageCount : '—'}</td>
+        <td><button type="button" class="btn danger sm" data-del-gsess="${escapeHtml(s.id)}">${escapeHtml(t('system.sessionDelete'))}</button></td>
+      </tr>`,
+    )
+    .join('');
+  const sessionsPane = `
+    <div class="system-tab-toolbar">
+      <span class="muted">${escapeHtml(t('system.sessionsHint'))}</span>
+      <form id="gsess-search" class="inline-form">
+        <input type="search" id="gsess-q" value="${escapeHtml(state.grokSessionQ || '')}" placeholder="${escapeHtml(t('system.sessionsSearch'))}" />
+        <button type="submit" class="btn secondary sm">${escapeHtml(t('common.search') || 'Search')}</button>
+      </form>
+    </div>
+    ${sessionPack.error ? `<div class="error-box">${escapeHtml(sessionPack.error)}</div>` : ''}
+    ${dataTablePanelHtml({
+      headHtml: `
+        <th>${escapeHtml(t('system.sessionId'))}</th>
+        <th>${escapeHtml(t('system.sessionTitle'))}</th>
+        <th>${escapeHtml(t('system.sessionCwd'))}</th>
+        <th>${escapeHtml(t('system.sessionUpdated'))}</th>
+        <th>${escapeHtml(t('chats.msgs') || '#')}</th>
+        <th></th>`,
+      bodyHtml: sessionRows,
+      colSpan: 6,
+      emptyText: t('common.empty'),
+    })}
+    <div class="muted">${escapeHtml(String(sessionPack.total || 0))}</div>`;
+
   document.getElementById('app').innerHTML = shell(`
     <div class="topbar">
       <h2>${escapeHtml(t('system.title'))}</h2>
@@ -5031,6 +5086,10 @@ async function renderSystem() {
         <button type="button" role="tab" class="seg-tab ${tab === 'env' ? 'is-active' : ''}" data-system-tab="env" aria-selected="${tab === 'env'}">
           ${escapeHtml(t('system.tabEnv'))}
         </button>
+        <button type="button" role="tab" class="seg-tab ${tab === 'sessions' ? 'is-active' : ''}" data-system-tab="sessions" aria-selected="${tab === 'sessions'}">
+          ${escapeHtml(t('system.tabSessions'))}
+          <span class="seg-tab-count">${tab === 'sessions' ? sessionPack.total : ''}</span>
+        </button>
       </div>
       <div class="usage-tab-body">
         <div class="usage-tab-pane system-tab-pane-software" id="system-tab-software" ${tab === 'software' ? '' : 'hidden'}>
@@ -5042,16 +5101,47 @@ async function renderSystem() {
         <div class="usage-tab-pane system-tab-pane-env" id="system-tab-env" ${tab === 'env' ? '' : 'hidden'}>
           ${envPane}
         </div>
+        <div class="usage-tab-pane system-tab-pane-sessions" id="system-tab-sessions" ${tab === 'sessions' ? '' : 'hidden'}>
+          ${sessionsPane}
+        </div>
       </div>
     </div>
   `);
   bindShell();
 
+  document.getElementById('gsess-search')?.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    state.grokSessionQ = document.getElementById('gsess-q')?.value || '';
+    renderSystem().catch(onErr);
+  });
+  document.querySelectorAll('[data-del-gsess]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-del-gsess');
+      if (!id) return;
+      const yes = await uiConfirm({
+        title: t('system.sessionDelete'),
+        message: t('system.sessionDeleteConfirm').replace('{id}', id),
+      });
+      if (!yes) return;
+      try {
+        await api(`/grok/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        await renderSystem();
+      } catch (e) {
+        onErr(e);
+      }
+    });
+  });
+
   document.querySelectorAll('[data-system-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const raw = btn.getAttribute('data-system-tab') || 'software';
       const next =
-        raw === 'package' || raw === 'env' || raw === 'software' ? raw : 'software';
+        raw === 'package' ||
+        raw === 'env' ||
+        raw === 'software' ||
+        raw === 'sessions'
+          ? raw
+          : 'software';
       if (state.systemTab === next) return;
       state.systemTab = next;
       renderSystem().catch(onErr);

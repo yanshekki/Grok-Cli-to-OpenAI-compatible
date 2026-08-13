@@ -279,6 +279,9 @@ Most control commands talk to the **local DB** (same `DATABASE_URL` as the gatew
 | Command | Description |
 |---------|-------------|
 | `gctoac stats` | Dashboard-style summary |
+| `gctoac grok inspect` | Local Grok Build snapshot (version, models, skills, MCP) |
+| `gctoac grok sessions` | List local Grok CLI sessions |
+| `gctoac grok sessions delete <id> --yes` | Permanently delete a Grok session |
 | `gctoac models [--refresh]` | Local Grok models |
 | `gctoac docs list\|show\|delete` | Documents (`delete` needs `--yes`) |
 | `gctoac chats list\|show` | API chat requests (meta) |

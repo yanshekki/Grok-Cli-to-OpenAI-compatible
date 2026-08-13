@@ -30,6 +30,8 @@ const ADMIN_COVERAGE: Array<{
   { method: 'get', path: '/admin/api/models', coveredBy: 'admin.routes.full' },
   { method: 'get', path: '/admin/api/system', coveredBy: 'admin.routes.full' },
   { method: 'get', path: '/admin/api/grok/inspect', coveredBy: 'admin.routes.full' },
+  { method: 'get', path: '/admin/api/grok/sessions', coveredBy: 'admin.routes.full' },
+  { method: 'delete', path: '/admin/api/grok/sessions/:id', coveredBy: 'admin.routes.full' },
   { method: 'get', path: '/admin/api/system/update-check', coveredBy: 'admin.routes.full' },
   { method: 'post', path: '/admin/api/system/update', coveredBy: 'deferred-dangerous' },
   { method: 'get', path: '/admin/api/chats', coveredBy: 'admin.routes.full' },

@@ -73,6 +73,11 @@ import { cmdAuditList } from './commands/audit';
 import { cmdStats } from './commands/stats';
 import { cmdModels } from './commands/models';
 import {
+  cmdGrokInspect,
+  cmdGrokSessionsList,
+  cmdGrokSessionsDelete,
+} from './commands/grok-env';
+import {
   cmdApiFeaturesGet,
   cmdApiFeaturesSet,
   cmdApiFeaturesPreset,
@@ -724,6 +729,46 @@ program
   .option('--refresh', 'Bypass cache')
   .action(async (opts: { refresh?: boolean }) => {
     await cmdModels({ ...globalOpts(), refresh: opts.refresh });
+  });
+
+const grokEnvCmd = program
+  .command('grok')
+  .description('Local Grok Build environment (inspect / sessions)');
+
+grokEnvCmd
+  .command('inspect')
+  .description('Read-only grok inspect snapshot')
+  .action(async () => {
+    await cmdGrokInspect(globalOpts());
+  });
+
+const grokSessionsCmd = grokEnvCmd
+  .command('sessions')
+  .description('List local Grok CLI sessions')
+  .option('-q, --q <text>', 'Search title / summary / id')
+  .option('--cwd <path>', 'Filter by working directory')
+  .option('--limit <n>', 'Max rows', (v: string) => Number(v))
+  .action(async (opts: { q?: string; cwd?: string; limit?: number }) => {
+    await cmdGrokSessionsList({ ...globalOpts(), ...opts });
+  });
+
+grokSessionsCmd
+  .command('list')
+  .description('List local Grok CLI sessions')
+  .option('-q, --q <text>', 'Search title / summary / id')
+  .option('--cwd <path>', 'Filter by working directory')
+  .option('--limit <n>', 'Max rows', (v: string) => Number(v))
+  .action(async (opts: { q?: string; cwd?: string; limit?: number }) => {
+    await cmdGrokSessionsList({ ...globalOpts(), ...opts });
+  });
+
+grokSessionsCmd
+  .command('delete')
+  .description('Permanently delete a Grok CLI session')
+  .argument('<id>', 'Session UUID')
+  .option('--yes', 'Confirm delete')
+  .action(async (id: string, opts: { yes?: boolean }) => {
+    await cmdGrokSessionsDelete({ ...globalOpts(), id, yes: opts.yes });
   });
 
 // ——— API features / Grok capability gates ———

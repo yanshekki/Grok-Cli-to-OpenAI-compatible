@@ -78,6 +78,12 @@ router.get('/usage', adminController.usage);
 router.get('/models', adminController.models);
 router.get('/system', adminController.system);
 router.get('/grok/inspect', adminController.grokInspect);
+router.get('/grok/sessions', adminController.grokSessionsList);
+router.delete(
+  '/grok/sessions/:id',
+  validate(adminIdParamSchema, 'params'),
+  adminController.grokSessionsDelete,
+);
 router.get('/system/update-check', adminController.checkUpdate);
 router.post('/system/update', adminController.runUpdate);
 

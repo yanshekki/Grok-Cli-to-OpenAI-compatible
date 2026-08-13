@@ -44,6 +44,7 @@ const HITS: Hit[] = [
   { method: 'GET', path: '/admin/api/models', ok: [200, 500, 503] },
   { method: 'GET', path: '/admin/api/system', ok: [200, 500, 503] },
   { method: 'GET', path: '/admin/api/grok/inspect', ok: [200, 500, 503] },
+  { method: 'GET', path: '/admin/api/grok/sessions', ok: [200, 500, 503] },
   {
     method: 'GET',
     path: '/admin/api/system/update-check',

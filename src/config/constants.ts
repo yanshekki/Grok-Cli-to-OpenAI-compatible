@@ -181,6 +181,7 @@ export const AUDIT_ACTIONS = {
   MEDIA_GENERATE: 'media.generate',
   MEDIA_READ: 'media.read',
   MEDIA_DELETE: 'media.delete',
+  GROK_SESSION_DELETE: 'grok.session_delete',
 } as const;
 
 export const ROLES = {
