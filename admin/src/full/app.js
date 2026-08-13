@@ -6978,6 +6978,9 @@ const chatUi = {
   /** Grok --resume UUID */
   resumeId: '',
   forkSession: false,
+  memory: false,
+  noPlan: false,
+  permissionMode: '',
   /** optional system prompt (sent every turn, not stored in chat history bubbles) */
   systemPrompt: '',
   systemOpen: false,
@@ -7952,6 +7955,12 @@ function captureChatUi() {
   if (resumeEl) chatUi.resumeId = resumeEl.value.trim();
   const forkEl = document.getElementById('chat-fork');
   if (forkEl) chatUi.forkSession = forkEl.checked;
+  const memEl = document.getElementById('chat-memory');
+  if (memEl) chatUi.memory = memEl.checked;
+  const planEl = document.getElementById('chat-no-plan');
+  if (planEl) chatUi.noPlan = planEl.checked;
+  const permEl = document.getElementById('chat-perm');
+  if (permEl) chatUi.permissionMode = permEl.value || '';
   if (sysEl) chatUi.systemPrompt = sysEl.value;
 }
 
@@ -8777,6 +8786,25 @@ async function renderChatPlayground() {
               <input type="checkbox" id="chat-fork" ${chatUi.forkSession ? 'checked' : ''} />
               ${escapeHtml(t('chat.fork'))}
             </label>
+            <label class="check-inline" for="chat-memory">
+              <input type="checkbox" id="chat-memory" ${chatUi.memory ? 'checked' : ''} />
+              ${escapeHtml(t('chat.memory'))}
+            </label>
+            <label class="check-inline" for="chat-no-plan">
+              <input type="checkbox" id="chat-no-plan" ${chatUi.noPlan ? 'checked' : ''} />
+              ${escapeHtml(t('chat.noPlan'))}
+            </label>
+            <label class="chat-ctx-label">${escapeHtml(t('chat.permission'))}
+              <select id="chat-perm">
+                ${['', 'default', 'acceptEdits', 'auto', 'dontAsk', 'bypassPermissions', 'plan']
+                  .map((v) => {
+                    const label = v || t('chat.effortDefault');
+                    const sel = (chatUi.permissionMode || '') === v ? ' selected' : '';
+                    return `<option value="${escapeHtml(v)}"${sel}>${escapeHtml(label)}</option>`;
+                  })
+                  .join('')}
+              </select>
+            </label>
           </div>
           <div class="chat-system-wrap" id="chat-system-wrap" ${chatUi.systemOpen || chatUi.systemPrompt ? '' : 'hidden'}>
             <label class="chat-system-label" for="chat-system">${escapeHtml(t('chat.systemPrompt'))}
@@ -8875,6 +8903,15 @@ async function renderChatPlayground() {
     captureChatUi(),
   );
   document.getElementById('chat-fork')?.addEventListener('change', () =>
+    captureChatUi(),
+  );
+  document.getElementById('chat-memory')?.addEventListener('change', () =>
+    captureChatUi(),
+  );
+  document.getElementById('chat-no-plan')?.addEventListener('change', () =>
+    captureChatUi(),
+  );
+  document.getElementById('chat-perm')?.addEventListener('change', () =>
     captureChatUi(),
   );
   document.getElementById('chat-system').oninput = () => captureChatUi();
@@ -9143,6 +9180,9 @@ async function sendChatMessage() {
     captureChatUi();
     if (chatUi.resumeId) body.resume = chatUi.resumeId;
     if (chatUi.forkSession) body.fork_session = true;
+    if (chatUi.memory) body.experimental_memory = true;
+    if (chatUi.noPlan) body.no_plan = true;
+    if (chatUi.permissionMode) body.permission_mode = chatUi.permissionMode;
     // Always pass document_ids when any attachment is in the thread
     if (docIds.length) body.document_ids = docIds;
     // Only send real key UUID — session actor is already on the Bearer token
