@@ -127,6 +127,59 @@ export class GrokToolsMediaProvider implements MediaProvider {
     });
   }
 
+  /**
+   * Grok reference_to_video: one or more stills + optional preset voices.
+   */
+  async generateVideoFromReferences(req: {
+    prompt: string;
+    images: Buffer[];
+    voices?: string[];
+    apiKeyId: string;
+    model?: string;
+    seconds?: number;
+    aspectRatio?: string;
+    timeoutMs?: number;
+    maxTurns?: number | null;
+    alwaysApprove?: boolean;
+    permissionMode?: string | null;
+  }): Promise<MediaArtifact[]> {
+    const runId = createId();
+    const sandbox = path.join(env.storageDir, 'media-runs', runId);
+    await fs.mkdir(sandbox, { recursive: true });
+    const names: string[] = [];
+    for (let i = 0; i < Math.min(req.images.length, 7); i += 1) {
+      const name = `ref-${i}.png`;
+      await fs.writeFile(path.join(sandbox, name), req.images[i]!);
+      names.push(name);
+    }
+    const raw = Number(req.seconds);
+    const seconds =
+      Number.isFinite(raw) && raw >= 1 && raw <= 15 ? Math.round(raw) : 6;
+    const aspect = req.aspectRatio ? ` aspect_ratio=${req.aspectRatio}` : '';
+    const voiceLine = req.voices?.length
+      ? `Speak with preset voices in order: ${req.voices.join(', ')} (reference as AUDIO_0…).\n`
+      : '';
+    const refs = names.map((n, i) => `<IMAGE_${i}>=./${n}`).join(', ');
+    const prompt =
+      `Create a short video and save it as output.mp4 in the current working directory.\n` +
+      `Use the reference_to_video tool with duration=${seconds}${aspect}.\n` +
+      `Reference images: ${refs}.\n` +
+      voiceLine +
+      `Direction: ${req.prompt}\n` +
+      `You must produce a real video file on disk (output.mp4).`;
+    return this.runGrokCollectMedia({
+      prompt,
+      sandbox,
+      model: req.model,
+      timeoutMs: req.timeoutMs,
+      maxTurns: req.maxTurns,
+      alwaysApprove: req.alwaysApprove,
+      permissionMode: req.permissionMode,
+      collect: 'video',
+      n: 1,
+    });
+  }
+
   private async runGrokCollectImages(
     req: ImageGenRequest & { prompt: string; sandbox: string },
   ): Promise<MediaArtifact[]> {

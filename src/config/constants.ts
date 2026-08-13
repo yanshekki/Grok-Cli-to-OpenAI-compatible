@@ -320,6 +320,16 @@ export const GROK_VIDEO_MIN_SECONDS = 1;
 export const GROK_VIDEO_MAX_SECONDS = 15;
 export const GROK_VIDEO_DURATIONS = [6, 10] as const;
 
+/** Preset voices for Grok reference_to_video (Imagine). Unknown ids are rejected. */
+export const GROK_VIDEO_VOICES = [
+  'ara',
+  'eve',
+  'leo',
+  'rex',
+  'sal',
+  'mio',
+] as const;
+
 /**
  * Map OpenAI-style `size` or Grok `aspect_ratio` → canonical aspect ratio string.
  */

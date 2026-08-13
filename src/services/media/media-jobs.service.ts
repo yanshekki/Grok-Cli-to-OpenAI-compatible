@@ -59,9 +59,11 @@ export class MediaJobsService {
     seconds?: number;
     aspectRatio?: string;
     sourceAssetId?: string;
+    sourceAssetIds?: string[];
     sourceDocumentId?: string;
     /** Uploaded frame bytes (admin SPA drag/drop) */
     sourceBytes?: Buffer;
+    voices?: string[];
   }): Promise<MediaJobPublic> {
     const features = await apiFeaturesService.get();
     if (!features.videoApi) {
@@ -80,7 +82,11 @@ export class MediaJobsService {
 
     const owner = await toPersistentApiKeyId(input.apiKey.id);
     const id = createId();
-    const seconds = input.seconds === 10 ? 10 : 6;
+    const rawSec = Number(input.seconds);
+    const seconds =
+      Number.isFinite(rawSec) && rawSec >= 1 && rawSec <= 15
+        ? Math.round(rawSec)
+        : 6;
     const providerEnv = (process.env.MEDIA_PROVIDER || 'grok-tools').toLowerCase();
     const provider =
       providerEnv === 'mock' || providerEnv === 'none' || providerEnv === 'stub'
@@ -107,8 +113,10 @@ export class MediaJobsService {
       seconds,
       aspectRatio: input.aspectRatio,
       sourceAssetId: input.sourceAssetId,
+      extraAssetIds: input.sourceAssetIds,
       sourceDocumentId: input.sourceDocumentId,
       sourceBytes: input.sourceBytes,
+      voices: input.voices,
     }).catch(() => undefined);
 
     return toPublic(row);
@@ -123,8 +131,10 @@ export class MediaJobsService {
       seconds: number;
       aspectRatio?: string;
       sourceAssetId?: string;
+      extraAssetIds?: string[];
       sourceDocumentId?: string;
       sourceBytes?: Buffer;
+      voices?: string[];
     },
   ): Promise<void> {
     await prisma.mediaJob.update({
@@ -240,18 +250,44 @@ export class MediaJobsService {
         throw new Error('No source frame for image_to_video');
       }
 
-      const videoArts = await grokToolsMediaProvider.generateVideoFromImage({
-        prompt: opts.prompt,
-        imageBytes: sourceBytes,
-        apiKeyId,
-        model,
-        seconds: opts.seconds,
-        aspectRatio: opts.aspectRatio,
-        timeoutMs,
-        maxTurns,
-        alwaysApprove: true,
-        permissionMode: 'bypassPermissions',
-      });
+      const extraFrames: Buffer[] = [];
+      for (const extraId of opts.extraAssetIds || []) {
+        try {
+          const got = await mediaStoreService.readBytes(extraId, apiKeyId);
+          extraFrames.push(got.bytes);
+        } catch {
+          /* skip missing extras */
+        }
+      }
+      const useReference =
+        Boolean(opts.voices?.length) || extraFrames.length > 0;
+
+      const videoArts = useReference
+        ? await grokToolsMediaProvider.generateVideoFromReferences({
+            prompt: opts.prompt,
+            images: [sourceBytes, ...extraFrames],
+            voices: opts.voices,
+            apiKeyId,
+            model,
+            seconds: opts.seconds,
+            aspectRatio: opts.aspectRatio,
+            timeoutMs,
+            maxTurns,
+            alwaysApprove: true,
+            permissionMode: 'bypassPermissions',
+          })
+        : await grokToolsMediaProvider.generateVideoFromImage({
+            prompt: opts.prompt,
+            imageBytes: sourceBytes,
+            apiKeyId,
+            model,
+            seconds: opts.seconds,
+            aspectRatio: opts.aspectRatio,
+            timeoutMs,
+            maxTurns,
+            alwaysApprove: true,
+            permissionMode: 'bypassPermissions',
+          });
       const art = videoArts[0]!;
       const stored = await mediaStoreService.save({
         apiKeyId,

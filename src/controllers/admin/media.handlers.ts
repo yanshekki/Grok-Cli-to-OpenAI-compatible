@@ -398,7 +398,26 @@ export const adminMediaHandlers = {
       throw ExceptionFactory.validation('prompt is required');
     }
     const secondsRaw = raw.seconds !== undefined ? Number(raw.seconds) : 6;
-    const seconds = secondsRaw >= 8 ? 10 : 6;
+    const seconds =
+      Number.isFinite(secondsRaw) && secondsRaw >= 1 && secondsRaw <= 15
+        ? Math.round(secondsRaw)
+        : 6;
+    const voicesRaw = raw.voices;
+    const voices = Array.isArray(voicesRaw)
+      ? voicesRaw.map(String).filter(Boolean)
+      : typeof voicesRaw === 'string' && voicesRaw.trim()
+        ? voicesRaw.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : undefined;
+    if (voices?.length) {
+      const { GROK_VIDEO_VOICES } = await import('../../config/constants');
+      const allowed = new Set<string>(GROK_VIDEO_VOICES);
+      const bad = voices.filter((v) => !allowed.has(v));
+      if (bad.length) {
+        throw ExceptionFactory.validation(
+          `Unknown video voice(s): ${bad.join(', ')}. Allowed: ${GROK_VIDEO_VOICES.join(', ')}`,
+        );
+      }
+    }
     const model =
       typeof raw.model === 'string' && raw.model.trim()
         ? raw.model.trim()
@@ -442,6 +461,7 @@ export const adminMediaHandlers = {
       sourceAssetId: sourceBytes ? undefined : sourceAssetId || undefined,
       sourceDocumentId: sourceBytes ? undefined : sourceDocumentId || undefined,
       sourceBytes,
+      voices,
     });
 
     await auditService.log({

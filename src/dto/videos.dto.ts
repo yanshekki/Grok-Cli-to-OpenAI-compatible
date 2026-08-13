@@ -3,6 +3,7 @@ import {
   GROK_ASPECT_RATIOS,
   GROK_VIDEO_MAX_SECONDS,
   GROK_VIDEO_MIN_SECONDS,
+  GROK_VIDEO_VOICES,
   MAX_MESSAGE_CHARS,
 } from '../config/constants';
 
@@ -32,8 +33,15 @@ export const createVideoSchema = z.object({
   aspect_ratio: aspectRatioEnum.optional(),
   /** Optional media-library asset id (image) for image_to_video */
   source_asset_id: z.string().uuid().optional(),
+  /** Extra reference images for reference_to_video (max 7 including source). */
+  source_asset_ids: z.array(z.string().uuid()).max(7).optional(),
   /** Optional documents-library id (image file) for image_to_video */
   source_document_id: z.string().uuid().optional(),
+  /** Preset Imagine voices (max 3). Presence selects reference_to_video. */
+  voices: z
+    .array(z.enum(GROK_VIDEO_VOICES as unknown as [string, ...string[]]))
+    .max(3)
+    .optional(),
 });
 
 export type CreateVideoDto = z.infer<typeof createVideoSchema>;

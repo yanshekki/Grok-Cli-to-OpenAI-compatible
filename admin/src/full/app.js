@@ -3780,6 +3780,15 @@ async function renderMedia() {
             <input type="number" id="mg-n" min="1" max="4" value="1" />
             <span class="hint">${escapeHtml(t('media.nHint'))}</span>
           </label>
+          <label id="mg-voice-wrap" hidden>${escapeHtml(t('media.videoVoice'))}
+            <select id="mg-voice">
+              <option value="">${escapeHtml(t('media.videoVoiceNone'))}</option>
+              ${['ara', 'eve', 'leo', 'rex', 'sal', 'mio']
+                .map((v) => `<option value="${v}">${v}</option>`)
+                .join('')}
+            </select>
+            <span class="hint">${escapeHtml(t('media.videoVoiceHint'))}</span>
+          </label>
           <label id="mg-duration-wrap" hidden>${escapeHtml(t('media.videoDuration'))}
             <select id="mg-duration">
               ${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
@@ -3938,10 +3947,12 @@ async function renderMedia() {
       const srcSec = document.getElementById('mg-source-section');
       const nWrap = document.getElementById('mg-n-wrap');
       const durWrap = document.getElementById('mg-duration-wrap');
+      const voiceWrap = document.getElementById('mg-voice-wrap');
       const submit = document.getElementById('mg-submit');
       if (srcSec) srcSec.hidden = mediaMode === 'generate';
       if (nWrap) nWrap.hidden = mediaMode === 'video';
       if (durWrap) durWrap.hidden = mediaMode !== 'video';
+      if (voiceWrap) voiceWrap.hidden = mediaMode !== 'video';
       if (submit) {
         submit.textContent =
           mediaMode === 'edit'
@@ -4188,6 +4199,8 @@ async function renderMedia() {
           );
           if (model) fd.append('model', model);
           if (apiKeyId) fd.append('apiKeyId', apiKeyId);
+          const voice = document.getElementById('mg-voice')?.value || '';
+          if (voice) fd.append('voices', voice);
           if (mediaSource?.kind === 'file' && mediaSource.file) {
             fd.append('image', mediaSource.file);
           } else if (mediaSource?.kind === 'asset' && mediaSource.id) {

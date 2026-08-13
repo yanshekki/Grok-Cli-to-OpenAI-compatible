@@ -15,6 +15,9 @@ export class VideosController {
       seconds: dto.seconds,
       aspectRatio: dto.aspect_ratio,
       sourceAssetId: dto.source_asset_id,
+      sourceAssetIds: dto.source_asset_ids,
+      sourceDocumentId: dto.source_document_id,
+      voices: dto.voices,
     });
     res.status(200).json(job);
   });
