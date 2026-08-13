@@ -396,7 +396,7 @@ export async function listMediaFiles(
   const walk = async (current: string): Promise<void> => {
     const contained = await resolveInsideSandbox(root, current);
     if (!contained) return;
-    let entries: Awaited<ReturnType<typeof fs.readdir>>;
+    let entries;
     try {
       entries = await fs.readdir(contained, { withFileTypes: true });
     } catch {
