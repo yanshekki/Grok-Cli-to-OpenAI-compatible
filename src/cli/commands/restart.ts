@@ -1,8 +1,8 @@
 import { cmdStart } from './start';
 import { cmdStop } from './stop';
 import { resolveRuntimePaths } from '../lib/paths';
-import { readPreferredRunner } from '../lib/runner-info';
-import { info } from '../lib/print';
+import { pm2AppStatus, readPreferredRunner } from '../lib/runner-info';
+import { info, warn } from '../lib/print';
 
 export async function cmdRestart(opts: {
   home?: string;
@@ -26,8 +26,13 @@ export async function cmdRestart(opts: {
     });
     const preferred = readPreferredRunner(paths.packageRoot);
     if (preferred === 'pm2') {
-      pm2 = true;
-      info('Preferred runner is PM2 — restarting under PM2');
+      if (pm2AppStatus(paths.packageRoot).available) {
+        pm2 = true;
+        info('Preferred runner is PM2 — restarting under PM2');
+      } else {
+        warn('Preferred runner is PM2 but pm2 is not on PATH — starting with gctoac');
+        pm2 = false;
+      }
     }
   }
 

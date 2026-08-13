@@ -10,6 +10,13 @@ export default defineConfig({
   test: {
     setupFiles: ['./tests/setup.ts'],
     fileParallelism: false,
+    // One fork for the whole run — avoids tinypool worker recycle
+    // ERR_MODULE_NOT_FOUND after prisma generate / long integration files.
+    pool: 'forks',
+    maxWorkers: 1,
+    poolOptions: {
+      forks: { singleFork: true },
+    },
     hookTimeout: 90_000,
     testTimeout: 60_000,
     coverage: {
