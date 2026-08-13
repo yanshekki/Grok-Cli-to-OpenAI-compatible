@@ -681,8 +681,8 @@ npm publish --access public --otp=<2FA六位碼>
 - Chat prompt/response、文件與 **佇列 job payload** 以 **AES-256-GCM** 靜態加密  
 - 對外 client 請用 **`safe`** mode  
 - **Admin SPA：** 只用 OTP（`gctoac admin otp`）→ 短時 session 存 `sessionStorage`（XSS = 在 session 有效期內完全接管）  
-- **客戶端 IP：** 只有 **可信代理列表** 內的 TCP peer（預設 `127.0.0.1`）先會採信 `CF-Connecting-IP`／`X-Real-IP`／`XFF`。直連客戶**無法偽造 header** 繞過限流或 ban 他人。遠端 nginx 請把其 IP 加進 Admin → DDoS → 可信代理。  
-- Admin 只應開喺本機／VPN  
+- **客戶端 IP：** 只有 **可信代理列表** 內的 TCP peer（預設 `127.0.0.1`）才會採信 `CF-Connecting-IP`／`X-Real-IP`／`XFF`。直連客戶**無法偽造 header** 繞過限流或封鎖他人。遠端 nginx 請把其 IP 加入 Admin → DDoS → 可信代理。  
+- Admin 只應在本機／VPN 開啟  
 - 不要 commit `.env`，不要外洩 admin key／OTP  
 - 可完全關閉 Admin：`gctoac admin off`（只能用 `gctoac admin on` 重開）  
 - 一鍵更新／PM2／改 port 需 admin（視 admin key／OTP session 為 root）
@@ -697,9 +697,9 @@ npm publish --access public --otp=<2FA六位碼>
 
 ### ☕ 支持 / 打賞
 
-如果呢個 Grok → OpenAI Gateway 對你有幫助，歡迎請我飲杯咖啡！
+若本 Grok → OpenAI Gateway 對你有幫助，歡迎請我喝杯咖啡！
 
-| 網路 | 地址 |
+| 網絡 | 地址 |
 | --- | --- |
 | **EVM** (ETH/BSC/AVAX) | `yanshekki.eth` |
 | **NEAR** | `yanshekki.near` |
@@ -713,4 +713,4 @@ MIT — 見 [LICENSE](./LICENSE)。
 
 ## 免責聲明
 
-本 gateway 會 spawn **Grok CLI**，視政策可能使用檔案系統、shell、網路等 tools。認證、暴露範圍、key 模式由你負責。作者不對濫用或資料損失負責。
+本 gateway 會啟動 **Grok CLI**，視政策可能使用檔案系統、shell、網絡等工具。認證、暴露範圍、key 模式由你負責。作者不對濫用或資料損失負責。

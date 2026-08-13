@@ -1322,7 +1322,7 @@ const dict = {
         '預設生產平衡：公平輪詢、中等深度、每 key 同時只跑 1 個。',
       presetStrictHint:
         '較低上限 + 全域 FIFO — 流量不可信或主機資源緊張時使用。',
-      presetCustomHint: '數值唔對應內建方案。可繼續微調，或上方選一個方案。',
+      presetCustomHint: '數值不符合內建方案。可繼續微調，或於上方選取一個方案。',
       presetActiveLabel: '目前：{name}',
       presetFormLabel: '草稿：{name}',
       presetTagActive: '目前',
@@ -1377,7 +1377,7 @@ const dict = {
       needKey: '請輸入或選擇 API 金鑰',
       attach: '上傳',
       attachLibrary: '從已上傳選擇',
-      attachHint: '可喺本頁任意位置拖放檔案、上傳，或從已上傳庫挑選',
+      attachHint: '可於本頁任意位置拖放檔案、上傳，或從已上傳庫挑選',
       dropTitle: '放開以附加檔案',
       dropHint: '放開即上傳 — 格式與「上傳」按鈕相同',
       formatsLabel: '格式',
@@ -1770,7 +1770,7 @@ const dict = {
       scReadDesc: '解碼／搜尋，不寫入。',
       scReadDetail: '安全開 · readonly · turns 8–15 · 120–180s。',
       scChatTitle: '純問答',
-      scChatDesc: '只回文字，唔使工具。',
+      scChatDesc: '只回覆文字，不需使用工具。',
       scChatDetail: '安全開 · none · turns 3–6 · 60s。',
       scLongTitle: '長任務（safe）',
       scLongDesc: '多步驟，減少 max turns 失敗。',
@@ -1897,7 +1897,7 @@ const dict = {
         '可生成圖片、編輯既有圖片，或建立圖生影片工作。執行限制依循安全設定。需啟用 imagesApi 與 tools（影片另需 videoApi）。',
       generateHint: '透過 Grok Imagine 工具（image_gen、image_edit、image_to_video）。',
       generatePrompt: '提示詞',
-      generatePromptPh: '描述您想生成的圖像…',
+      generatePromptPh: '描述你想生成的圖像…',
       generateSize: '尺寸',
       aspectRatio: '長寬比',
       aspectHint: '採用 Grok Imagine 的 aspect_ratio（非 OpenAI 像素尺寸）',
@@ -2043,7 +2043,7 @@ const dict = {
       presetTagDraft: '草稿',
       presetTagSaved: '已儲存',
       presetActiveHint: '目前方案：{name}。若改動其他欄位請按「儲存策略」。',
-      presetCustomHint: '目前數值唔屬於寬鬆／均衡／嚴格，已判定為「自訂」。',
+      presetCustomHint: '目前數值不屬於寬鬆／均衡／嚴格，已判定為「自訂」。',
       presetUnsavedHint:
         '表單顯示「{form}」，伺服器仍為「{saved}」。請按「儲存策略」先套用。',
       savePolicy: '儲存策略',
@@ -2053,7 +2053,7 @@ const dict = {
       confirmReset: '確定將所有 DDoS 策略欄位重設為 .env 預設？',
       sectionProxy: '反向代理 / CDN',
       proxyHint:
-        '流量經 nginx 或 Cloudflare 時，請設定信任層數，令封鎖、限流、稽核日誌使用真實用戶 IP，而唔係代理伺服器 IP。',
+        '流量經 nginx 或 Cloudflare 時，請設定信任層數，令封鎖、限流、稽核日誌使用真實用戶 IP，而非代理伺服器 IP。',
       proxyTrustHops: '信任代理層數',
       proxyTrustHopsHint:
         '0 = 直連（忽略 header）。1 = nginx 或 Cloudflare→應用。2 = Cloudflare→nginx→應用。',
@@ -2067,7 +2067,7 @@ const dict = {
       proxySrcSocket: '僅 TCP socket（無代理）',
       trustedProxies: '可信代理 IP / CIDR',
       trustedProxiesHint:
-        '只有呢啲 peer 先可以設定 CF-Connecting-IP / X-Real-IP / XFF。預設 127.0.0.1（本機 nginx）。遠端代理請加其 IP。直連客戶無法偽造 header。',
+        '只有這些 peer 才可設定 CF-Connecting-IP / X-Real-IP / XFF。預設 127.0.0.1（本機 nginx）。遠端代理請加入其 IP。直連客戶無法偽造 header。',
       sectionLimits: '限流',
       sectionAuth: '失敗認證',
       sectionRate: '限流濫用（429）',
@@ -2313,7 +2313,7 @@ const dict = {
     /** API error.code → 使用者可見訊息（管理面板） */
     errors: {
       unauthorized: '憑證無效或缺失，請重新登入。',
-      forbidden: '您沒有執行此操作的權限。',
+      forbidden: '你沒有執行此操作的權限。',
       not_found: '找不到請求的資源。',
       validation_error: '請求無效，請檢查輸入內容。',
       rate_limit_exceeded: '已超過速率限制，請稍後再試。',
