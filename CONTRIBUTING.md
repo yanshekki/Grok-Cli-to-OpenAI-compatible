@@ -33,6 +33,6 @@ The workflow file must stay `.github/workflows/release.yml` and must not set a G
 3. Merge to `main` with CI green. Do not tag from a feature branch.
 4. On the merged commit, push an annotated tag whose name is `v` plus the `package.json` version, for example `v1.7.5`.
 5. `.github/workflows/release.yml` runs the test suite, publishes with `npm publish --access public --provenance` over OIDC, checks `npm view grok-cli-to-openai-compatible@<version>` (including the provenance attestation), and creates one GitHub Release whose notes are that version’s section in `CHANGELOG.md`.
-6. Re-running the workflow is safe. If that version is already on npm, publish is skipped. If the GitHub Release already exists, it is left as-is.
+6. Re-running the workflow is safe. If that version is already on npm, publish is skipped. If the GitHub Release already exists, it is left as-is. npm can accept the upload a few minutes before `npm view` can see the version. The workflow polls for up to eight minutes before it fails the verify step.
 
 `prepublishOnly` still runs `npm run build`, so the tarball includes `dist/`. Provenance is also set in `publishConfig`. The publish job needs Node 24 (bundled npm 11.5.1+) and `id-token: write`.

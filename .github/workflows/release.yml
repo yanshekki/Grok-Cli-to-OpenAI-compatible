@@ -143,16 +143,18 @@ jobs:
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
           NAME="$(node -p "require('./package.json').name")"
-          for i in 1 2 3 4 5 6 7 8 9 10; do
+          # npm accepts the upload before the version is readable. 1.7.5 took
+          # about four minutes ("may take a few minutes to become available").
+          for i in $(seq 1 32); do
             if npm view "${NAME}@${VERSION}" --json > /tmp/npm-view.json 2> /tmp/npm-view.err; then
               break
             fi
-            if [ "$i" -eq 10 ]; then
+            if [ "$i" -eq 32 ]; then
               echo "::error::npm view ${NAME}@${VERSION} failed"
               cat /tmp/npm-view.err
               exit 1
             fi
-            sleep 10
+            sleep 15
           done
           npm view "${NAME}@${VERSION}"
           node <<'NODE'
