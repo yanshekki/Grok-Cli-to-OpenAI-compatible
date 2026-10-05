@@ -1,0 +1,198 @@
+name: Release
+
+# npm Trusted Publishing (OIDC) for grok-cli-to-openai-compatible.
+# Trusted publisher on npmjs.com: GitHub Actions, owner yanshekki,
+# repository Grok-Cli-to-OpenAI-compatible, workflow filename release.yml,
+# environment blank. Do not add an npm token or a GitHub environment.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      DATABASE_URL: file:../data/gateway.db
+      # 32 zero bytes as base64 (must decode to exactly 32 bytes)
+      ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      GROK_DEFAULT_CWD: ${{ github.workspace }}
+      GROK_CWD_ALLOWLIST: ${{ github.workspace }}
+      LOG_LEVEL: error
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          check-latest: true
+          registry-url: "https://registry.npmjs.org"
+          # Release builds must not restore a package-manager cache.
+          package-manager-cache: false
+
+      - name: Require OIDC-capable npm and a matching stable tag
+        run: |
+          set -euo pipefail
+          if [ -n "${NODE_AUTH_TOKEN:-}" ] || [ -n "${NPM_TOKEN:-}" ]; then
+            echo "::error::Refusing to publish: an npm token is present. This workflow is OIDC only."
+            exit 1
+          fi
+          echo "node $(node --version)"
+          echo "npm $(npm --version)"
+          node <<'NODE'
+          const { execSync } = require('node:child_process');
+          const npm = execSync('npm --version', { encoding: 'utf8' }).trim();
+          const [maj, min, pat] = npm.split('.').map((n) => Number(n));
+          const ok =
+            maj > 11 || (maj === 11 && (min > 5 || (min === 5 && pat >= 1)));
+          if (!ok) {
+            console.error(
+              `npm ${npm} is below 11.5.1 (required for trusted publishing)`,
+            );
+            process.exit(1);
+          }
+          const version = require('./package.json').version;
+          const tag = process.env.GITHUB_REF_NAME || '';
+          if (!/^v\d+\.\d+\.\d+$/.test(tag)) {
+            console.error(`tag ${tag} is not a stable vX.Y.Z version tag`);
+            process.exit(1);
+          }
+          if (tag !== `v${version}`) {
+            console.error(
+              `tag ${tag} does not match package.json version ${version}`,
+            );
+            process.exit(1);
+          }
+          NODE
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Ensure data directory
+        run: mkdir -p data
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Prisma migrate
+        run: npx prisma migrate deploy
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit + integration tests
+        run: npm test
+
+      - name: Prepare GitHub Release notes
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const version = require('./package.json').version;
+          const text = fs.readFileSync('CHANGELOG.md', 'utf8');
+          const header = `## [${version}]`;
+          const start = text.indexOf(header);
+          if (start < 0) {
+            console.error(`CHANGELOG.md has no section ${header}`);
+            process.exit(1);
+          }
+          const rest = text.slice(start);
+          const next = rest.indexOf('\n## [', header.length);
+          const section = (next < 0 ? rest : rest.slice(0, next)).trim() + '\n';
+          const out = `${process.env.RUNNER_TEMP}/release-notes.md`;
+          fs.writeFileSync(out, section);
+          process.stdout.write(section);
+          NODE
+
+      - name: Publish to npm (OIDC, skip if this version exists)
+        env:
+          NODE_ENV: production
+        run: |
+          set -euo pipefail
+          if [ -n "${NODE_AUTH_TOKEN:-}" ] || [ -n "${NPM_TOKEN:-}" ]; then
+            echo "::error::Refusing to publish: an npm token is present. This workflow is OIDC only."
+            exit 1
+          fi
+          VERSION="$(node -p "require('./package.json').version")"
+          NAME="$(node -p "require('./package.json').name")"
+          if npm view "${NAME}@${VERSION}" version > /tmp/npm-view-version.txt 2> /tmp/npm-view-version.err; then
+            echo "Version ${VERSION} is already on npm ($(tr -d '\n' < /tmp/npm-view-version.txt)); skipping publish."
+          else
+            if grep -Eqi 'E404|404 Not Found|not in this registry' /tmp/npm-view-version.err; then
+              npm publish --access public --provenance
+            else
+              echo "::error::npm view failed before publish"
+              cat /tmp/npm-view-version.err
+              exit 1
+            fi
+          fi
+
+      - name: Verify npm registry
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          NAME="$(node -p "require('./package.json').name")"
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if npm view "${NAME}@${VERSION}" --json > /tmp/npm-view.json 2> /tmp/npm-view.err; then
+              break
+            fi
+            if [ "$i" -eq 10 ]; then
+              echo "::error::npm view ${NAME}@${VERSION} failed"
+              cat /tmp/npm-view.err
+              exit 1
+            fi
+            sleep 10
+          done
+          npm view "${NAME}@${VERSION}"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const pkg = require('./package.json');
+          const view = JSON.parse(fs.readFileSync('/tmp/npm-view.json', 'utf8'));
+          if (view.version !== pkg.version) {
+            console.error(`registry version ${view.version} != ${pkg.version}`);
+            process.exit(1);
+          }
+          const att = view.dist && view.dist.attestations;
+          if (!att || !att.provenance) {
+            console.error('published version has no provenance attestation');
+            console.error(
+              JSON.stringify({ _npmUser: view._npmUser, dist: view.dist }, null, 2),
+            );
+            process.exit(1);
+          }
+          console.log(
+            JSON.stringify(
+              {
+                version: view.version,
+                _npmUser: view._npmUser,
+                attestations: att,
+              },
+              null,
+              2,
+            ),
+          );
+          NODE
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          NOTES="${RUNNER_TEMP}/release-notes.md"
+          if gh release view "$TAG" --json url --jq .url > /tmp/gh-release-url.txt 2> /tmp/gh-release.err; then
+            echo "GitHub Release ${TAG} already exists: $(cat /tmp/gh-release-url.txt)"
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file "$NOTES"
+          fi
