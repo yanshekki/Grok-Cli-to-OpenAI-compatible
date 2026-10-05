@@ -727,12 +727,52 @@ gctoac setup|start|status|stop|doctor|logs|update
 
 ### 發佈到 npm（維護者）
 
-`prepublishOnly` 會跑 `npm run build`，tarball 一定包含 `dist/`。
+在 `main` 推送附註標籤 `vX.Y.Z` 後，由 [`.github/workflows/release.yml`](./.github/workflows/release.yml) 發佈。認證只用 npm 受信任發佈（OIDC），並附來源證明（provenance）。沒有 npm token。
 
-```bash
-npm login
-npm publish --access public --otp=<2FA六位碼>
-```
+`prepublishOnly` 仍會跑 `npm run build`，tarball 一定包含 `dist/`。工作流程會跑測試；該版本尚未在 npm 時才發佈；然後執行 `npm view grok-cli-to-openai-compatible@<version>`，並建立一個 GitHub Release。重新執行不會發佈第二次。
+
+更新日誌規則與完整步驟見 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
+---
+
+## 更新日誌
+
+這裡只列最近三個版本。較舊的版本在 [CHANGELOG.zh.md](./CHANGELOG.zh.md)。
+
+### 1.7.5 — 2026-10-05
+
+#### 改進
+
+- README 加上產品頁連結（[ysk.hk/products/gctoac](https://ysk.hk/products/gctoac)，英文：[ysk.hk/en/products/gctoac](https://ysk.hk/en/products/gctoac)）。
+
+#### 內部／CI
+
+- 推送 `vX.Y.Z` 標籤後，由 `.github/workflows/release.yml` 發佈。認證只用 npm 受信任發佈（OIDC），並附來源證明。工作流程不使用 npm token，也不使用 GitHub environment。
+- 重新執行時，若該版本已在登錄庫，就跳過 `npm publish`，再執行 `npm view grok-cli-to-openai-compatible@<version>`；GitHub Release 只在尚未建立時才建立。
+- CI 的 `actions/checkout` 與 `actions/setup-node` 由 v4 改為 v7。發佈 job 使用 Node 24，以便內建 npm 為 11.5.1 或更新。
+- 兩份 README 只保留最近三個版本，並按類別分組。完整記錄在 `CHANGELOG.md` 與 `CHANGELOG.zh.md`。
+
+### 1.7.4 — 2026-08-14
+
+#### 修正
+
+- Grok CLI 在檔案寫好之後以 exit `1` 結束時（`maxTurns`／失敗的 `use_tool` 複製），`/v1/images/generations` 仍交回 Imagine 圖片。Gateway 會取回今次 run 的 session 圖片與沙箱 `output.*`，串流期間輪詢並複製；`n=1` 一拿到檔案就停止行程。
+
+#### 內部／CI
+
+- 為 v1.7.3 的 i18n 字串重新建置 `public/admin/boot.js`。
+
+### 1.7.3 — 2026-08-14
+
+#### 修正
+
+- Grok Imagine 只把圖寫到今次 run 的 session `images/`、沙箱沒有 `output.png` 時，`/v1/images/generations` 仍交回圖片。Gateway 把今次 run 最新一張複製到沙箱 `output.*`。只有完全沒有檔案時才回 502 `no_image_in_sandbox`。
+
+#### 改進
+
+- README 與 README-ZH 寫明圖片請求、收圖路徑，以及 `/v1/images/*` 與 `/v1/media/assets/*`。
+
+[完整更新日誌](./CHANGELOG.zh.md)
 
 ---
 

@@ -790,12 +790,52 @@ gctoac setup|start|status|stop|doctor|logs|update
 
 ### Publish (maintainers)
 
-`prepublishOnly` runs `npm run build` so the tarball includes `dist/`.
+Releases are published by [`.github/workflows/release.yml`](./.github/workflows/release.yml) when an annotated `vX.Y.Z` tag is pushed to `main`. Authentication is npm Trusted Publishing (OIDC) with provenance. There is no npm token.
 
-```bash
-npm login
-npm publish --access public --otp=<2FA_CODE>
-```
+`prepublishOnly` still runs `npm run build`, so the tarball includes `dist/`. The workflow runs the tests, publishes only if that version is not already on npm, checks `npm view grok-cli-to-openai-compatible@<version>`, and opens one GitHub Release. Re-running it does not publish a second time.
+
+The changelog rule and the full steps are in [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+---
+
+## Changelog
+
+Only the latest three versions are listed here. Older releases are in [CHANGELOG.md](./CHANGELOG.md).
+
+### 1.7.5 — 2026-10-05
+
+#### Improvements
+
+- README links the product page ([ysk.hk/products/gctoac](https://ysk.hk/products/gctoac), English: [ysk.hk/en/products/gctoac](https://ysk.hk/en/products/gctoac)).
+
+#### Internal/CI
+
+- Publish from a pushed `vX.Y.Z` tag with `.github/workflows/release.yml`. Authentication is npm Trusted Publishing (OIDC) with provenance. The workflow does not use an npm token or a GitHub environment.
+- A re-run skips `npm publish` when that version is already on the registry, checks `npm view grok-cli-to-openai-compatible@<version>`, and creates the GitHub Release only when it is missing.
+- CI `actions/checkout` and `actions/setup-node` move from v4 to v7. The publish job uses Node 24 so the bundled npm is 11.5.1 or newer.
+- READMEs keep the latest three versions, by category. The full history is in `CHANGELOG.md` and `CHANGELOG.zh.md`.
+
+### 1.7.4 — 2026-08-14
+
+#### Fixes
+
+- `/v1/images/generations` returns the Imagine image when Grok CLI exits 1 after the file was written (`maxTurns` / failed `use_tool` copies). The gateway recovers this run’s session images and sandbox `output.*`, polls and copies during the stream, and for `n=1` stops the process once a file is in hand.
+
+#### Internal/CI
+
+- Rebuild `public/admin/boot.js` for the v1.7.3 i18n strings.
+
+### 1.7.3 — 2026-08-14
+
+#### Fixes
+
+- `/v1/images/generations` returns the image when Grok Imagine wrote it only under this run’s session `images/` and the sandbox has no `output.png`. The gateway copies the newest file for this run into sandbox `output.*`. A 502 `no_image_in_sandbox` happens only when nothing was written.
+
+#### Improvements
+
+- README and README-ZH document the images request, the harvest path, and `/v1/images/*` plus `/v1/media/assets/*`.
+
+[Full changelog](./CHANGELOG.md)
 
 ---
 
