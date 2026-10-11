@@ -10,6 +10,22 @@
 
 條目來自 git 歷史、標籤，以及 [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases)。`package.json` 有過、但未曾發佈到 npm 的版本會註明。npm 日期是登錄庫發佈時間（香港時間，UTC+8）。沒有把 commit 說明改寫成 commit 本身沒有的說法。
 
+## [1.7.6] - 2026-10-11
+
+### 依賴升級
+
+- `pino-pretty` 13.1.3 → 13.2.0
+- `tsx` 4.23.1 → 4.23.15
+- `vite` 6.4.3 → 6.4.4
+- `typescript-eslint` 8.64.0 → 8.71.1
+- `prisma` 與 `@prisma/client` 6.5.0 → 6.19.3（同步升級）。CLI、update、prepare 與測試 harness 的後備路徑釘死 `npx prisma@6.19.3`。
+- `express` 4.22.2 → 4.22.3
+- `@types/node` 22.20.1 → 22.20.5
+
+### 內部／CI
+
+- ESLint 設定涵蓋 `admin/src`，並允許現有的 `@ts-nocheck` 與測試裡無 `yield` 的 async generator mock，`typescript-eslint` 8.71.1 下 `npm run lint` 仍通過。
+
 ## [1.7.5] - 2026-10-05
 
 ### 改進

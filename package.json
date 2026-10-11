@@ -1,6 +1,6 @@
 {
   "name": "grok-cli-to-openai-compatible",
-  "version": "1.7.5",
+  "version": "1.7.6",
   "description": "OpenAI-compatible API gateway for Grok CLI — with Admin panel, safe mode, and gctoac CLI",
   "keywords": [
     "grok",
@@ -47,7 +47,7 @@
     "dev": "tsx watch src/server.ts",
     "dev:admin": "vite --config admin/vite.config.ts",
     "build:admin": "vite build --config admin/vite.config.ts",
-    "build": "node scripts/generate-allowed-extensions.cjs && npx prisma@6.5.0 generate && tsc -p tsconfig.json && node -e \"require('fs').chmodSync('dist/cli/index.js',0o755)\" && npm run build:admin",
+    "build": "node scripts/generate-allowed-extensions.cjs && npx prisma@6.19.3 generate && tsc -p tsconfig.json && node -e \"require('fs').chmodSync('dist/cli/index.js',0o755)\" && npm run build:admin",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:admin": "vitest run --project admin-node --project admin-dom",
@@ -64,10 +64,10 @@
     "typecheck:admin": "tsc -p admin/tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" \"admin/src/**/*.ts\"",
     "lint:fix": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" \"admin/src/**/*.ts\" --fix",
-    "prisma:generate": "npx prisma@6.5.0 generate",
-    "prisma:migrate": "mkdir -p data && npx prisma@6.5.0 migrate dev",
-    "prisma:deploy": "mkdir -p data && npx prisma@6.5.0 migrate deploy",
-    "db:setup": "mkdir -p data && npx prisma@6.5.0 migrate deploy && tsx prisma/seed.ts",
+    "prisma:generate": "npx prisma@6.19.3 generate",
+    "prisma:migrate": "mkdir -p data && npx prisma@6.19.3 migrate dev",
+    "prisma:deploy": "mkdir -p data && npx prisma@6.19.3 migrate deploy",
+    "db:setup": "mkdir -p data && npx prisma@6.19.3 migrate deploy && tsx prisma/seed.ts",
     "seed": "tsx prisma/seed.ts",
     "smoke": "bash scripts/smoke.sh",
     "prepare": "node scripts/prepare.cjs",
@@ -78,7 +78,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "6.5.0",
+    "@prisma/client": "6.19.3",
     "commander": "^13.1.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -89,7 +89,7 @@
     "multer": "^1.4.5-lts.1",
     "pino": "^9.6.0",
     "pino-http": "^10.4.0",
-    "prisma": "6.5.0",
+    "prisma": "6.19.3",
     "zod": "^3.24.2"
   },
   "devDependencies": {

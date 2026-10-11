@@ -10,6 +10,22 @@ Categories: **New features**, **Improvements**, **Fixes**, **Security**, **Depen
 
 Entries come from git history, tags, and [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases). A version that appears in `package.json` history but was never published to npm is marked. npm dates are the registry publish time in Hong Kong (UTC+8). Commit subjects are not rewritten into claims the commits do not make.
 
+## [1.7.6] - 2026-10-11
+
+### Dependency upgrades
+
+- `pino-pretty` 13.1.3 → 13.2.0
+- `tsx` 4.23.1 → 4.23.15
+- `vite` 6.4.3 → 6.4.4
+- `typescript-eslint` 8.64.0 → 8.71.1
+- `prisma` and `@prisma/client` 6.5.0 → 6.19.3 (lockstep). CLI, update, prepare, and test harness fallbacks pin `npx prisma@6.19.3`.
+- `express` 4.22.2 → 4.22.3
+- `@types/node` 22.20.1 → 22.20.5
+
+### Internal/CI
+
+- ESLint config covers `admin/src` and allows existing `@ts-nocheck` plus async-generator test mocks, so `npm run lint` stays green with `typescript-eslint` 8.71.1.
+
 ## [1.7.5] - 2026-10-05
 
 ### Improvements
