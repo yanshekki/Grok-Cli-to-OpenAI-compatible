@@ -739,6 +739,22 @@ gctoac setup|start|status|stop|doctor|logs|update
 
 這裡只列最近三個版本。較舊的版本在 [CHANGELOG.zh.md](./CHANGELOG.zh.md)。
 
+### 1.7.6 — 2026-10-11
+
+#### 依賴升級
+
+- `pino-pretty` 13.1.3 → 13.2.0
+- `tsx` 4.23.1 → 4.23.15
+- `vite` 6.4.3 → 6.4.4
+- `typescript-eslint` 8.64.0 → 8.71.1
+- `prisma` 與 `@prisma/client` 6.5.0 → 6.19.3（同步升級）。CLI、update、prepare 與測試 harness 的後備路徑釘死 `npx prisma@6.19.3`。
+- `express` 4.22.2 → 4.22.3
+- `@types/node` 22.20.1 → 22.20.5
+
+#### 內部／CI
+
+- ESLint 設定涵蓋 `admin/src`，並允許現有的 `@ts-nocheck` 與測試裡無 `yield` 的 async generator mock，`typescript-eslint` 8.71.1 下 `npm run lint` 仍通過。
+
 ### 1.7.5 — 2026-10-05
 
 #### 改進
@@ -761,16 +777,6 @@ gctoac setup|start|status|stop|doctor|logs|update
 #### 內部／CI
 
 - 為 v1.7.3 的 i18n 字串重新建置 `public/admin/boot.js`。
-
-### 1.7.3 — 2026-08-14
-
-#### 修正
-
-- Grok Imagine 只把圖寫到今次 run 的 session `images/`、沙箱沒有 `output.png` 時，`/v1/images/generations` 仍交回圖片。Gateway 把今次 run 最新一張複製到沙箱 `output.*`。只有完全沒有檔案時才回 502 `no_image_in_sandbox`。
-
-#### 改進
-
-- README 與 README-ZH 寫明圖片請求、收圖路徑，以及 `/v1/images/*` 與 `/v1/media/assets/*`。
 
 [完整更新日誌](./CHANGELOG.zh.md)
 

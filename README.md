@@ -802,6 +802,22 @@ The changelog rule and the full steps are in [CONTRIBUTING.md](./CONTRIBUTING.md
 
 Only the latest three versions are listed here. Older releases are in [CHANGELOG.md](./CHANGELOG.md).
 
+### 1.7.6 — 2026-10-11
+
+#### Dependency upgrades
+
+- `pino-pretty` 13.1.3 → 13.2.0
+- `tsx` 4.23.1 → 4.23.15
+- `vite` 6.4.3 → 6.4.4
+- `typescript-eslint` 8.64.0 → 8.71.1
+- `prisma` and `@prisma/client` 6.5.0 → 6.19.3 (lockstep). CLI, update, prepare, and test harness fallbacks pin `npx prisma@6.19.3`.
+- `express` 4.22.2 → 4.22.3
+- `@types/node` 22.20.1 → 22.20.5
+
+#### Internal/CI
+
+- ESLint config covers `admin/src` and allows existing `@ts-nocheck` plus async-generator test mocks, so `npm run lint` stays green with `typescript-eslint` 8.71.1.
+
 ### 1.7.5 — 2026-10-05
 
 #### Improvements
@@ -824,16 +840,6 @@ Only the latest three versions are listed here. Older releases are in [CHANGELOG
 #### Internal/CI
 
 - Rebuild `public/admin/boot.js` for the v1.7.3 i18n strings.
-
-### 1.7.3 — 2026-08-14
-
-#### Fixes
-
-- `/v1/images/generations` returns the image when Grok Imagine wrote it only under this run’s session `images/` and the sandbox has no `output.png`. The gateway copies the newest file for this run into sandbox `output.*`. A 502 `no_image_in_sandbox` happens only when nothing was written.
-
-#### Improvements
-
-- README and README-ZH document the images request, the harvest path, and `/v1/images/*` plus `/v1/media/assets/*`.
 
 [Full changelog](./CHANGELOG.md)
 
