@@ -10,6 +10,21 @@ Categories: **New features**, **Improvements**, **Fixes**, **Security**, **Depen
 
 Entries come from git history, tags, and [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases). A version that appears in `package.json` history but was never published to npm is marked. npm dates are the registry publish time in Hong Kong (UTC+8). Commit subjects are not rewritten into claims the commits do not make.
 
+## [1.7.7] - 2026-10-25
+
+### Security
+
+- Upgrade `multer` 1.4.5-lts.2 → **2.5.0** for CVE-2026-77078 (High multipart field-name DoS) and later 2.x multipart fixes including CVE-2026-113872. Upload routes still use `memoryStorage()`. Oversize and malformed multipart now map `MulterError` to **413** / **400** instead of 500.
+- Lock `body-parser` at **1.20.9** (CVE-2026-111181) via `overrides` so `express.json` / `urlencoded` pick up the patched transitive. Repo lockfile was on 1.20.8.
+- Operators: prefer Node **22.23.4+** or **24.22.1+** after the 2026-10-21 Node security releases (High Brotli OOB CVE-2026-111497). `engines` stays `>=20`.
+
+### Dependency upgrades
+
+- `express` range `^4.21.2` → `^4.22.3` (resolved version already 4.22.3).
+- `vite` 6.4.4 → **6.4.5** (GHSA-8g5g-mxqh-grgj, incomplete `server.fs.deny` backport; Admin Vite dev server only).
+- `typescript-eslint` 8.71.1 → **8.72.0**.
+- `@types/multer` 1.4.13 → **2.3.0** (multer 2 does not ship its own types).
+
 ## [1.7.6] - 2026-10-11
 
 ### Dependency upgrades

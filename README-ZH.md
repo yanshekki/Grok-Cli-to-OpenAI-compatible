@@ -739,6 +739,21 @@ gctoac setup|start|status|stop|doctor|logs|update
 
 這裡只列最近三個版本。較舊的版本在 [CHANGELOG.zh.md](./CHANGELOG.zh.md)。
 
+### 1.7.7 — 2026-10-25
+
+#### 安全
+
+- 將 `multer` 由 1.4.5-lts.2 升到 **2.5.0**，修 CVE-2026-77078（High，multipart 欄位名稱 DoS）以及其後 2.x 的 multipart 修正（含 CVE-2026-113872）。上傳路徑仍用 `memoryStorage()`。過大或格式錯誤的 multipart 會把 `MulterError` 對應成 **413**／**400**，不再變成 500。
+- 用 `overrides` 把 `body-parser` 鎖在 **1.20.9**（CVE-2026-111181），讓 `express.json`／`urlencoded` 用到已修的傳遞依賴。倉庫 lockfile 先前是 1.20.8。
+- 營運建議：2026-10-21 Node 安全更新之後，生產環境優先用 **22.23.4+** 或 **24.22.1+**（High Brotli 越界寫入 CVE-2026-111497）。`engines` 仍是 `>=20`。
+
+#### 依賴升級
+
+- `express` 範圍 `^4.21.2` → `^4.22.3`（實際解析版本本來已是 4.22.3）。
+- `vite` 6.4.4 → **6.4.5**（GHSA-8g5g-mxqh-grgj，`server.fs.deny` 回移植不完整；只影響 Admin Vite 開發伺服器）。
+- `typescript-eslint` 8.71.1 → **8.72.0**。
+- `@types/multer` 1.4.13 → **2.3.0**（multer 2 不自帶型別）。
+
 ### 1.7.6 — 2026-10-11
 
 #### 依賴升級
@@ -768,16 +783,6 @@ gctoac setup|start|status|stop|doctor|logs|update
 - CI 的 `actions/checkout` 與 `actions/setup-node` 由 v4 改為 v7。發佈 job 使用 Node 24，以便內建 npm 為 11.5.1 或更新。
 - 兩份 README 只保留最近三個版本，並按類別分組。完整記錄在 `CHANGELOG.md` 與 `CHANGELOG.zh.md`。
 
-### 1.7.4 — 2026-08-14
-
-#### 修正
-
-- Grok CLI 在檔案寫好之後以 exit `1` 結束時（`maxTurns`／失敗的 `use_tool` 複製），`/v1/images/generations` 仍交回 Imagine 圖片。Gateway 會取回今次 run 的 session 圖片與沙箱 `output.*`，串流期間輪詢並複製；`n=1` 一拿到檔案就停止行程。
-
-#### 內部／CI
-
-- 為 v1.7.3 的 i18n 字串重新建置 `public/admin/boot.js`。
-
 [完整更新日誌](./CHANGELOG.zh.md)
 
 ---
@@ -793,6 +798,7 @@ gctoac setup|start|status|stop|doctor|logs|update
 - 不要 commit `.env`，不要外洩 admin key／OTP  
 - 可完全關閉 Admin：`gctoac admin off`（只能用 `gctoac admin on` 重開）  
 - 一鍵更新／PM2／改 port 需 admin（視 admin key／OTP session 為 root）
+- 生產環境 Node：優先 **22.23.4+** 或 **24.22.1+**（2026-10-21 安全更新）。`engines` 仍是 `>=20`。
 
 ---
 

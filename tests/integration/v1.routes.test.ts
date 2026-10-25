@@ -113,6 +113,22 @@ describe('v1 routes (auth, models, documents, api-keys)', () => {
     expect(del.status).toBe(200);
   });
 
+  it('documents upload rejects oversized multipart with 413', async () => {
+    if (!h) return;
+    const fd = new FormData();
+    fd.append(
+      'file',
+      new Blob([new Uint8Array(1_048_576 + 1)], { type: 'text/plain' }),
+      'big.txt',
+    );
+    const up = await apiFetch(h.baseUrl, '/v1/documents', {
+      method: 'POST',
+      key: h.clientKey,
+      formData: fd,
+    });
+    expect(up.status).toBe(413);
+  });
+
   it('api-keys requires admin; client forbidden', async () => {
     if (!h) return;
     const forbidden = await apiFetch(h.baseUrl, '/v1/api-keys', {
