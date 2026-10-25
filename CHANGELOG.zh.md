@@ -10,6 +10,21 @@
 
 條目來自 git 歷史、標籤，以及 [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases)。`package.json` 有過、但未曾發佈到 npm 的版本會註明。npm 日期是登錄庫發佈時間（香港時間，UTC+8）。沒有把 commit 說明改寫成 commit 本身沒有的說法。
 
+## [1.7.7] - 2026-10-25
+
+### 安全
+
+- 將 `multer` 由 1.4.5-lts.2 升到 **2.5.0**，修 CVE-2026-77078（High，multipart 欄位名稱 DoS）以及其後 2.x 的 multipart 修正（含 CVE-2026-113872）。上傳路徑仍用 `memoryStorage()`。過大或格式錯誤的 multipart 會把 `MulterError` 對應成 **413**／**400**，不再變成 500。
+- 用 `overrides` 把 `body-parser` 鎖在 **1.20.9**（CVE-2026-111181），讓 `express.json`／`urlencoded` 用到已修的傳遞依賴。倉庫 lockfile 先前是 1.20.8。
+- 營運建議：2026-10-21 Node 安全更新之後，生產環境優先用 **22.23.4+** 或 **24.22.1+**（High Brotli 越界寫入 CVE-2026-111497）。`engines` 仍是 `>=20`。
+
+### 依賴升級
+
+- `express` 範圍 `^4.21.2` → `^4.22.3`（實際解析版本本來已是 4.22.3）。
+- `vite` 6.4.4 → **6.4.5**（GHSA-8g5g-mxqh-grgj，`server.fs.deny` 回移植不完整；只影響 Admin Vite 開發伺服器）。
+- `typescript-eslint` 8.71.1 → **8.72.0**。
+- `@types/multer` 1.4.13 → **2.3.0**（multer 2 不自帶型別）。
+
 ## [1.7.6] - 2026-10-11
 
 ### 依賴升級

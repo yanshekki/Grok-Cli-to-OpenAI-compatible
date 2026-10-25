@@ -1,4 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
+import multer from 'multer';
+import { env } from '../config/env';
 import {
   HttpException,
   toProtocolErrorBody,
@@ -27,6 +29,17 @@ export function errorMiddleware(
     const httpErr = ExceptionFactory.forbidden(err.message);
     res.status(httpErr.statusCode).json(toProtocolErrorBody(httpErr, path));
     return;
+  }
+
+  // multer 2 raises MulterError instead of crashing on oversize / bad field names
+  if (err instanceof multer.MulterError) {
+    err =
+      err.code === 'LIMIT_FILE_SIZE'
+        ? ExceptionFactory.documentTooLarge(env.UPLOAD_MAX_BYTES)
+        : ExceptionFactory.validation(err.message || 'Invalid multipart upload', {
+            multerCode: err.code,
+            field: err.field,
+          });
   }
 
   if (err instanceof HttpException) {

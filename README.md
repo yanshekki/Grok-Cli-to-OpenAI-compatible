@@ -802,6 +802,21 @@ The changelog rule and the full steps are in [CONTRIBUTING.md](./CONTRIBUTING.md
 
 Only the latest three versions are listed here. Older releases are in [CHANGELOG.md](./CHANGELOG.md).
 
+### 1.7.7 — 2026-10-25
+
+#### Security
+
+- Upgrade `multer` 1.4.5-lts.2 → **2.5.0** for CVE-2026-77078 (High multipart field-name DoS) and later 2.x multipart fixes including CVE-2026-113872. Upload routes still use `memoryStorage()`. Oversize and malformed multipart now map `MulterError` to **413** / **400** instead of 500.
+- Lock `body-parser` at **1.20.9** (CVE-2026-111181) via `overrides` so `express.json` / `urlencoded` pick up the patched transitive. Repo lockfile was on 1.20.8.
+- Operators: prefer Node **22.23.4+** or **24.22.1+** after the 2026-10-21 Node security releases (High Brotli OOB CVE-2026-111497). `engines` stays `>=20`.
+
+#### Dependency upgrades
+
+- `express` range `^4.21.2` → `^4.22.3` (resolved version already 4.22.3).
+- `vite` 6.4.4 → **6.4.5** (GHSA-8g5g-mxqh-grgj, incomplete `server.fs.deny` backport; Admin Vite dev server only).
+- `typescript-eslint` 8.71.1 → **8.72.0**.
+- `@types/multer` 1.4.13 → **2.3.0** (multer 2 does not ship its own types).
+
 ### 1.7.6 — 2026-10-11
 
 #### Dependency upgrades
@@ -831,16 +846,6 @@ Only the latest three versions are listed here. Older releases are in [CHANGELOG
 - CI `actions/checkout` and `actions/setup-node` move from v4 to v7. The publish job uses Node 24 so the bundled npm is 11.5.1 or newer.
 - READMEs keep the latest three versions, by category. The full history is in `CHANGELOG.md` and `CHANGELOG.zh.md`.
 
-### 1.7.4 — 2026-08-14
-
-#### Fixes
-
-- `/v1/images/generations` returns the Imagine image when Grok CLI exits 1 after the file was written (`maxTurns` / failed `use_tool` copies). The gateway recovers this run’s session images and sandbox `output.*`, polls and copies during the stream, and for `n=1` stops the process once a file is in hand.
-
-#### Internal/CI
-
-- Rebuild `public/admin/boot.js` for the v1.7.3 i18n strings.
-
 [Full changelog](./CHANGELOG.md)
 
 ---
@@ -856,6 +861,7 @@ Only the latest three versions are listed here. Older releases are in [CHANGELOG
 - Never commit `.env` or share admin keys / OTP codes  
 - Admin can be fully disabled: `gctoac admin off` (re-enable only via `gctoac admin on`)  
 - One-click update / PM2 / port change require admin (treat admin keys / OTP sessions as root)
+- Production Node: prefer **22.23.4+** or **24.22.1+** (2026-10-21 security releases). `engines` remains `>=20`.
 
 ---
 
