@@ -10,6 +10,28 @@
 
 條目來自 git 歷史、標籤，以及 [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases)。`package.json` 有過、但未曾發佈到 npm 的版本會註明。npm 日期是登錄庫發佈時間（香港時間，UTC+8）。沒有把 commit 說明改寫成 commit 本身沒有的說法。
 
+## [1.7.8] - 2026-11-01
+
+### 安全
+
+- 用 `overrides` 把傳遞依賴 `qs` 釘在 **6.16.2**（express 與 body-parser 宣告 `~6.16.0`）。lockfile 先前是 6.16.0，落在 GHSA-6pq8-jhm2-2vcw（中等，`qs.stringify` 配 `arrayFormat: 'comma'` 遇到不可呼叫的自有 `toString` 會拋錯；6.16.1 已修）同 GHSA-w4cr-vjpx-p82q（低，`allowEmptyArrays` 沒有編碼空陣列的 key；6.16.2 已修）。
+- Admin 內嵌的 DOMPurify 由 **3.2.4** 升到 **3.4.17**（`public/admin/vendor/purify.min.js`）。3.2.4 落在 CVE-2025-15599（3.2.7 已修）同 CVE-2026-0540（3.3.2 已修）範圍內。對話 markdown 仍用 `USE_PROFILES: { html: true }` 消毒。
+- 生產環境 Node 建議加上 **26.12.1+**，與 **22.23.4+**、**24.22.1+** 並列（CVE-2026-111497，Brotli 越界寫入）。`engines` 仍是 `>=20`。
+
+### 依賴升級
+
+- `typescript-eslint` 8.72.0 → **8.72.1**。
+- `package.json` 下限對齊 lockfile 已有版本：`@types/node` `^22.20.5`、`pino-pretty` `^13.2.0`、`tsx` `^4.23.15`。實際解析版本沒有變。
+
+### 修正
+
+- `formatApiError` 把頂層後備物件標成同 `error` 一樣的 body，`npm run typecheck:admin` 才讀得到 `details.feature`、`flag`、`reason`。執行路徑沒有變：`root.error` 是物件就用它，否則用頂層 body。
+
+### 內部／CI
+
+- CI 的 `actions/setup-node` 由 Node 20 改為 Node 22，並設 `check-latest: true`。Node 20 已 EOL，而且早於 CVE-2026-111497 的修正。發佈工作流程仍用 Node 24。
+- 本機 Grok Build 檢查：`grok update --check --json` 回報 `currentVersion` 1.0.70、`latestVersion` 1.0.70、`updateAvailable` false、channel stable（公開最新版日期 2026-10-23）。`grok <flag> --version` 仍接受 `--no-auto-update`、`--no-ask-user`、`--no-memory`、`--experimental-memory`。`--best-of-n` 同 `--check` 仍是未預期參數。沒有做 gateway 對 CLI 的行為煙測：未有數據。
+
 ## [1.7.7] - 2026-10-25
 
 ### 安全

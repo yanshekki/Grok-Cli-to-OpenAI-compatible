@@ -6,18 +6,24 @@
 export type TranslateFn = (path: string) => string;
 export type HasTranslateFn = (path: string) => boolean;
 
-export type ApiErrorEnvelope = {
-  error?: {
-    message?: string;
-    code?: string;
-    details?: {
-      feature?: string;
-      flag?: string;
-      reason?: string;
-      [k: string]: unknown;
-    };
-  };
+export type ApiErrorDetails = {
+  feature?: string;
+  flag?: string;
+  reason?: string;
+  [k: string]: unknown;
+};
+
+export type ApiErrorBody = {
   message?: string;
+  code?: string;
+  details?: ApiErrorDetails;
+};
+
+export type ApiErrorEnvelope = {
+  error?: ApiErrorBody;
+  message?: string;
+  code?: string;
+  details?: ApiErrorDetails;
 };
 
 export function fingerprintFeature(msg: string): string {
@@ -49,10 +55,8 @@ export function formatApiError(
   hasT: HasTranslateFn,
 ): string {
   const root = (data && typeof data === 'object' ? data : {}) as ApiErrorEnvelope;
-  const err =
-    root.error && typeof root.error === 'object'
-      ? root.error
-      : (root as { message?: string; code?: string; details?: ApiErrorEnvelope['error'] extends infer E ? E : never });
+  const err: ApiErrorBody =
+    root.error && typeof root.error === 'object' ? root.error : root;
   const code = typeof err.code === 'string' ? err.code : '';
   const details =
     err.details && typeof err.details === 'object' ? err.details : {};

@@ -10,6 +10,28 @@ Categories: **New features**, **Improvements**, **Fixes**, **Security**, **Depen
 
 Entries come from git history, tags, and [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases). A version that appears in `package.json` history but was never published to npm is marked. npm dates are the registry publish time in Hong Kong (UTC+8). Commit subjects are not rewritten into claims the commits do not make.
 
+## [1.7.8] - 2026-11-01
+
+### Security
+
+- Pin transitive `qs` at **6.16.2** via `overrides` (express and body-parser declare `~6.16.0`). Lockfile was 6.16.0, which is inside GHSA-6pq8-jhm2-2vcw (moderate, `qs.stringify` with `arrayFormat: 'comma'` throws on a non-callable own `toString`; patched in 6.16.1) and GHSA-w4cr-vjpx-p82q (low, `allowEmptyArrays` did not encode empty-array keys; patched in 6.16.2).
+- Vendor Admin DOMPurify **3.2.4 → 3.4.17** (`public/admin/vendor/purify.min.js`). 3.2.4 is inside CVE-2025-15599 (fixed in 3.2.7) and CVE-2026-0540 (fixed in 3.3.2). Chat markdown still sanitizes with `USE_PROFILES: { html: true }`.
+- Production Node guidance adds **26.12.1+** beside **22.23.4+** and **24.22.1+** (CVE-2026-111497, Brotli OOB). `engines` stays `>=20`.
+
+### Dependency upgrades
+
+- `typescript-eslint` 8.72.0 → **8.72.1**.
+- Raise package.json floors to versions already in the lockfile: `@types/node` `^22.20.5`, `pino-pretty` `^13.2.0`, `tsx` `^4.23.15`. Resolved versions unchanged.
+
+### Fixes
+
+- `formatApiError` types the top-level fallback as the same body as `error`, so `npm run typecheck:admin` can read `details.feature`, `flag`, and `reason`. The runtime branch is unchanged: use `root.error` when it is an object, otherwise the top-level body.
+
+### Internal/CI
+
+- CI `actions/setup-node` moves from Node 20 to Node 22 with `check-latest: true`. Node 20 is EOL and predates the CVE-2026-111497 fix. The release workflow stays on Node 24.
+- Grok Build check on this machine: `grok update --check --json` reported `currentVersion` 1.0.70, `latestVersion` 1.0.70, `updateAvailable` false, channel stable (public latest 2026-10-23). `grok <flag> --version` still accepts `--no-auto-update`, `--no-ask-user`, `--no-memory`, and `--experimental-memory`. `--best-of-n` and `--check` are still unexpected arguments. Deep behavioral compatibility was not smoke-tested: 未有數據.
+
 ## [1.7.7] - 2026-10-25
 
 ### Security
