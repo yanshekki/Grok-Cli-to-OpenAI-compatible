@@ -78,8 +78,8 @@ Client (OpenAI SDK / curl / Open WebUI)
 
 ### 1. 前置要求
 
-- **Node.js** ≥ 20  
-- **Grok CLI**（Grok Build **1.0+**）已安裝並登入：
+- **Node.js** ≥ 20（`engines`）。生產環境：**22.23.4+**、**24.22.1+** 或 **26.12.1+**（CVE-2026-111497）。Node 20 已 EOL。
+- **Grok CLI**（Grok Build **1.0+**）已安裝並登入。2026-11-01 的 `grok update --check` 回報已安裝版本與 stable 最新版都是 **1.0.70**。本 gateway 對該 CLI 的行為相容沒有做煙測（未有數據）。
 
 ```bash
 curl -fsSL https://x.ai/cli/install.sh | bash
@@ -739,6 +739,28 @@ gctoac setup|start|status|stop|doctor|logs|update
 
 這裡只列最近三個版本。較舊的版本在 [CHANGELOG.zh.md](./CHANGELOG.zh.md)。
 
+### 1.7.8 — 2026-11-01
+
+#### 安全
+
+- 用 `overrides` 把傳遞依賴 `qs` 釘在 **6.16.2**（express 與 body-parser 宣告 `~6.16.0`）。lockfile 先前是 6.16.0：GHSA-6pq8-jhm2-2vcw（中等，6.16.1 已修）同 GHSA-w4cr-vjpx-p82q（低，6.16.2 已修）。
+- Admin 內嵌的 DOMPurify 由 **3.2.4** 升到 **3.4.17**。3.2.4 落在 CVE-2025-15599（3.2.7 已修）同 CVE-2026-0540（3.3.2 已修）範圍內。
+- 生產環境 Node 建議加上 **26.12.1+**，與 **22.23.4+**、**24.22.1+** 並列（CVE-2026-111497）。`engines` 仍是 `>=20`。
+
+#### 依賴升級
+
+- `typescript-eslint` 8.72.0 → **8.72.1**。
+- `package.json` 下限對齊 lockfile 已有版本：`@types/node` `^22.20.5`、`pino-pretty` `^13.2.0`、`tsx` `^4.23.15`。實際解析版本沒有變。
+
+#### 修正
+
+- `formatApiError` 把頂層後備物件標成同 `error` 一樣的 body，`typecheck:admin` 才讀得到 `details.feature`、`flag`、`reason`。執行路徑沒有變。
+
+#### 內部／CI
+
+- CI 由 Node 20 改為 Node 22，並設 `check-latest: true`。發佈工作流程仍用 Node 24。
+- Grok Build **1.0.70** 是本機已安裝版本，亦是 stable 最新版（`grok update --check`）。沒有做行為煙測：未有數據。
+
 ### 1.7.7 — 2026-10-25
 
 #### 安全
@@ -770,19 +792,6 @@ gctoac setup|start|status|stop|doctor|logs|update
 
 - ESLint 設定涵蓋 `admin/src`，並允許現有的 `@ts-nocheck` 與測試裡無 `yield` 的 async generator mock，`typescript-eslint` 8.71.1 下 `npm run lint` 仍通過。
 
-### 1.7.5 — 2026-10-05
-
-#### 改進
-
-- README 加上產品頁連結（[ysk.hk/products/gctoac](https://ysk.hk/products/gctoac)，英文：[ysk.hk/en/products/gctoac](https://ysk.hk/en/products/gctoac)）。
-
-#### 內部／CI
-
-- 推送 `vX.Y.Z` 標籤後，由 `.github/workflows/release.yml` 發佈。認證只用 npm 受信任發佈（OIDC），並附來源證明。工作流程不使用 npm token，也不使用 GitHub environment。
-- 重新執行時，若該版本已在登錄庫，就跳過 `npm publish`，再執行 `npm view grok-cli-to-openai-compatible@<version>`；GitHub Release 只在尚未建立時才建立。
-- CI 的 `actions/checkout` 與 `actions/setup-node` 由 v4 改為 v7。發佈 job 使用 Node 24，以便內建 npm 為 11.5.1 或更新。
-- 兩份 README 只保留最近三個版本，並按類別分組。完整記錄在 `CHANGELOG.md` 與 `CHANGELOG.zh.md`。
-
 [完整更新日誌](./CHANGELOG.zh.md)
 
 ---
@@ -798,7 +807,7 @@ gctoac setup|start|status|stop|doctor|logs|update
 - 不要 commit `.env`，不要外洩 admin key／OTP  
 - 可完全關閉 Admin：`gctoac admin off`（只能用 `gctoac admin on` 重開）  
 - 一鍵更新／PM2／改 port 需 admin（視 admin key／OTP session 為 root）
-- 生產環境 Node：優先 **22.23.4+** 或 **24.22.1+**（2026-10-21 安全更新）。`engines` 仍是 `>=20`。
+- 生產環境 Node：**22.23.4+**、**24.22.1+** 或 **26.12.1+**（CVE-2026-111497）。`engines` 仍是 `>=20`。Node 20 已 EOL。
 
 ---
 

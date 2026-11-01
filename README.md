@@ -80,8 +80,8 @@ Client (OpenAI SDK / curl / Open WebUI)
 
 ### 1. Prerequisites
 
-- **Node.js** ≥ 20  
-- **Grok CLI** (Grok Build **1.0+**) installed and logged in:
+- **Node.js** ≥ 20 (`engines`). Production: **22.23.4+**, **24.22.1+**, or **26.12.1+** (CVE-2026-111497). Node 20 is EOL.
+- **Grok CLI** (Grok Build **1.0+**) installed and logged in. On 2026-11-01, `grok update --check` reported **1.0.70** as both the installed version and the latest stable. Deep compatibility of this gateway against that CLI was not smoke-tested (未有數據).
 
 ```bash
 curl -fsSL https://x.ai/cli/install.sh | bash
@@ -802,6 +802,28 @@ The changelog rule and the full steps are in [CONTRIBUTING.md](./CONTRIBUTING.md
 
 Only the latest three versions are listed here. Older releases are in [CHANGELOG.md](./CHANGELOG.md).
 
+### 1.7.8 — 2026-11-01
+
+#### Security
+
+- Pin transitive `qs` at **6.16.2** via `overrides` (express and body-parser declare `~6.16.0`). Lockfile was 6.16.0: GHSA-6pq8-jhm2-2vcw (moderate, patched in 6.16.1) and GHSA-w4cr-vjpx-p82q (low, patched in 6.16.2).
+- Vendor Admin DOMPurify **3.2.4 → 3.4.17**. 3.2.4 is inside CVE-2025-15599 (fixed in 3.2.7) and CVE-2026-0540 (fixed in 3.3.2).
+- Production Node guidance adds **26.12.1+** beside **22.23.4+** and **24.22.1+** (CVE-2026-111497). `engines` stays `>=20`.
+
+#### Dependency upgrades
+
+- `typescript-eslint` 8.72.0 → **8.72.1**.
+- Package.json floors raised to locked versions: `@types/node` `^22.20.5`, `pino-pretty` `^13.2.0`, `tsx` `^4.23.15`. Resolved versions unchanged.
+
+#### Fixes
+
+- `formatApiError` types the top-level fallback as the same body as `error`, so `typecheck:admin` can read `details.feature`, `flag`, and `reason`. Runtime branch unchanged.
+
+#### Internal/CI
+
+- CI Node 20 → Node 22 with `check-latest: true`. The release workflow stays on Node 24.
+- Grok Build `1.0.70` is the installed version and the latest stable (`grok update --check`). Deep behavioral compatibility was not smoke-tested: 未有數據.
+
 ### 1.7.7 — 2026-10-25
 
 #### Security
@@ -833,19 +855,6 @@ Only the latest three versions are listed here. Older releases are in [CHANGELOG
 
 - ESLint config covers `admin/src` and allows existing `@ts-nocheck` plus async-generator test mocks, so `npm run lint` stays green with `typescript-eslint` 8.71.1.
 
-### 1.7.5 — 2026-10-05
-
-#### Improvements
-
-- README links the product page ([ysk.hk/products/gctoac](https://ysk.hk/products/gctoac), English: [ysk.hk/en/products/gctoac](https://ysk.hk/en/products/gctoac)).
-
-#### Internal/CI
-
-- Publish from a pushed `vX.Y.Z` tag with `.github/workflows/release.yml`. Authentication is npm Trusted Publishing (OIDC) with provenance. The workflow does not use an npm token or a GitHub environment.
-- A re-run skips `npm publish` when that version is already on the registry, checks `npm view grok-cli-to-openai-compatible@<version>`, and creates the GitHub Release only when it is missing.
-- CI `actions/checkout` and `actions/setup-node` move from v4 to v7. The publish job uses Node 24 so the bundled npm is 11.5.1 or newer.
-- READMEs keep the latest three versions, by category. The full history is in `CHANGELOG.md` and `CHANGELOG.zh.md`.
-
 [Full changelog](./CHANGELOG.md)
 
 ---
@@ -861,7 +870,7 @@ Only the latest three versions are listed here. Older releases are in [CHANGELOG
 - Never commit `.env` or share admin keys / OTP codes  
 - Admin can be fully disabled: `gctoac admin off` (re-enable only via `gctoac admin on`)  
 - One-click update / PM2 / port change require admin (treat admin keys / OTP sessions as root)
-- Production Node: prefer **22.23.4+** or **24.22.1+** (2026-10-21 security releases). `engines` remains `>=20`.
+- Production Node: **22.23.4+**, **24.22.1+**, or **26.12.1+** (CVE-2026-111497). `engines` remains `>=20`. Node 20 is EOL.
 
 ---
 
