@@ -81,7 +81,7 @@ Client (OpenAI SDK / curl / Open WebUI)
 ### 1. Prerequisites
 
 - **Node.js** ≥ 20 (`engines`). Production: **22.23.4+**, **24.22.1+**, or **26.12.1+** (CVE-2026-111497). Node 20 is EOL.
-- **Grok CLI** (Grok Build **1.0+**) installed and logged in. On 2026-11-01, `grok update --check` reported **1.0.70** as both the installed version and the latest stable. Deep compatibility of this gateway against that CLI was not smoke-tested (未有數據).
+- **Grok CLI** (Grok Build **1.0+**) installed and logged in. On 2026-11-08, `grok update --check` reported installed **1.0.70** and `latestVersion` **1.0.77**. Official [x.ai/changelog/build](https://x.ai/changelog/build) still lists Latest **v1.0.70** (2026-10-23). Deep compatibility of this gateway against those CLIs was not smoke-tested (未有數據).
 
 ```bash
 curl -fsSL https://x.ai/cli/install.sh | bash
@@ -802,6 +802,20 @@ The changelog rule and the full steps are in [CONTRIBUTING.md](./CONTRIBUTING.md
 
 Only the latest three versions are listed here. Older releases are in [CHANGELOG.md](./CHANGELOG.md).
 
+### 1.7.9 — 2026-11-08
+
+#### Security
+
+- Raise the transitive `qs` override **6.16.2 → 6.17.1** (express and body-parser still declare `~6.16.0`). 6.16.2 is already OSV-clean for GHSA-6pq8-jhm2-2vcw and GHSA-w4cr-vjpx-p82q. 6.17.1 is current 6.x hygiene plus qs changelog parse hardening.
+
+#### Dependency upgrades
+
+- Package.json floors raised to locked versions: `cors` `^2.8.6`, `@types/cors` `^2.8.19`. Resolved versions unchanged.
+
+#### Internal/CI
+
+- Grok Build installed `1.0.70`. `grok update --check` reports latestVersion `1.0.77`; official [x.ai/changelog/build](https://x.ai/changelog/build) still lists Latest **v1.0.70**. 1.0.77 was not installed. Deep behavioral compatibility was not smoke-tested: 未有數據.
+
 ### 1.7.8 — 2026-11-01
 
 #### Security
@@ -838,22 +852,6 @@ Only the latest three versions are listed here. Older releases are in [CHANGELOG
 - `vite` 6.4.4 → **6.4.5** (GHSA-8g5g-mxqh-grgj, incomplete `server.fs.deny` backport; Admin Vite dev server only).
 - `typescript-eslint` 8.71.1 → **8.72.0**.
 - `@types/multer` 1.4.13 → **2.3.0** (multer 2 does not ship its own types).
-
-### 1.7.6 — 2026-10-11
-
-#### Dependency upgrades
-
-- `pino-pretty` 13.1.3 → 13.2.0
-- `tsx` 4.23.1 → 4.23.15
-- `vite` 6.4.3 → 6.4.4
-- `typescript-eslint` 8.64.0 → 8.71.1
-- `prisma` and `@prisma/client` 6.5.0 → 6.19.3 (lockstep). CLI, update, prepare, and test harness fallbacks pin `npx prisma@6.19.3`.
-- `express` 4.22.2 → 4.22.3
-- `@types/node` 22.20.1 → 22.20.5
-
-#### Internal/CI
-
-- ESLint config covers `admin/src` and allows existing `@ts-nocheck` plus async-generator test mocks, so `npm run lint` stays green with `typescript-eslint` 8.71.1.
 
 [Full changelog](./CHANGELOG.md)
 

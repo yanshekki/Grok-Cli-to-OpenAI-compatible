@@ -79,7 +79,7 @@ Client (OpenAI SDK / curl / Open WebUI)
 ### 1. 前置要求
 
 - **Node.js** ≥ 20（`engines`）。生產環境：**22.23.4+**、**24.22.1+** 或 **26.12.1+**（CVE-2026-111497）。Node 20 已 EOL。
-- **Grok CLI**（Grok Build **1.0+**）已安裝並登入。2026-11-01 的 `grok update --check` 回報已安裝版本與 stable 最新版都是 **1.0.70**。本 gateway 對該 CLI 的行為相容沒有做煙測（未有數據）。
+- **Grok CLI**（Grok Build **1.0+**）已安裝並登入。2026-11-08 的 `grok update --check` 回報已安裝 **1.0.70**，`latestVersion` **1.0.77**。官方 [x.ai/changelog/build](https://x.ai/changelog/build) 仍列 Latest **v1.0.70**（2026-10-23）。本 gateway 對這些 CLI 的行為相容沒有做煙測（未有數據）。
 
 ```bash
 curl -fsSL https://x.ai/cli/install.sh | bash
@@ -739,6 +739,20 @@ gctoac setup|start|status|stop|doctor|logs|update
 
 這裡只列最近三個版本。較舊的版本在 [CHANGELOG.zh.md](./CHANGELOG.zh.md)。
 
+### 1.7.9 — 2026-11-08
+
+#### 安全
+
+- 把傳遞依賴 `qs` 的 `overrides` 由 **6.16.2** 升到 **6.17.1**（express 與 body-parser 仍宣告 `~6.16.0`）。6.16.2 對 GHSA-6pq8-jhm2-2vcw 同 GHSA-w4cr-vjpx-p82q 已是 OSV 乾淨。6.17.1 是目前 6.x 衛生升級，並含 qs changelog 的 parse 加固。
+
+#### 依賴升級
+
+- `package.json` 下限對齊 lockfile 已有版本：`cors` `^2.8.6`、`@types/cors` `^2.8.19`。實際解析版本沒有變。
+
+#### 內部／CI
+
+- Grok Build 已安裝 **1.0.70**。`grok update --check` 回報 `latestVersion` **1.0.77**；官方 [x.ai/changelog/build](https://x.ai/changelog/build) 仍列 Latest **v1.0.70**。本機沒有安裝 1.0.77。沒有做行為煙測：未有數據。
+
 ### 1.7.8 — 2026-11-01
 
 #### 安全
@@ -775,22 +789,6 @@ gctoac setup|start|status|stop|doctor|logs|update
 - `vite` 6.4.4 → **6.4.5**（GHSA-8g5g-mxqh-grgj，`server.fs.deny` 回移植不完整；只影響 Admin Vite 開發伺服器）。
 - `typescript-eslint` 8.71.1 → **8.72.0**。
 - `@types/multer` 1.4.13 → **2.3.0**（multer 2 不自帶型別）。
-
-### 1.7.6 — 2026-10-11
-
-#### 依賴升級
-
-- `pino-pretty` 13.1.3 → 13.2.0
-- `tsx` 4.23.1 → 4.23.15
-- `vite` 6.4.3 → 6.4.4
-- `typescript-eslint` 8.64.0 → 8.71.1
-- `prisma` 與 `@prisma/client` 6.5.0 → 6.19.3（同步升級）。CLI、update、prepare 與測試 harness 的後備路徑釘死 `npx prisma@6.19.3`。
-- `express` 4.22.2 → 4.22.3
-- `@types/node` 22.20.1 → 22.20.5
-
-#### 內部／CI
-
-- ESLint 設定涵蓋 `admin/src`，並允許現有的 `@ts-nocheck` 與測試裡無 `yield` 的 async generator mock，`typescript-eslint` 8.71.1 下 `npm run lint` 仍通過。
 
 [完整更新日誌](./CHANGELOG.zh.md)
 

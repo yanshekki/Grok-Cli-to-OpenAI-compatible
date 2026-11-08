@@ -10,6 +10,20 @@
 
 條目來自 git 歷史、標籤，以及 [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases)。`package.json` 有過、但未曾發佈到 npm 的版本會註明。npm 日期是登錄庫發佈時間（香港時間，UTC+8）。沒有把 commit 說明改寫成 commit 本身沒有的說法。
 
+## [1.7.9] - 2026-11-08
+
+### 安全
+
+- 把傳遞依賴 `qs` 的 `overrides` 由 **6.16.2** 升到 **6.17.1**（express 與 body-parser 仍宣告 `~6.16.0`）。6.16.2 對 GHSA-6pq8-jhm2-2vcw 同 GHSA-w4cr-vjpx-p82q 已是 OSV 乾淨。6.17.1 是目前 6.x（衛生升級）。qs changelog 6.17.0／6.17.1 亦有 parse 加固：深度 0 的方括號 prototype key 防護、稀疏陣列元素計入 `arrayLimit`、自有 `__proto__` key 當資料複製、百分號編碼的點不分大小寫解碼。沒有新的 GHSA 把 6.16.2 列為受影響。
+
+### 依賴升級
+
+- `package.json` 下限對齊 lockfile 已有版本：`cors` `^2.8.6`、`@types/cors` `^2.8.19`。實際解析版本沒有變。
+
+### 內部／CI
+
+- 本機 Grok Build 檢查：`grok update --check --json` 回報 `currentVersion` 1.0.70、`latestVersion` 1.0.77、`updateAvailable` true、channel stable。官方 [x.ai/changelog/build](https://x.ai/changelog/build) 仍列 Latest **v1.0.70** · 2026-10-23。`grok <flag> --version` 仍接受 `--no-auto-update`、`--no-ask-user`、`--no-memory`、`--experimental-memory`、`--verbatim`、`--disable-web-search`、`--no-subagents`、`--no-plan`、`--resume`。`--best-of-n` 同 `--check` 仍是未預期參數。`sessions delete` 與 `inspect --json` 仍在 `--help`。本機沒有安裝 1.0.77。沒有做 gateway 對 1.0.70 或 1.0.77 的行為煙測：未有數據。
+
 ## [1.7.8] - 2026-11-01
 
 ### 安全

@@ -10,6 +10,20 @@ Categories: **New features**, **Improvements**, **Fixes**, **Security**, **Depen
 
 Entries come from git history, tags, and [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases). A version that appears in `package.json` history but was never published to npm is marked. npm dates are the registry publish time in Hong Kong (UTC+8). Commit subjects are not rewritten into claims the commits do not make.
 
+## [1.7.9] - 2026-11-08
+
+### Security
+
+- Raise the transitive `qs` override **6.16.2 → 6.17.1** (express and body-parser still declare `~6.16.0`). 6.16.2 is already OSV-clean for GHSA-6pq8-jhm2-2vcw and GHSA-w4cr-vjpx-p82q. 6.17.1 is the current 6.x (hygiene). qs changelog 6.17.0/6.17.1 also includes parse hardening: guard bracket-wrapped prototype keys at depth 0, count sparse-array elements against `arrayLimit`, copy an own `__proto__` key as data, decode percent-encoded dots case-insensitively. No new GHSA lists 6.16.2 as affected.
+
+### Dependency upgrades
+
+- Raise package.json floors to versions already in the lockfile: `cors` `^2.8.6`, `@types/cors` `^2.8.19`. Resolved versions unchanged.
+
+### Internal/CI
+
+- Grok Build check on this machine: `grok update --check --json` reported `currentVersion` 1.0.70, `latestVersion` 1.0.77, `updateAvailable` true, channel stable. Official [x.ai/changelog/build](https://x.ai/changelog/build) still lists Latest **v1.0.70** · Oct 23, 2026. `grok <flag> --version` still accepts `--no-auto-update`, `--no-ask-user`, `--no-memory`, `--experimental-memory`, `--verbatim`, `--disable-web-search`, `--no-subagents`, `--no-plan`, and `--resume`. `--best-of-n` and `--check` are still unexpected arguments. `sessions delete` and `inspect --json` are still in `--help`. 1.0.77 was not installed on this machine. Deep behavioral compatibility of the gateway against 1.0.70 or 1.0.77 was not smoke-tested: 未有數據.
+
 ## [1.7.8] - 2026-11-01
 
 ### Security
