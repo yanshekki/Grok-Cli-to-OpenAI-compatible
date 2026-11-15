@@ -80,8 +80,8 @@ Client (OpenAI SDK / curl / Open WebUI)
 
 ### 1. Prerequisites
 
-- **Node.js** ≥ 20 (`engines`). Production: **22.23.4+**, **24.22.1+**, or **26.12.1+** (CVE-2026-111497). Node 20 is EOL.
-- **Grok CLI** (Grok Build **1.0+**) installed and logged in. On 2026-11-08, `grok update --check` reported installed **1.0.70** and `latestVersion` **1.0.77**. Official [x.ai/changelog/build](https://x.ai/changelog/build) still lists Latest **v1.0.70** (2026-10-23). Deep compatibility of this gateway against those CLIs was not smoke-tested (未有數據).
+- **Node.js** ≥ 20 (`engines`). Production: **22.23.5+**, **24.22.3+**, or **26.13.1+** (CVE-2026-123863, CVE-2026-123864, and siblings). Node 20 is EOL.
+- **Grok CLI** (Grok Build **1.0+**) installed and logged in. On 2026-11-15, `grok update --check` reported installed **1.0.70** and `latestVersion` **1.0.77**. Official [x.ai/changelog/build](https://x.ai/changelog/build) lists Latest **v1.0.77** (2026-11-05). Notes files through 1.0.87 exist (including 1.0.85 dated 2026-11-13) but are not the live stable. Deep compatibility of this gateway against those CLIs was not smoke-tested (未有數據).
 
 ```bash
 curl -fsSL https://x.ai/cli/install.sh | bash
@@ -802,6 +802,23 @@ The changelog rule and the full steps are in [CONTRIBUTING.md](./CONTRIBUTING.md
 
 Only the latest three versions are listed here. Older releases are in [CHANGELOG.md](./CHANGELOG.md).
 
+### 1.7.10 — 2026-11-15
+
+#### Security
+
+- Locked Vite **6.4.5 → 6.4.6** (GHSA-p4f5-76q4-ffq7, Critical RCE on an exposed Vite **dev** server). Production Admin is the built static bundle; `dev:admin` still needed the patch.
+- Vendor Admin DOMPurify **3.4.17 → 3.4.18** (official minified 3.4.18). 3.4.17 is inside GHSA-qm7q-q8h9-jg8q (Moderate, `SAFE_FOR_TEMPLATES` reparse bypass) plus a hook allow-list leak. Chat markdown still uses `USE_PROFILES: { html: true }`.
+- Production Node: **22.23.5+**, **24.22.3+**, or **26.13.1+** after the 2026-11-11 Node security releases (CVE-2026-123863, CVE-2026-123864, and siblings). `engines` stays `>=20`.
+
+#### Dependency upgrades
+
+- `typescript-eslint` 8.72.1 → **8.72.2** (matching `@typescript-eslint/*`). Plugin bugfixes only.
+
+#### Internal/CI
+
+- CI stays on Node 22 with `check-latest: true`; comment tracks `>=22.23.5`. Release workflow stays on Node 24.
+- Grok Build installed `1.0.70`. `grok update --check` reports latestVersion `1.0.77`; official [x.ai/changelog/build](https://x.ai/changelog/build) now lists Latest **v1.0.77**. Notes files through 1.0.87 (including 1.0.85 dated 2026-11-13) are not the live stable. 1.0.77 was not installed. Deep behavioral compatibility was not smoke-tested: 未有數據.
+
 ### 1.7.9 — 2026-11-08
 
 #### Security
@@ -838,21 +855,6 @@ Only the latest three versions are listed here. Older releases are in [CHANGELOG
 - CI Node 20 → Node 22 with `check-latest: true`. The release workflow stays on Node 24.
 - Grok Build `1.0.70` is the installed version and the latest stable (`grok update --check`). Deep behavioral compatibility was not smoke-tested: 未有數據.
 
-### 1.7.7 — 2026-10-25
-
-#### Security
-
-- Upgrade `multer` 1.4.5-lts.2 → **2.5.0** for CVE-2026-77078 (High multipart field-name DoS) and later 2.x multipart fixes including CVE-2026-113872. Upload routes still use `memoryStorage()`. Oversize and malformed multipart now map `MulterError` to **413** / **400** instead of 500.
-- Lock `body-parser` at **1.20.9** (CVE-2026-111181) via `overrides` so `express.json` / `urlencoded` pick up the patched transitive. Repo lockfile was on 1.20.8.
-- Operators: prefer Node **22.23.4+** or **24.22.1+** after the 2026-10-21 Node security releases (High Brotli OOB CVE-2026-111497). `engines` stays `>=20`.
-
-#### Dependency upgrades
-
-- `express` range `^4.21.2` → `^4.22.3` (resolved version already 4.22.3).
-- `vite` 6.4.4 → **6.4.5** (GHSA-8g5g-mxqh-grgj, incomplete `server.fs.deny` backport; Admin Vite dev server only).
-- `typescript-eslint` 8.71.1 → **8.72.0**.
-- `@types/multer` 1.4.13 → **2.3.0** (multer 2 does not ship its own types).
-
 [Full changelog](./CHANGELOG.md)
 
 ---
@@ -868,7 +870,7 @@ Only the latest three versions are listed here. Older releases are in [CHANGELOG
 - Never commit `.env` or share admin keys / OTP codes  
 - Admin can be fully disabled: `gctoac admin off` (re-enable only via `gctoac admin on`)  
 - One-click update / PM2 / port change require admin (treat admin keys / OTP sessions as root)
-- Production Node: **22.23.4+**, **24.22.1+**, or **26.12.1+** (CVE-2026-111497). `engines` remains `>=20`. Node 20 is EOL.
+- Production Node: **22.23.5+**, **24.22.3+**, or **26.13.1+** (CVE-2026-123863, CVE-2026-123864, and siblings). `engines` remains `>=20`. Node 20 is EOL.
 
 ---
 
