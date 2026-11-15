@@ -10,6 +10,23 @@
 
 條目來自 git 歷史、標籤，以及 [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases)。`package.json` 有過、但未曾發佈到 npm 的版本會註明。npm 日期是登錄庫發佈時間（香港時間，UTC+8）。沒有把 commit 說明改寫成 commit 本身沒有的說法。
 
+## [1.7.10] - 2026-11-15
+
+### 安全
+
+- 鎖定的 Vite 由 **6.4.5** 升到 **6.4.6**（GHSA-p4f5-76q4-ffq7，Critical）。未跳脫的 `__vite-browser-external`／`__vite-optional-peer-dep` 虛擬模組 ID 可在 Vite **開發伺服器**對外暴露（`--host`／`server.host`）時造成 RCE。受影響：Vite `>=4.0.0,<=6.4.5`。已修：6.4.6（changelog：「fix: escape ids in resolve virtual modules」）。生產環境 Admin 是建置後的靜態 bundle；`dev:admin` 與 lockfile 內的 Vite 仍需這次修補。
+- Admin 內嵌的 DOMPurify 由 **3.4.17** 升到 **3.4.18**（`public/admin/vendor/purify.min.js`，官方 3.4.18 minified build）。3.4.17 落在 GHSA-qm7q-q8h9-jg8q（中等，`SAFE_FOR_TEMPLATES` 再解析繞過）範圍內。3.4.18 亦修補 hook 擴寬的 allow-list 在把 config 物件交回 `sanitize()` 時外洩。對話 markdown 仍用 `USE_PROFILES: { html: true }` 消毒（不是 `SAFE_FOR_TEMPLATES`）。
+- 生產環境 Node 建議：**22.23.5+**、**24.22.3+** 或 **26.13.1+**（2026-11-11 Node 安全更新，CVE-2026-123863、CVE-2026-123864 及同批）。`engines` 仍是 `>=20`。
+
+### 依賴升級
+
+- `typescript-eslint` 8.72.1 → **8.72.2**（對應的 `@typescript-eslint/*` 一併更新）。只含 plugin 修正：prefer-string-starts-ends-with、no-deprecated 循環別名、no-unnecessary-type-assertion、prefer-nullish-coalescing。
+
+### 內部／CI
+
+- CI 的 `actions/setup-node` 註解改為跟 2026-11-11 下限（`>=22.23.5`）。job 仍用 Node 22 並設 `check-latest: true`。發佈工作流程仍用 Node 24。
+- 本機 Grok Build 檢查：`grok update --check --json` 回報 `currentVersion` 1.0.70、`latestVersion` 1.0.77、`updateAvailable` true、channel stable。官方 [x.ai/changelog/build](https://x.ai/changelog/build) 現列 Latest **v1.0.77** · 2026-11-05。notes 檔去到 [1.0.87.external.md](https://x.ai/cli/changelogs/1.0.87.external.md)（包括日期為 2026-11-13 的 [1.0.85.external.md](https://x.ai/cli/changelogs/1.0.85.external.md)），但按 `grok update --check` 與 changelog 頁，這些不是 live stable。`grok <flag> --version` 仍接受 `--no-auto-update`、`--no-ask-user`、`--no-memory`、`--experimental-memory`、`--verbatim`、`--disable-web-search`、`--no-subagents`、`--no-plan`、`--resume`。`--best-of-n` 同 `--check` 仍是未預期參數。`sessions delete` 與 `inspect --json` 仍在 `--help`。本機沒有安裝 1.0.77。沒有做 gateway 對 1.0.70 或 1.0.77 的行為煙測：未有數據。
+
 ## [1.7.9] - 2026-11-08
 
 ### 安全

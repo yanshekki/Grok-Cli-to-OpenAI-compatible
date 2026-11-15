@@ -78,8 +78,8 @@ Client (OpenAI SDK / curl / Open WebUI)
 
 ### 1. 前置要求
 
-- **Node.js** ≥ 20（`engines`）。生產環境：**22.23.4+**、**24.22.1+** 或 **26.12.1+**（CVE-2026-111497）。Node 20 已 EOL。
-- **Grok CLI**（Grok Build **1.0+**）已安裝並登入。2026-11-08 的 `grok update --check` 回報已安裝 **1.0.70**，`latestVersion` **1.0.77**。官方 [x.ai/changelog/build](https://x.ai/changelog/build) 仍列 Latest **v1.0.70**（2026-10-23）。本 gateway 對這些 CLI 的行為相容沒有做煙測（未有數據）。
+- **Node.js** ≥ 20（`engines`）。生產環境：**22.23.5+**、**24.22.3+** 或 **26.13.1+**（CVE-2026-123863、CVE-2026-123864 及同批）。Node 20 已 EOL。
+- **Grok CLI**（Grok Build **1.0+**）已安裝並登入。2026-11-15 的 `grok update --check` 回報已安裝 **1.0.70**，`latestVersion` **1.0.77**。官方 [x.ai/changelog/build](https://x.ai/changelog/build) 列 Latest **v1.0.77**（2026-11-05）。notes 檔去到 1.0.87（包括日期為 2026-11-13 的 1.0.85），但不是 live stable。本 gateway 對這些 CLI 的行為相容沒有做煙測（未有數據）。
 
 ```bash
 curl -fsSL https://x.ai/cli/install.sh | bash
@@ -739,6 +739,23 @@ gctoac setup|start|status|stop|doctor|logs|update
 
 這裡只列最近三個版本。較舊的版本在 [CHANGELOG.zh.md](./CHANGELOG.zh.md)。
 
+### 1.7.10 — 2026-11-15
+
+#### 安全
+
+- 鎖定的 Vite 由 **6.4.5** 升到 **6.4.6**（GHSA-p4f5-76q4-ffq7，Critical；Vite **開發伺服器**對外暴露時的 RCE）。生產環境 Admin 是建置後的靜態 bundle；`dev:admin` 仍需這次修補。
+- Admin 內嵌的 DOMPurify 由 **3.4.17** 升到 **3.4.18**（官方 3.4.18 minified）。3.4.17 落在 GHSA-qm7q-q8h9-jg8q（中等，`SAFE_FOR_TEMPLATES` 再解析繞過）範圍內，並修 hook allow-list 外洩。對話 markdown 仍用 `USE_PROFILES: { html: true }`。
+- 生產環境 Node：**22.23.5+**、**24.22.3+** 或 **26.13.1+**（2026-11-11 Node 安全更新，CVE-2026-123863、CVE-2026-123864 及同批）。`engines` 仍是 `>=20`。
+
+#### 依賴升級
+
+- `typescript-eslint` 8.72.1 → **8.72.2**（對應的 `@typescript-eslint/*` 一併更新）。只含 plugin 修正。
+
+#### 內部／CI
+
+- CI 仍用 Node 22 並設 `check-latest: true`；註解改為 `>=22.23.5`。發佈工作流程仍用 Node 24。
+- Grok Build 已安裝 **1.0.70**。`grok update --check` 回報 `latestVersion` **1.0.77**；官方 [x.ai/changelog/build](https://x.ai/changelog/build) 現列 Latest **v1.0.77**。notes 檔去到 1.0.87（包括日期為 2026-11-13 的 1.0.85），但不是 live stable。本機沒有安裝 1.0.77。沒有做行為煙測：未有數據。
+
 ### 1.7.9 — 2026-11-08
 
 #### 安全
@@ -775,21 +792,6 @@ gctoac setup|start|status|stop|doctor|logs|update
 - CI 由 Node 20 改為 Node 22，並設 `check-latest: true`。發佈工作流程仍用 Node 24。
 - Grok Build **1.0.70** 是本機已安裝版本，亦是 stable 最新版（`grok update --check`）。沒有做行為煙測：未有數據。
 
-### 1.7.7 — 2026-10-25
-
-#### 安全
-
-- 將 `multer` 由 1.4.5-lts.2 升到 **2.5.0**，修 CVE-2026-77078（High，multipart 欄位名稱 DoS）以及其後 2.x 的 multipart 修正（含 CVE-2026-113872）。上傳路徑仍用 `memoryStorage()`。過大或格式錯誤的 multipart 會把 `MulterError` 對應成 **413**／**400**，不再變成 500。
-- 用 `overrides` 把 `body-parser` 鎖在 **1.20.9**（CVE-2026-111181），讓 `express.json`／`urlencoded` 用到已修的傳遞依賴。倉庫 lockfile 先前是 1.20.8。
-- 營運建議：2026-10-21 Node 安全更新之後，生產環境優先用 **22.23.4+** 或 **24.22.1+**（High Brotli 越界寫入 CVE-2026-111497）。`engines` 仍是 `>=20`。
-
-#### 依賴升級
-
-- `express` 範圍 `^4.21.2` → `^4.22.3`（實際解析版本本來已是 4.22.3）。
-- `vite` 6.4.4 → **6.4.5**（GHSA-8g5g-mxqh-grgj，`server.fs.deny` 回移植不完整；只影響 Admin Vite 開發伺服器）。
-- `typescript-eslint` 8.71.1 → **8.72.0**。
-- `@types/multer` 1.4.13 → **2.3.0**（multer 2 不自帶型別）。
-
 [完整更新日誌](./CHANGELOG.zh.md)
 
 ---
@@ -805,7 +807,7 @@ gctoac setup|start|status|stop|doctor|logs|update
 - 不要 commit `.env`，不要外洩 admin key／OTP  
 - 可完全關閉 Admin：`gctoac admin off`（只能用 `gctoac admin on` 重開）  
 - 一鍵更新／PM2／改 port 需 admin（視 admin key／OTP session 為 root）
-- 生產環境 Node：**22.23.4+**、**24.22.1+** 或 **26.12.1+**（CVE-2026-111497）。`engines` 仍是 `>=20`。Node 20 已 EOL。
+- 生產環境 Node：**22.23.5+**、**24.22.3+** 或 **26.13.1+**（CVE-2026-123863、CVE-2026-123864 及同批）。`engines` 仍是 `>=20`。Node 20 已 EOL。
 
 ---
 

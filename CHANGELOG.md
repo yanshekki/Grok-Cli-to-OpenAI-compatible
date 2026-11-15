@@ -10,6 +10,23 @@ Categories: **New features**, **Improvements**, **Fixes**, **Security**, **Depen
 
 Entries come from git history, tags, and [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases). A version that appears in `package.json` history but was never published to npm is marked. npm dates are the registry publish time in Hong Kong (UTC+8). Commit subjects are not rewritten into claims the commits do not make.
 
+## [1.7.10] - 2026-11-15
+
+### Security
+
+- Upgrade locked Vite **6.4.5 → 6.4.6** (GHSA-p4f5-76q4-ffq7, Critical). Unescaped `__vite-browser-external` / `__vite-optional-peer-dep` virtual module IDs allowed RCE when the Vite **dev** server is exposed (`--host` / `server.host`). Affected: Vite `>=4.0.0,<=6.4.5`. Patched: 6.4.6 (changelog: “fix: escape ids in resolve virtual modules”). Production Admin is the built static bundle; `dev:admin` and the locked Vite still needed the patch.
+- Vendor Admin DOMPurify **3.4.17 → 3.4.18** (`public/admin/vendor/purify.min.js`, official minified 3.4.18 build). 3.4.17 is inside GHSA-qm7q-q8h9-jg8q (Moderate, `SAFE_FOR_TEMPLATES` reparse bypass). 3.4.18 also stops a hook-widened allow-list from carrying over when a hook passes the config object back to `sanitize()`. Chat markdown still sanitizes with `USE_PROFILES: { html: true }` (not `SAFE_FOR_TEMPLATES`).
+- Production Node guidance: **22.23.5+**, **24.22.3+**, or **26.13.1+** after the 2026-11-11 Node security releases (CVE-2026-123863, CVE-2026-123864, and siblings). `engines` stays `>=20`.
+
+### Dependency upgrades
+
+- `typescript-eslint` 8.72.1 → **8.72.2** (matching `@typescript-eslint/*`). Plugin bugfixes only: prefer-string-starts-ends-with, no-deprecated circular aliases, no-unnecessary-type-assertion, prefer-nullish-coalescing.
+
+### Internal/CI
+
+- CI `actions/setup-node` comment now tracks the 2026-11-11 floor (`>=22.23.5`). Job stays on Node 22 with `check-latest: true`. Release workflow stays on Node 24.
+- Grok Build check on this machine: `grok update --check --json` reported `currentVersion` 1.0.70, `latestVersion` 1.0.77, `updateAvailable` true, channel stable. Official [x.ai/changelog/build](https://x.ai/changelog/build) now lists Latest **v1.0.77** · Nov 5, 2026. Notes files through [1.0.87.external.md](https://x.ai/cli/changelogs/1.0.87.external.md) (including [1.0.85.external.md](https://x.ai/cli/changelogs/1.0.85.external.md) dated 2026-11-13) exist but are not the live stable according to `grok update --check` or the changelog page. `grok <flag> --version` still accepts `--no-auto-update`, `--no-ask-user`, `--no-memory`, `--experimental-memory`, `--verbatim`, `--disable-web-search`, `--no-subagents`, `--no-plan`, and `--resume`. `--best-of-n` and `--check` are still unexpected arguments. `sessions delete` and `inspect --json` are still in `--help`. 1.0.77 was not installed on this machine. Deep behavioral compatibility of the gateway against 1.0.70 or 1.0.77 was not smoke-tested: 未有數據.
+
 ## [1.7.9] - 2026-11-08
 
 ### Security
