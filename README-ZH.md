@@ -79,7 +79,7 @@ Client (OpenAI SDK / curl / Open WebUI)
 ### 1. 前置要求
 
 - **Node.js** ≥ 20（`engines`）。生產環境：**22.23.5+**、**24.22.3+** 或 **26.13.1+**（CVE-2026-123863、CVE-2026-123864 及同批）。Node 20 已 EOL。
-- **Grok CLI**（Grok Build **1.0+**）已安裝並登入。2026-11-15 的 `grok update --check` 回報已安裝 **1.0.70**，`latestVersion` **1.0.77**。官方 [x.ai/changelog/build](https://x.ai/changelog/build) 列 Latest **v1.0.77**（2026-11-05）。notes 檔去到 1.0.87（包括日期為 2026-11-13 的 1.0.85），但不是 live stable。本 gateway 對這些 CLI 的行為相容沒有做煙測（未有數據）。
+- **Grok CLI**（Grok Build **1.0+**）已安裝並登入。2026-11-22 的 `grok update --check` 回報已安裝 **1.0.70**，`latestVersion` **1.0.92**。官方 [x.ai/changelog/build](https://x.ai/changelog/build) 列 Latest **v1.0.89**（2026-11-17）。notes 檔去到 1.0.93（包括日期為 2026-11-19 的 1.0.92）。本 gateway 對這些 CLI 的行為相容沒有做煙測（未有數據）。
 
 ```bash
 curl -fsSL https://x.ai/cli/install.sh | bash
@@ -739,6 +739,16 @@ gctoac setup|start|status|stop|doctor|logs|update
 
 這裡只列最近三個版本。較舊的版本在 [CHANGELOG.zh.md](./CHANGELOG.zh.md)。
 
+### 1.7.11 — 2026-11-22
+
+#### 依賴升級
+
+- `typescript-eslint` 8.72.2 → **8.73.0**（對應的 `@typescript-eslint/*` 一併更新）。新規則 `no-unsafe-class-instance-assignment` 在 `strict-type-checked`，不是本 repo 的 `recommended`。TypeScript 7.1 experimental parser backend 未啟用。
+
+#### 內部／CI
+
+- Grok Build 已安裝 **1.0.70**。`grok update --check` 回報 `latestVersion` **1.0.92**；官方 [x.ai/changelog/build](https://x.ai/changelog/build) 列 Latest **v1.0.89**。notes 檔去到 1.0.93（包括日期為 2026-11-19 的 1.0.92）。本機沒有安裝 1.0.92。沒有做行為煙測：未有數據。
+
 ### 1.7.10 — 2026-11-15
 
 #### 安全
@@ -769,28 +779,6 @@ gctoac setup|start|status|stop|doctor|logs|update
 #### 內部／CI
 
 - Grok Build 已安裝 **1.0.70**。`grok update --check` 回報 `latestVersion` **1.0.77**；官方 [x.ai/changelog/build](https://x.ai/changelog/build) 仍列 Latest **v1.0.70**。本機沒有安裝 1.0.77。沒有做行為煙測：未有數據。
-
-### 1.7.8 — 2026-11-01
-
-#### 安全
-
-- 用 `overrides` 把傳遞依賴 `qs` 釘在 **6.16.2**（express 與 body-parser 宣告 `~6.16.0`）。lockfile 先前是 6.16.0：GHSA-6pq8-jhm2-2vcw（中等，6.16.1 已修）同 GHSA-w4cr-vjpx-p82q（低，6.16.2 已修）。
-- Admin 內嵌的 DOMPurify 由 **3.2.4** 升到 **3.4.17**。3.2.4 落在 CVE-2025-15599（3.2.7 已修）同 CVE-2026-0540（3.3.2 已修）範圍內。
-- 生產環境 Node 建議加上 **26.12.1+**，與 **22.23.4+**、**24.22.1+** 並列（CVE-2026-111497）。`engines` 仍是 `>=20`。
-
-#### 依賴升級
-
-- `typescript-eslint` 8.72.0 → **8.72.1**。
-- `package.json` 下限對齊 lockfile 已有版本：`@types/node` `^22.20.5`、`pino-pretty` `^13.2.0`、`tsx` `^4.23.15`。實際解析版本沒有變。
-
-#### 修正
-
-- `formatApiError` 把頂層後備物件標成同 `error` 一樣的 body，`typecheck:admin` 才讀得到 `details.feature`、`flag`、`reason`。執行路徑沒有變。
-
-#### 內部／CI
-
-- CI 由 Node 20 改為 Node 22，並設 `check-latest: true`。發佈工作流程仍用 Node 24。
-- Grok Build **1.0.70** 是本機已安裝版本，亦是 stable 最新版（`grok update --check`）。沒有做行為煙測：未有數據。
 
 [完整更新日誌](./CHANGELOG.zh.md)
 

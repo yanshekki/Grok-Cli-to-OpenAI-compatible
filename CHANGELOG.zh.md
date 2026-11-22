@@ -10,6 +10,16 @@
 
 條目來自 git 歷史、標籤，以及 [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases)。`package.json` 有過、但未曾發佈到 npm 的版本會註明。npm 日期是登錄庫發佈時間（香港時間，UTC+8）。沒有把 commit 說明改寫成 commit 本身沒有的說法。
 
+## [1.7.11] - 2026-11-22
+
+### 依賴升級
+
+- `typescript-eslint` 8.72.2 → **8.73.0**（對應的 `@typescript-eslint/*` 一併更新）。plugin：`consistent-type-imports` 報告位置收窄；新增規則 `no-unsafe-class-instance-assignment`（在 `strict-type-checked`，不是本 repo 的 `recommended`）。typescript-estree 新增 `projectService.EXPERIMENTAL_backend`（TypeScript 7.1 native parser over IPC；未啟用）。
+
+### 內部／CI
+
+- 本機 Grok Build 檢查：`grok update --check --json` 回報 `currentVersion` 1.0.70、`latestVersion` 1.0.92、`updateAvailable` true、channel stable。官方 [x.ai/changelog/build](https://x.ai/changelog/build) 列 Latest **v1.0.89** · 2026-11-17。notes 檔去到 [1.0.93.external.md](https://x.ai/cli/changelogs/1.0.93.external.md)（包括日期為 2026-11-19 的 [1.0.92.external.md](https://x.ai/cli/changelogs/1.0.92.external.md)）。`grok <flag> --version` 仍接受 `--no-auto-update`、`--no-ask-user`、`--no-memory`、`--experimental-memory`、`--verbatim`、`--disable-web-search`、`--no-subagents`、`--no-plan`、`--resume`。`--best-of-n` 同 `--check` 仍是未預期參數。`sessions delete` 與 `inspect --json` 仍在 `--help`。本機沒有安裝 1.0.92。沒有做 gateway 對 1.0.70 或 1.0.92 的行為煙測：未有數據。
+
 ## [1.7.10] - 2026-11-15
 
 ### 安全
