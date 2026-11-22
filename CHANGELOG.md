@@ -10,6 +10,16 @@ Categories: **New features**, **Improvements**, **Fixes**, **Security**, **Depen
 
 Entries come from git history, tags, and [GitHub Releases](https://github.com/yanshekki/Grok-Cli-to-OpenAI-compatible/releases). A version that appears in `package.json` history but was never published to npm is marked. npm dates are the registry publish time in Hong Kong (UTC+8). Commit subjects are not rewritten into claims the commits do not make.
 
+## [1.7.11] - 2026-11-22
+
+### Dependency upgrades
+
+- `typescript-eslint` 8.72.2 → **8.73.0** (matching `@typescript-eslint/*`). Plugin: narrower `consistent-type-imports` report location; new rule `no-unsafe-class-instance-assignment` (on `strict-type-checked`, not this repo’s `recommended`). typescript-estree adds `projectService.EXPERIMENTAL_backend` for TypeScript 7.1 native parser over IPC (not enabled).
+
+### Internal/CI
+
+- Grok Build check on this machine: `grok update --check --json` reported `currentVersion` 1.0.70, `latestVersion` 1.0.92, `updateAvailable` true, channel stable. Official [x.ai/changelog/build](https://x.ai/changelog/build) lists Latest **v1.0.89** · Nov 17, 2026. Notes files through [1.0.93.external.md](https://x.ai/cli/changelogs/1.0.93.external.md) exist (including [1.0.92.external.md](https://x.ai/cli/changelogs/1.0.92.external.md) dated 2026-11-19). `grok <flag> --version` still accepts `--no-auto-update`, `--no-ask-user`, `--no-memory`, `--experimental-memory`, `--verbatim`, `--disable-web-search`, `--no-subagents`, `--no-plan`, and `--resume`. `--best-of-n` and `--check` are still unexpected arguments. `sessions delete` and `inspect --json` are still in `--help`. 1.0.92 was not installed on this machine. Deep behavioral compatibility of the gateway against 1.0.70 or 1.0.92 was not smoke-tested: 未有數據.
+
 ## [1.7.10] - 2026-11-15
 
 ### Security

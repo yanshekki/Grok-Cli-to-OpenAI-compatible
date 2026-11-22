@@ -81,7 +81,7 @@ Client (OpenAI SDK / curl / Open WebUI)
 ### 1. Prerequisites
 
 - **Node.js** ≥ 20 (`engines`). Production: **22.23.5+**, **24.22.3+**, or **26.13.1+** (CVE-2026-123863, CVE-2026-123864, and siblings). Node 20 is EOL.
-- **Grok CLI** (Grok Build **1.0+**) installed and logged in. On 2026-11-15, `grok update --check` reported installed **1.0.70** and `latestVersion` **1.0.77**. Official [x.ai/changelog/build](https://x.ai/changelog/build) lists Latest **v1.0.77** (2026-11-05). Notes files through 1.0.87 exist (including 1.0.85 dated 2026-11-13) but are not the live stable. Deep compatibility of this gateway against those CLIs was not smoke-tested (未有數據).
+- **Grok CLI** (Grok Build **1.0+**) installed and logged in. On 2026-11-22, `grok update --check` reported installed **1.0.70** and `latestVersion` **1.0.92**. Official [x.ai/changelog/build](https://x.ai/changelog/build) lists Latest **v1.0.89** (2026-11-17). Notes files through 1.0.93 exist (including 1.0.92 dated 2026-11-19). Deep compatibility of this gateway against those CLIs was not smoke-tested (未有數據).
 
 ```bash
 curl -fsSL https://x.ai/cli/install.sh | bash
@@ -802,6 +802,16 @@ The changelog rule and the full steps are in [CONTRIBUTING.md](./CONTRIBUTING.md
 
 Only the latest three versions are listed here. Older releases are in [CHANGELOG.md](./CHANGELOG.md).
 
+### 1.7.11 — 2026-11-22
+
+#### Dependency upgrades
+
+- `typescript-eslint` 8.72.2 → **8.73.0** (matching `@typescript-eslint/*`). New rule `no-unsafe-class-instance-assignment` is on `strict-type-checked`, not this repo’s `recommended`. Experimental TypeScript 7.1 parser backend is not enabled.
+
+#### Internal/CI
+
+- Grok Build installed `1.0.70`. `grok update --check` reports latestVersion `1.0.92`; official [x.ai/changelog/build](https://x.ai/changelog/build) lists Latest **v1.0.89**. Notes files through 1.0.93 (including 1.0.92 dated 2026-11-19) exist. 1.0.92 was not installed. Deep behavioral compatibility was not smoke-tested: 未有數據.
+
 ### 1.7.10 — 2026-11-15
 
 #### Security
@@ -832,28 +842,6 @@ Only the latest three versions are listed here. Older releases are in [CHANGELOG
 #### Internal/CI
 
 - Grok Build installed `1.0.70`. `grok update --check` reports latestVersion `1.0.77`; official [x.ai/changelog/build](https://x.ai/changelog/build) still lists Latest **v1.0.70**. 1.0.77 was not installed. Deep behavioral compatibility was not smoke-tested: 未有數據.
-
-### 1.7.8 — 2026-11-01
-
-#### Security
-
-- Pin transitive `qs` at **6.16.2** via `overrides` (express and body-parser declare `~6.16.0`). Lockfile was 6.16.0: GHSA-6pq8-jhm2-2vcw (moderate, patched in 6.16.1) and GHSA-w4cr-vjpx-p82q (low, patched in 6.16.2).
-- Vendor Admin DOMPurify **3.2.4 → 3.4.17**. 3.2.4 is inside CVE-2025-15599 (fixed in 3.2.7) and CVE-2026-0540 (fixed in 3.3.2).
-- Production Node guidance adds **26.12.1+** beside **22.23.4+** and **24.22.1+** (CVE-2026-111497). `engines` stays `>=20`.
-
-#### Dependency upgrades
-
-- `typescript-eslint` 8.72.0 → **8.72.1**.
-- Package.json floors raised to locked versions: `@types/node` `^22.20.5`, `pino-pretty` `^13.2.0`, `tsx` `^4.23.15`. Resolved versions unchanged.
-
-#### Fixes
-
-- `formatApiError` types the top-level fallback as the same body as `error`, so `typecheck:admin` can read `details.feature`, `flag`, and `reason`. Runtime branch unchanged.
-
-#### Internal/CI
-
-- CI Node 20 → Node 22 with `check-latest: true`. The release workflow stays on Node 24.
-- Grok Build `1.0.70` is the installed version and the latest stable (`grok update --check`). Deep behavioral compatibility was not smoke-tested: 未有數據.
 
 [Full changelog](./CHANGELOG.md)
 
